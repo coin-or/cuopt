@@ -410,9 +410,9 @@ void lb_multi_probe_t<i_t, f_t>::set_updated_bounds(const raft::handle_t* handle
 {
   auto& bnds = select_update ? upd_1.vars_bnd : upd_0.vars_bnd;
 
-  cuopt_assert(bnds.size() == output_lb.size(), "size of variable lower bound mismatch");
-  cuopt_assert(bnds.size() == output_ub.size(), "size of variable upper bound mismatch");
   auto bnd_span = make_span_2(bnds);
+  cuopt_assert(bnd_span.size() == output_lb.size(), "size of variable lower bound mismatch");
+  cuopt_assert(bnd_span.size() == output_ub.size(), "size of variable upper bound mismatch");
   thrust::for_each(handle_ptr->get_thrust_policy(),
                    thrust::make_counting_iterator<i_t>(0),
                    thrust::make_counting_iterator<i_t>(bnd_span.size()),

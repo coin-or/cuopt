@@ -426,7 +426,6 @@ termination_criterion_t load_balanced_bounds_presolve_t<i_t, f_t>::bound_update_
   infeas_cnst_slack_set_to_nan = true;
   calculate_infeasible_redundant_constraints(handle_ptr);
   solve_iter = iter;
-  std::cout << "solve_iter " << solve_iter << "\n";
 
   return criteria;
 }
