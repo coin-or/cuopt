@@ -21,6 +21,9 @@ ConfigureTest(LP_UNIT_TEST
 ConfigureTest(PDLP_TEST
     ${CMAKE_CURRENT_SOURCE_DIR}/pdlp_test.cu
 )
+ConfigureTest(SPMV_TEST
+    ${CMAKE_CURRENT_SOURCE_DIR}/spmv_test.cu
+)
 # ##################################################################################################
 # - MIP tests ----------------------------------------------------------------------
 ConfigureTest(MIP_TEST
