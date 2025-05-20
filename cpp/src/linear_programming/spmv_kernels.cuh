@@ -40,12 +40,16 @@ __device__ f_t spmv(view_t view, raft::device_span<f_t> input, i_t tid, i_t beg,
   return out;
 }
 
-template <typename i_t, typename f_t, typename view_t>
+template <typename i_t,
+          typename f_t,
+          typename view_t,
+          typename functor_t = identity_functor<i_t, f_t>>
 __global__ void finalize_spmv_kernel(i_t heavy_beg_id,
                                      raft::device_span<const i_t> item_offsets,
                                      raft::device_span<f_t> tmp_out,
                                      view_t view,
-                                     raft::device_span<f_t> output)
+                                     raft::device_span<f_t> output,
+                                     functor_t functor = identity_functor<i_t, f_t>())
 {
   using warp_reduce = cub::WarpReduce<f_t>;
   __shared__ typename warp_reduce::TempStorage temp_storage;
@@ -59,7 +63,7 @@ __global__ void finalize_spmv_kernel(i_t heavy_beg_id,
     out += tmp_out[i];
   }
   out = warp_reduce(temp_storage).Sum(out);
-  if (threadIdx.x == 0) { output[item_idx] = out; }
+  if (threadIdx.x == 0) { functor(item_idx, out, output); }
 }
 
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
@@ -100,12 +104,18 @@ __device__ __forceinline__ void get_sub_warp_bin(i_t* id_warp_beg,
   // }
 }
 
-template <typename i_t, typename f_t, i_t BDIM, i_t MAX_EDGE_PER_CNST, typename view_t>
+template <typename i_t,
+          typename f_t,
+          i_t BDIM,
+          i_t MAX_EDGE_PER_CNST,
+          typename view_t,
+          typename functor_t = identity_functor<i_t, f_t>>
 __device__ void spmv_sub_warp(i_t id_warp_beg,
                               i_t id_range_end,
                               view_t view,
                               raft::device_span<f_t> input,
-                              raft::device_span<f_t> output)
+                              raft::device_span<f_t> output,
+                              functor_t functor = identity_functor<i_t, f_t>())
 {
   i_t lane_id = (threadIdx.x & 31);
   i_t idx     = id_warp_beg + (lane_id / MAX_EDGE_PER_CNST);
@@ -137,15 +147,20 @@ __device__ void spmv_sub_warp(i_t id_warp_beg,
 
   out = warp_reduce(temp_storage).Sum(out);
 
-  if (head_flag && (idx < id_range_end)) { output[item_idx] = out; }
+  if (head_flag && (idx < id_range_end)) { functor(item_idx, out, output); }
 }
 
-template <typename i_t, typename f_t, i_t BDIM, typename view_t>
+template <typename i_t,
+          typename f_t,
+          i_t BDIM,
+          typename view_t,
+          typename functor_t = identity_functor<i_t, f_t>>
 __device__ void spmv_warp(i_t id_warp_beg,
                           i_t id_range_end,
                           view_t view,
                           raft::device_span<f_t> input,
-                          raft::device_span<f_t> output)
+                          raft::device_span<f_t> output,
+                          functor_t functor = identity_functor<i_t, f_t>())
 {
   i_t lane_id = (threadIdx.x & 31);
   i_t idx     = id_warp_beg + (lane_id / raft::WarpSize);
@@ -167,40 +182,50 @@ __device__ void spmv_warp(i_t id_warp_beg,
 
   out = warp_reduce(temp_storage[threadIdx.x / BDIM]).Sum(out);
 
-  if (head_flag && (idx < id_range_end)) { output[item_idx] = out; }
+  if (head_flag && (idx < id_range_end)) { functor(item_idx, out, output); }
 }
 
-template <int BDIM, typename i_t, typename f_t, typename view_t>
+template <typename i_t,
+          typename f_t,
+          i_t BDIM,
+          typename view_t,
+          typename functor_t = identity_functor<i_t, f_t>>
 __device__ void call_spmv_sub_warp(view_t view,
                                    raft::device_span<f_t> input,
                                    raft::device_span<f_t> output,
                                    raft::device_span<const i_t> warp_item_offsets,
-                                   raft::device_span<const i_t> warp_item_id_offsets)
+                                   raft::device_span<const i_t> warp_item_id_offsets,
+                                   functor_t functor = identity_functor<i_t, f_t>())
 {
   i_t id_warp_beg, id_range_end, t_p_v;
   get_sub_warp_bin<i_t>(
     &id_warp_beg, &id_range_end, &t_p_v, warp_item_offsets, warp_item_id_offsets);
 
   if (t_p_v == 1) {
-    spmv_sub_warp<i_t, f_t, BDIM, 1>(id_warp_beg, id_range_end, view, input, output);
+    spmv_sub_warp<i_t, f_t, BDIM, 1>(id_warp_beg, id_range_end, view, input, output, functor);
   } else if (t_p_v == 2) {
-    spmv_sub_warp<i_t, f_t, BDIM, 2>(id_warp_beg, id_range_end, view, input, output);
+    spmv_sub_warp<i_t, f_t, BDIM, 2>(id_warp_beg, id_range_end, view, input, output, functor);
   } else if (t_p_v == 4) {
-    spmv_sub_warp<i_t, f_t, BDIM, 4>(id_warp_beg, id_range_end, view, input, output);
+    spmv_sub_warp<i_t, f_t, BDIM, 4>(id_warp_beg, id_range_end, view, input, output, functor);
   } else if (t_p_v == 8) {
-    spmv_sub_warp<i_t, f_t, BDIM, 8>(id_warp_beg, id_range_end, view, input, output);
+    spmv_sub_warp<i_t, f_t, BDIM, 8>(id_warp_beg, id_range_end, view, input, output, functor);
   } else if (t_p_v == 16) {
-    spmv_sub_warp<i_t, f_t, BDIM, 16>(id_warp_beg, id_range_end, view, input, output);
+    spmv_sub_warp<i_t, f_t, BDIM, 16>(id_warp_beg, id_range_end, view, input, output, functor);
   } else if (t_p_v == 32) {
-    spmv_warp<i_t, f_t, BDIM>(id_warp_beg, id_range_end, view, input, output);
+    spmv_warp<i_t, f_t, BDIM>(id_warp_beg, id_range_end, view, input, output, functor);
   }
 }
 
-template <typename i_t, typename f_t, i_t BDIM, typename view_t>
+template <typename i_t,
+          typename f_t,
+          i_t BDIM,
+          typename view_t,
+          typename functor_t = identity_functor<i_t, f_t>>
 __device__ void spmv_block(i_t id_block,
                            view_t view,
                            raft::device_span<f_t> input,
-                           raft::device_span<f_t> output)
+                           raft::device_span<f_t> output,
+                           functor_t functor = identity_functor<i_t, f_t>())
 {
   typedef cub::BlockReduce<f_t, BDIM> BlockReduce;
   __shared__ typename BlockReduce::TempStorage temp_storage;
@@ -213,10 +238,10 @@ __device__ void spmv_block(i_t id_block,
 
   out = BlockReduce(temp_storage).Sum(out);
 
-  if (threadIdx.x == 0) { output[item_idx] = out; }
+  if (threadIdx.x == 0) { functor(item_idx, out, output); }
 }
 
-template <int BDIM, typename i_t, typename f_t, typename view_t>
+template <typename i_t, typename f_t, i_t BDIM, typename view_t>
 __device__ void call_spmv_heavy(view_t view,
                                 raft::device_span<f_t> input,
                                 raft::device_span<f_t> tmp_out,
@@ -241,7 +266,11 @@ __device__ void call_spmv_heavy(view_t view,
   if (threadIdx.x == 0) { tmp_out[id_block] = out; }
 }
 
-template <int BDIM, typename i_t, typename f_t, typename view_t>
+template <typename i_t,
+          typename f_t,
+          i_t BDIM,
+          typename view_t,
+          typename functor_t = identity_functor<i_t, f_t>>
 __global__ void spmv_kernel(view_t view,
                             raft::device_span<f_t> input,
                             raft::device_span<f_t> output,
@@ -253,26 +282,28 @@ __global__ void spmv_kernel(view_t view,
                             raft::device_span<const i_t> warp_item_offsets,
                             raft::device_span<const i_t> warp_item_id_offsets,
                             raft::device_span<const i_t> heavy_items_vertex_ids,
-                            raft::device_span<const i_t> heavy_items_pseudo_block_ids)
+                            raft::device_span<const i_t> heavy_items_pseudo_block_ids,
+                            functor_t functor = identity_functor<i_t, f_t>())
 {
   if (blockIdx.x < sub_warp_blocks_end) {
     // sub warps
-    call_spmv_sub_warp<BDIM>(view, input, output, warp_item_offsets, warp_item_id_offsets);
+    call_spmv_sub_warp<i_t, f_t, BDIM>(
+      view, input, output, warp_item_offsets, warp_item_id_offsets, functor);
   } else if (blockIdx.x < med_blocks_end) {
     // medium blocks
     spmv_block<i_t, f_t, BDIM>(
-      blockIdx.x - sub_warp_blocks_end + warp_item_id_offsets.back(), view, input, output);
+      blockIdx.x - sub_warp_blocks_end + warp_item_id_offsets.back(), view, input, output, functor);
   } else {
     // heavy
     i_t id_block = blockIdx.x - med_blocks_end;
-    call_spmv_heavy<BDIM>(view,
-                          input,
-                          tmp_out,
-                          id_block,
-                          heavy_vertex_beg,
-                          heavy_work_per_block,
-                          heavy_items_vertex_ids,
-                          heavy_items_pseudo_block_ids);
+    call_spmv_heavy<i_t, f_t, BDIM>(view,
+                                    input,
+                                    tmp_out,
+                                    id_block,
+                                    heavy_vertex_beg,
+                                    heavy_work_per_block,
+                                    heavy_items_vertex_ids,
+                                    heavy_items_pseudo_block_ids);
   }
 }
 

@@ -170,29 +170,29 @@ void spmv_t<i_t, f_t>::setup_lb_problem(problem_t<i_t, f_t>& problem_, bool debu
   //   compact_bins(vars_bin_offsets, n_variables);
   // }
 
-  if (true) {
-    std::cout << "cnst_bin_offsets\n";
-    std::cout << "bin\t(lb\tub]\tbeg_off\tcount\n";
-    for (int i = 0; i < static_cast<i_t>(cnst_bin_offsets.size()); ++i) {
-      if (i > 0) {
-        std::cout << i << "\t" << lb(i) << "\t" << ub(i) << "\t" << cnst_bin_offsets[i] << "\t"
-                  << (cnst_bin_offsets[i] - cnst_bin_offsets[i - 1]) << "\n";
-      } else {
-        std::cout << i << "\t" << lb(i) << "\t" << ub(i) << "\t" << cnst_bin_offsets[i]
-                  << "\tn/a\n";
-      }
-      if (cnst_bin_offsets[i] == cnst_bin_offsets.back()) {
-        std::cout << "\n";
-        break;
-      }
-    }
-  }
-  if (false) {
-    std::cout << "vars_bin_offsets\n";
-    for (int i = 0; i < static_cast<i_t>(vars_bin_offsets.size()); ++i) {
-      std::cout << i << " " << vars_bin_offsets[i] << "\n";
-    }
-  }
+  // if (true) {
+  //   std::cout << "cnst_bin_offsets\n";
+  //   std::cout << "bin\t(lb\tub]\tbeg_off\tcount\n";
+  //   for (int i = 0; i < static_cast<i_t>(cnst_bin_offsets.size()); ++i) {
+  //     if (i > 0) {
+  //       std::cout << i << "\t" << lb(i) << "\t" << ub(i) << "\t" << cnst_bin_offsets[i] << "\t"
+  //                 << (cnst_bin_offsets[i] - cnst_bin_offsets[i - 1]) << "\n";
+  //     } else {
+  //       std::cout << i << "\t" << lb(i) << "\t" << ub(i) << "\t" << cnst_bin_offsets[i]
+  //                 << "\tn/a\n";
+  //     }
+  //     if (cnst_bin_offsets[i] == cnst_bin_offsets.back()) {
+  //       std::cout << "\n";
+  //       break;
+  //     }
+  //   }
+  // }
+  // if (false) {
+  //   std::cout << "vars_bin_offsets\n";
+  //   for (int i = 0; i < static_cast<i_t>(vars_bin_offsets.size()); ++i) {
+  //     std::cout << i << " " << vars_bin_offsets[i] << "\n";
+  //   }
+  // }
 
   // RAFT_CHECK_CUDA(stream.synchronize());
   // std::cerr<<"pt 6\n";
