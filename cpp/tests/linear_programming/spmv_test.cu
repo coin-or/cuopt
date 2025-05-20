@@ -233,8 +233,8 @@ bool test_eq(const raft::handle_t* handle_ptr,
 {
   bool is_match = true;
   for (size_t i = 0; i < h_res.size(); ++i) {
-    if (abs(h_res[i] - h_gld[i]) > tolerance) {
-      std::cout << "\nmismatch " << i << "\t" << h_res[i] << "\t" << h_gld[i] << "\n";
+    if (abs(h_res[i] - 2*h_gld[i]) > tolerance) {
+      std::cout << "\nmismatch " << i << "\t" << h_res[i] << "\t" << 2*h_gld[i] << "\n";
       is_match = false;
     }
   }
@@ -289,7 +289,10 @@ void test_spmv_functor(std::string path)
   auto gld_res = cusparse_call(&handle_, problem, pdhg_solver.get_cusparse_view(), x, cusp_ax);
 
   detail::spmv_t<int, double> spmv(problem);
-  spmv.Ax(&handle_, make_span(x), make_span(ax));
+  spmv.Ax(&handle_, make_span(x), make_span(ax), [] __device__(int idx, double x, raft::device_span<double> output)
+      {
+        output[idx] = 2*x;
+      });
   auto ref_res = host_copy(ax);
 
   test_eq(&handle_, ref_res, gld_res, 1e-5);

@@ -31,14 +31,14 @@
 #include <rmm/device_scalar.hpp>
 #include <rmm/device_uvector.hpp>
 
-#include "managed_stream_pool.cuh"
+#include "spmv_helpers.cuh"
 
 namespace cuopt::linear_programming::detail {
 
 template <typename i_t, typename f_t>
 class spmv_t {
  public:
-  struct spmv_view_t {
+  struct view_t {
     raft::device_span<const i_t> reorg_ids;
     raft::device_span<const i_t> offsets;
     raft::device_span<const i_t> elem;
@@ -46,24 +46,18 @@ class spmv_t {
     i_t nnz;
   };
 
-  spmv_t(problem_t<i_t, f_t>& problem,
-         // raft::device_span<f_t> ax_input_,
-         // raft::device_span<f_t> ax_output_,
-         // raft::device_span<f_t> aty_input_,
-         // raft::device_span<f_t> aty_output_,
-         // raft::device_span<f_t> aty_next_input_,
-         // raft::device_span<f_t> aty_next_output_,
-         bool debug = false);
+  spmv_t(problem_t<i_t, f_t>& problem, bool debug = false);
   spmv_t() = delete;
   void setup_lb_problem(problem_t<i_t, f_t>& problem, bool debug = false);
   void setup_lb_meta();
-  spmv_view_t get_A_view();
-  spmv_view_t get_AT_view();
+  view_t get_A_view();
+  view_t get_AT_view();
 
-  void Ax(const raft::handle_t* h, raft::device_span<f_t> input, raft::device_span<f_t> output);
-  void ATy(const raft::handle_t* h, raft::device_span<f_t> input, raft::device_span<f_t> output);
+  template <typename functor_t = identity_functor<i_t, f_t>>
+  void Ax(const raft::handle_t* h, raft::device_span<f_t> input, raft::device_span<f_t> output, functor_t functor = identity_functor<i_t, f_t>{});
 
-  managed_stream_pool streams;
+  template <typename functor_t = identity_functor<i_t, f_t>>
+  void ATy(const raft::handle_t* h, raft::device_span<f_t> input, raft::device_span<f_t> output, functor_t functor = identity_functor<i_t, f_t>{});
 
   static constexpr i_t heavy_degree_cutoff = 16 * 1024;
   problem_t<i_t, f_t>* pb;
@@ -123,5 +117,59 @@ class spmv_t {
   vertex_bin_t<i_t> cnst_binner;
   vertex_bin_t<i_t> vars_binner;
 };
+
+template <typename i_t, typename f_t>
+template <typename functor_t>
+void spmv_t<i_t, f_t>::Ax(const raft::handle_t* h,
+                          raft::device_span<f_t> input,
+                          raft::device_span<f_t> output,
+                          functor_t functor)
+{
+  raft::common::nvtx::range scope("ax");
+  spmv_call(h->get_stream(),
+            get_A_view(),
+            input,
+            output,
+            make_span(tmp_ax),
+            cnst_sub_warp_count,
+            cnst_med_block_count,
+            num_blocks_heavy_cnst,
+            cnst_heavy_beg_id,
+            pb->n_constraints - cnst_heavy_beg_id,
+            heavy_degree_cutoff,
+            warp_cnst_offsets,
+            warp_cnst_id_offsets,
+            heavy_cnst_vertex_ids,
+            heavy_cnst_pseudo_block_ids,
+            heavy_cnst_block_segments,
+            functor);
+}
+
+template <typename i_t, typename f_t>
+template <typename functor_t>
+void spmv_t<i_t, f_t>::ATy(const raft::handle_t* h,
+                           raft::device_span<f_t> input,
+                           raft::device_span<f_t> output,
+                           functor_t functor)
+{
+  raft::common::nvtx::range scope("aty");
+  spmv_call(h->get_stream(),
+            get_AT_view(),
+            input,
+            output,
+            make_span(tmp_aty),
+            vars_sub_warp_count,
+            vars_med_block_count,
+            num_blocks_heavy_vars,
+            vars_heavy_beg_id,
+            pb->n_variables - vars_heavy_beg_id,
+            heavy_degree_cutoff,
+            warp_vars_offsets,
+            warp_vars_id_offsets,
+            heavy_vars_vertex_ids,
+            heavy_vars_pseudo_block_ids,
+            heavy_vars_block_segments,
+            functor);
+}
 
 }  // namespace cuopt::linear_programming::detail

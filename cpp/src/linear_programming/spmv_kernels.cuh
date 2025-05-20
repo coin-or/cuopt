@@ -19,14 +19,6 @@
 
 namespace cuopt::linear_programming::detail {
 
-template <typename i_t, typename f_t>
-struct identity_functor {
-  __device__ __forceinline__ void operator()(i_t idx, f_t x, raft::device_span<f_t> output) const
-  {
-    output[idx] = x;
-  }
-};
-
 template <typename i_t, typename f_t, i_t MAX_EDGE_PER_CNST, typename view_t>
 __device__ f_t spmv(view_t view, raft::device_span<f_t> input, i_t tid, i_t beg, i_t end)
 {
@@ -43,13 +35,13 @@ __device__ f_t spmv(view_t view, raft::device_span<f_t> input, i_t tid, i_t beg,
 template <typename i_t,
           typename f_t,
           typename view_t,
-          typename functor_t = identity_functor<i_t, f_t>>
+          typename functor_t>
 __global__ void finalize_spmv_kernel(i_t heavy_beg_id,
                                      raft::device_span<const i_t> item_offsets,
                                      raft::device_span<f_t> tmp_out,
                                      view_t view,
                                      raft::device_span<f_t> output,
-                                     functor_t functor = identity_functor<i_t, f_t>())
+                                     functor_t functor)
 {
   using warp_reduce = cub::WarpReduce<f_t>;
   __shared__ typename warp_reduce::TempStorage temp_storage;
@@ -65,12 +57,6 @@ __global__ void finalize_spmv_kernel(i_t heavy_beg_id,
   out = warp_reduce(temp_storage).Sum(out);
   if (threadIdx.x == 0) { functor(item_idx, out, output); }
 }
-
-#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
-#define BYTE_TO_BINARY(byte)                                                         \
-  ((byte)&0x80 ? '1' : '0'), ((byte)&0x40 ? '1' : '0'), ((byte)&0x20 ? '1' : '0'),   \
-    ((byte)&0x10 ? '1' : '0'), ((byte)&0x08 ? '1' : '0'), ((byte)&0x04 ? '1' : '0'), \
-    ((byte)&0x02 ? '1' : '0'), ((byte)&0x01 ? '1' : '0')
 
 template <typename i_t>
 __device__ __forceinline__ void get_sub_warp_bin(i_t* id_warp_beg,
@@ -95,13 +81,6 @@ __device__ __forceinline__ void get_sub_warp_bin(i_t* id_warp_beg,
   *id_warp_beg  = beg;
   *id_range_end = end;
   *t_p_v        = (1 << seg);
-  // if (blockIdx.x == 0 && lane_id == 0) {
-  //   printf("warp_id %d seg %d beg %d end %d t_p_v %d\n", warp_id, seg, beg, end, (1<<seg));
-  // }
-  // if (lane_id == 0 && warp_id < warp_offsets.back()) {
-  //   printf("warp_id %d : %c%c%c%c%c%c%c%c bin %d dim %d beg %d end %d it_per_warp %d\n", warp_id,
-  //   BYTE_TO_BINARY(m), seg, 1<<seg, beg, end, it_per_warp);
-  // }
 }
 
 template <typename i_t,
@@ -109,13 +88,13 @@ template <typename i_t,
           i_t BDIM,
           i_t MAX_EDGE_PER_CNST,
           typename view_t,
-          typename functor_t = identity_functor<i_t, f_t>>
+          typename functor_t>
 __device__ void spmv_sub_warp(i_t id_warp_beg,
                               i_t id_range_end,
                               view_t view,
                               raft::device_span<f_t> input,
                               raft::device_span<f_t> output,
-                              functor_t functor = identity_functor<i_t, f_t>())
+                              functor_t functor)
 {
   i_t lane_id = (threadIdx.x & 31);
   i_t idx     = id_warp_beg + (lane_id / MAX_EDGE_PER_CNST);
@@ -134,15 +113,6 @@ __device__ void spmv_sub_warp(i_t id_warp_beg,
     i_t item_off_beg = view.offsets[idx];
     i_t item_off_end = view.offsets[idx + 1];
     out = spmv<i_t, f_t, MAX_EDGE_PER_CNST>(view, input, p_tid, item_off_beg, item_off_end);
-    // if (item_idx == 0) {
-    //   for (i_t i = p_tid + item_off_beg; i < item_off_end; i += MAX_EDGE_PER_CNST) {
-    //     auto coeff = view.coeff[i];
-    //     auto var   = view.elem[i];
-    //     auto in    = input[var];
-    //     printf("spmv_sub_warp %d coeff %f var %d in %f out %f\n", p_tid, coeff, var, in,
-    //     coeff*in);
-    //   }
-    // }
   }
 
   out = warp_reduce(temp_storage).Sum(out);
@@ -154,13 +124,13 @@ template <typename i_t,
           typename f_t,
           i_t BDIM,
           typename view_t,
-          typename functor_t = identity_functor<i_t, f_t>>
+          typename functor_t>
 __device__ void spmv_warp(i_t id_warp_beg,
                           i_t id_range_end,
                           view_t view,
                           raft::device_span<f_t> input,
                           raft::device_span<f_t> output,
-                          functor_t functor = identity_functor<i_t, f_t>())
+                          functor_t functor)
 {
   i_t lane_id = (threadIdx.x & 31);
   i_t idx     = id_warp_beg + (lane_id / raft::WarpSize);
@@ -189,13 +159,13 @@ template <typename i_t,
           typename f_t,
           i_t BDIM,
           typename view_t,
-          typename functor_t = identity_functor<i_t, f_t>>
+          typename functor_t>
 __device__ void call_spmv_sub_warp(view_t view,
                                    raft::device_span<f_t> input,
                                    raft::device_span<f_t> output,
                                    raft::device_span<const i_t> warp_item_offsets,
                                    raft::device_span<const i_t> warp_item_id_offsets,
-                                   functor_t functor = identity_functor<i_t, f_t>())
+                                   functor_t functor)
 {
   i_t id_warp_beg, id_range_end, t_p_v;
   get_sub_warp_bin<i_t>(
@@ -220,12 +190,12 @@ template <typename i_t,
           typename f_t,
           i_t BDIM,
           typename view_t,
-          typename functor_t = identity_functor<i_t, f_t>>
+          typename functor_t>
 __device__ void spmv_block(i_t id_block,
                            view_t view,
                            raft::device_span<f_t> input,
                            raft::device_span<f_t> output,
-                           functor_t functor = identity_functor<i_t, f_t>())
+                           functor_t functor)
 {
   typedef cub::BlockReduce<f_t, BDIM> BlockReduce;
   __shared__ typename BlockReduce::TempStorage temp_storage;
@@ -270,7 +240,7 @@ template <typename i_t,
           typename f_t,
           i_t BDIM,
           typename view_t,
-          typename functor_t = identity_functor<i_t, f_t>>
+          typename functor_t>
 __global__ void spmv_kernel(view_t view,
                             raft::device_span<f_t> input,
                             raft::device_span<f_t> output,
@@ -283,7 +253,7 @@ __global__ void spmv_kernel(view_t view,
                             raft::device_span<const i_t> warp_item_id_offsets,
                             raft::device_span<const i_t> heavy_items_vertex_ids,
                             raft::device_span<const i_t> heavy_items_pseudo_block_ids,
-                            functor_t functor = identity_functor<i_t, f_t>())
+                            functor_t functor)
 {
   if (blockIdx.x < sub_warp_blocks_end) {
     // sub warps

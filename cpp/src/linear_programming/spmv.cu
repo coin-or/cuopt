@@ -29,8 +29,7 @@ spmv_t<i_t, f_t>::spmv_t(problem_t<i_t, f_t>& problem_,
                          // raft::device_span<f_t> aty_next_input_,
                          // raft::device_span<f_t> aty_next_output_,
                          bool debug)
-  : streams(16),
-    pb(&problem_),
+  : pb(&problem_),
     handle_ptr(pb->handle_ptr),
     n_constraints(pb->n_constraints),
     n_variables(pb->n_variables),
@@ -246,61 +245,12 @@ void spmv_t<i_t, f_t>::setup_lb_meta()
 
   RAFT_CHECK_CUDA(stream.synchronize());
   stream.synchronize();
-  streams.sync_all_issued();
 }
 
 template <typename i_t, typename f_t>
-void spmv_t<i_t, f_t>::Ax(const raft::handle_t* h,
-                          raft::device_span<f_t> input,
-                          raft::device_span<f_t> output)
+typename spmv_t<i_t, f_t>::view_t spmv_t<i_t, f_t>::get_A_view()
 {
-  raft::common::nvtx::range scope("ax");
-  spmv_call(h->get_stream(),
-            get_A_view(),
-            input,
-            output,
-            make_span(tmp_ax),
-            cnst_sub_warp_count,
-            cnst_med_block_count,
-            num_blocks_heavy_cnst,
-            cnst_heavy_beg_id,
-            pb->n_constraints - cnst_heavy_beg_id,
-            heavy_degree_cutoff,
-            warp_cnst_offsets,
-            warp_cnst_id_offsets,
-            heavy_cnst_vertex_ids,
-            heavy_cnst_pseudo_block_ids,
-            heavy_cnst_block_segments);
-}
-
-template <typename i_t, typename f_t>
-void spmv_t<i_t, f_t>::ATy(const raft::handle_t* h,
-                           raft::device_span<f_t> input,
-                           raft::device_span<f_t> output)
-{
-  // raft::common::nvtx::range scope("ay");
-  spmv_call(h->get_stream(),
-            get_AT_view(),
-            input,
-            output,
-            make_span(tmp_aty),
-            vars_sub_warp_count,
-            vars_med_block_count,
-            num_blocks_heavy_vars,
-            vars_heavy_beg_id,
-            pb->n_variables - vars_heavy_beg_id,
-            heavy_degree_cutoff,
-            warp_vars_offsets,
-            warp_vars_id_offsets,
-            heavy_vars_vertex_ids,
-            heavy_vars_pseudo_block_ids,
-            heavy_vars_block_segments);
-}
-
-template <typename i_t, typename f_t>
-typename spmv_t<i_t, f_t>::spmv_view_t spmv_t<i_t, f_t>::get_A_view()
-{
-  spmv_t::spmv_view_t v;
+  spmv_t::view_t v;
   v.reorg_ids = make_span(cnst_reorg_ids);
   v.coeff     = make_span(coefficients);
   v.elem      = make_span(variables);
@@ -310,9 +260,9 @@ typename spmv_t<i_t, f_t>::spmv_view_t spmv_t<i_t, f_t>::get_A_view()
 }
 
 template <typename i_t, typename f_t>
-typename spmv_t<i_t, f_t>::spmv_view_t spmv_t<i_t, f_t>::get_AT_view()
+typename spmv_t<i_t, f_t>::view_t spmv_t<i_t, f_t>::get_AT_view()
 {
-  spmv_t::spmv_view_t v;
+  spmv_t::view_t v;
   v.reorg_ids = make_span(vars_reorg_ids);
   v.coeff     = make_span(reverse_coefficients);
   v.elem      = make_span(reverse_constraints);

@@ -12,33 +12,23 @@
 
 #pragma once
 
-#include <mip/presolve/load_balanced_partition_helpers.cuh>
-#include <mip/problem/problem.cuh>
-#include "managed_stream_pool.cuh"
 #include "spmv_kernels.cuh"
 
 #include <raft/core/device_span.hpp>
-#include <raft/core/handle.hpp>
+#include <rmm/cuda_stream_view.hpp>
 #include <rmm/device_uvector.hpp>
 
 namespace cuopt::linear_programming::detail {
 
-template <typename i_t>
-i_t get_id_offset(const std::vector<i_t>& bin_offsets, i_t degree_cutoff)
-{
-  return bin_offsets[ceil_log_2(degree_cutoff)];
-}
+template <typename i_t, typename f_t>
+struct identity_functor {
+  __host__ __device__ __forceinline__ void operator()(i_t idx, f_t x, raft::device_span<f_t> output) const
+  {
+    output[idx] = x;
+  }
+};
 
-template <typename i_t>
-std::pair<i_t, i_t> get_id_range(const std::vector<i_t>& bin_offsets,
-                                 i_t degree_beg,
-                                 i_t degree_end)
-{
-  return std::make_pair(bin_offsets[ceil_log_2(degree_beg)],
-                        bin_offsets[ceil_log_2(degree_end) + 1]);
-}
-
-template <typename i_t, typename f_t, typename view_t>
+template <typename i_t, typename f_t, typename view_t, typename functor_t = identity_functor<i_t, f_t>>
 void spmv_call(rmm::cuda_stream_view stream,
                view_t view,
                raft::device_span<f_t> input,
@@ -54,9 +44,9 @@ void spmv_call(rmm::cuda_stream_view stream,
                const rmm::device_uvector<i_t>& warp_item_id_offsets,
                const rmm::device_uvector<i_t>& heavy_items_vertex_ids,
                const rmm::device_uvector<i_t>& heavy_items_pseudo_block_ids,
-               const rmm::device_uvector<i_t>& heavy_items_block_segments)
+               const rmm::device_uvector<i_t>& heavy_items_block_segments,
+               functor_t functor = identity_functor<i_t, f_t>())
 {
-#if 1
   constexpr i_t block_size = 256;
   i_t num_sub_warp_blocks  = raft::ceildiv(item_sub_warp_count * raft::WarpSize, block_size);
   spmv_kernel<i_t, f_t, block_size>
@@ -72,12 +62,12 @@ void spmv_call(rmm::cuda_stream_view stream,
       make_span(warp_item_offsets),
       make_span(warp_item_id_offsets),
       make_span(heavy_items_vertex_ids),
-      make_span(heavy_items_pseudo_block_ids));
+      make_span(heavy_items_pseudo_block_ids),
+      functor);
   if (heavy_block_count != 0) {
     finalize_spmv_kernel<i_t, f_t><<<num_heavy_items, 32, 0, stream>>>(
-      heavy_items_beg_id, make_span(heavy_items_block_segments), tmp_out, view, output);
+      heavy_items_beg_id, make_span(heavy_items_block_segments), tmp_out, view, output, functor);
   }
-#endif
 }
 
 }  // namespace cuopt::linear_programming::detail
