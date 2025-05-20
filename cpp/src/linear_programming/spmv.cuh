@@ -47,25 +47,18 @@ class spmv_t {
   };
 
   spmv_t(problem_t<i_t, f_t>& problem,
-         //raft::device_span<f_t> ax_input_,
-         //raft::device_span<f_t> ax_output_,
-         //raft::device_span<f_t> aty_input_,
-         //raft::device_span<f_t> aty_output_,
-         //raft::device_span<f_t> aty_next_input_,
-         //raft::device_span<f_t> aty_next_output_,
+         // raft::device_span<f_t> ax_input_,
+         // raft::device_span<f_t> ax_output_,
+         // raft::device_span<f_t> aty_input_,
+         // raft::device_span<f_t> aty_output_,
+         // raft::device_span<f_t> aty_next_input_,
+         // raft::device_span<f_t> aty_next_output_,
          bool debug = false);
-  ~spmv_t();
   spmv_t() = delete;
   void setup_lb_problem(problem_t<i_t, f_t>& problem, bool debug = false);
   void setup_lb_meta();
   spmv_view_t get_A_view();
   spmv_view_t get_AT_view();
-  void call_Ax_graph(raft::device_span<f_t> input,
-                     raft::device_span<f_t> output,
-                     bool dry_run = false);
-  void call_ATy_graph(raft::device_span<f_t> input,
-                      raft::device_span<f_t> output,
-                      bool dry_run = false);
 
   void Ax(const raft::handle_t* h, raft::device_span<f_t> input, raft::device_span<f_t> output);
   void ATy(const raft::handle_t* h, raft::device_span<f_t> input, raft::device_span<f_t> output);
@@ -112,16 +105,14 @@ class spmv_t {
 
   // lb sub-warp opt members
   i_t cnst_heavy_beg_id;
-  bool is_cnst_sub_warp_single_bin;
   i_t cnst_sub_warp_count;
   i_t cnst_med_block_count;
   rmm::device_uvector<i_t> warp_cnst_offsets;
   rmm::device_uvector<i_t> warp_cnst_id_offsets;
-  rmm::device_uvector<i_t> block_cnst_offsets;
-  rmm::device_uvector<i_t> block_cnst_id_offsets;
 
-  bool is_vars_sub_warp_single_bin;
+  i_t vars_heavy_beg_id;
   i_t vars_sub_warp_count;
+  i_t vars_med_block_count;
   rmm::device_uvector<i_t> warp_vars_offsets;
   rmm::device_uvector<i_t> warp_vars_id_offsets;
 
@@ -131,29 +122,6 @@ class spmv_t {
 
   vertex_bin_t<i_t> cnst_binner;
   vertex_bin_t<i_t> vars_binner;
-
-  raft::device_span<f_t> ax_input;
-  raft::device_span<f_t> ax_output;
-
-  raft::device_span<f_t> aty_input;
-  raft::device_span<f_t> aty_output;
-
-  raft::device_span<f_t> aty_next_input;
-  raft::device_span<f_t> aty_next_output;
-
-  // spmv graphs
-  bool ax_graph_created;
-  bool aty_graph_created;
-  bool aty_next_graph_created;
-
-  cudaGraphExec_t ax_exec;
-  cudaGraph_t ax_graph;
-
-  cudaGraphExec_t aty_exec;
-  cudaGraph_t aty_graph;
-
-  cudaGraphExec_t aty_next_exec;
-  cudaGraph_t aty_next_graph;
 };
 
 }  // namespace cuopt::linear_programming::detail
