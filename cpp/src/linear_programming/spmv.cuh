@@ -54,10 +54,16 @@ class spmv_t {
   view_t get_AT_view();
 
   template <typename functor_t = identity_functor<i_t, f_t>>
-  void Ax(const raft::handle_t* h, raft::device_span<f_t> input, raft::device_span<f_t> output, functor_t functor = identity_functor<i_t, f_t>{});
+  void Ax(rmm::cuda_stream_view stream,
+          raft::device_span<f_t> input,
+          raft::device_span<f_t> output,
+          functor_t functor = identity_functor<i_t, f_t>{});
 
   template <typename functor_t = identity_functor<i_t, f_t>>
-  void ATy(const raft::handle_t* h, raft::device_span<f_t> input, raft::device_span<f_t> output, functor_t functor = identity_functor<i_t, f_t>{});
+  void ATy(rmm::cuda_stream_view stream,
+           raft::device_span<f_t> input,
+           raft::device_span<f_t> output,
+           functor_t functor = identity_functor<i_t, f_t>{});
 
   static constexpr i_t heavy_degree_cutoff = 16 * 1024;
   problem_t<i_t, f_t>* pb;
@@ -120,13 +126,13 @@ class spmv_t {
 
 template <typename i_t, typename f_t>
 template <typename functor_t>
-void spmv_t<i_t, f_t>::Ax(const raft::handle_t* h,
+void spmv_t<i_t, f_t>::Ax(rmm::cuda_stream_view stream,
                           raft::device_span<f_t> input,
                           raft::device_span<f_t> output,
                           functor_t functor)
 {
   raft::common::nvtx::range scope("ax");
-  spmv_call(h->get_stream(),
+  spmv_call(stream,
             get_A_view(),
             input,
             output,
@@ -147,13 +153,13 @@ void spmv_t<i_t, f_t>::Ax(const raft::handle_t* h,
 
 template <typename i_t, typename f_t>
 template <typename functor_t>
-void spmv_t<i_t, f_t>::ATy(const raft::handle_t* h,
+void spmv_t<i_t, f_t>::ATy(rmm::cuda_stream_view stream,
                            raft::device_span<f_t> input,
                            raft::device_span<f_t> output,
                            functor_t functor)
 {
   raft::common::nvtx::range scope("aty");
-  spmv_call(h->get_stream(),
+  spmv_call(stream,
             get_AT_view(),
             input,
             output,

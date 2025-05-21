@@ -10,7 +10,6 @@
  * its affiliates is strictly prohibited.
  */
 
-#include <linear_programming/pdlp.cuh>
 #include <mip/mip_constants.hpp>
 #include "spmv.cuh"
 #include "spmv_helpers.cuh"
@@ -21,14 +20,7 @@
 namespace cuopt::linear_programming::detail {
 
 template <typename i_t, typename f_t>
-spmv_t<i_t, f_t>::spmv_t(problem_t<i_t, f_t>& problem_,
-                         // raft::device_span<f_t> ax_input_,
-                         // raft::device_span<f_t> ax_output_,
-                         // raft::device_span<f_t> aty_input_,
-                         // raft::device_span<f_t> aty_output_,
-                         // raft::device_span<f_t> aty_next_input_,
-                         // raft::device_span<f_t> aty_next_output_,
-                         bool debug)
+spmv_t<i_t, f_t>::spmv_t(problem_t<i_t, f_t>& problem_, bool debug)
   : pb(&problem_),
     handle_ptr(pb->handle_ptr),
     n_constraints(pb->n_constraints),

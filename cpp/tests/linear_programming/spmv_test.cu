@@ -14,8 +14,8 @@
 #include <linear_programming/pdlp.cuh>
 #include <linear_programming/pdlp_constants.hpp>
 #include <linear_programming/solve.cuh>
-#include <linear_programming/utils.cuh>
 #include <linear_programming/spmv.cuh>
+#include <linear_programming/utils.cuh>
 #include <mip/presolve/trivial_presolve.cuh>
 #include <mps_parser.hpp>
 #include "utilities/pdlp_test_utilities.cuh"
@@ -57,7 +57,7 @@
 
 namespace cuopt::linear_programming::test {
 
-//constexpr int bench_iter_count = 1;
+// constexpr int bench_iter_count = 1;
 
 void init_handler(const raft::handle_t* handle_ptr)
 {
@@ -129,7 +129,6 @@ void display_vars_dist(detail::problem_t<i_t, f_t>& problem)
   }
 }
 
-
 template <typename i_t, typename f_t>
 void display_cnst_dist(detail::problem_t<i_t, f_t>& problem)
 {
@@ -196,11 +195,11 @@ void test_spmv_functor(std::string path)
 #endif
 
 template <typename cusp_view_t>
-std::vector<double> cusparse_call(const raft::handle_t* handle_ptr,
-    detail::problem_t<int, double>& problem,
-    cusp_view_t& view,
-    rmm::device_uvector<double>& x,
-    rmm::device_uvector<double>& ax)
+std::vector<double> cusparse_call_ax(const raft::handle_t* handle_ptr,
+                                     detail::problem_t<int, double>& problem,
+                                     cusp_view_t& view,
+                                     rmm::device_uvector<double>& x,
+                                     rmm::device_uvector<double>& ax)
 {
   cusparseDnVecDescr_t cusp_x;
   cusparseDnVecDescr_t cusp_ax;
@@ -225,6 +224,36 @@ std::vector<double> cusparse_call(const raft::handle_t* handle_ptr,
   return host_copy(ax);
 }
 
+template <typename cusp_view_t>
+std::vector<double> cusparse_call_aty(const raft::handle_t* handle_ptr,
+                                      detail::problem_t<int, double>& problem,
+                                      cusp_view_t& view,
+                                      rmm::device_uvector<double>& y,
+                                      rmm::device_uvector<double>& aty)
+{
+  cusparseDnVecDescr_t cusp_y;
+  cusparseDnVecDescr_t cusp_aty;
+  RAFT_CUSPARSE_TRY(
+    raft::sparse::detail::cusparsecreatednvec(&cusp_y, problem.n_constraints, y.data()));
+  RAFT_CUSPARSE_TRY(
+    raft::sparse::detail::cusparsecreatednvec(&cusp_aty, problem.n_variables, aty.data()));
+
+  rmm::device_scalar<double> sc_1(1.0, handle_ptr->get_stream());
+  rmm::device_scalar<double> sc_0(0.0, handle_ptr->get_stream());
+
+  RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsespmv(handle_ptr->get_cusparse_handle(),
+                                                       CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                       sc_1.data(),  // 1
+                                                       view.A_T,
+                                                       cusp_y,
+                                                       sc_0.data(),  // 0
+                                                       cusp_aty,
+                                                       CUSPARSE_SPMV_CSR_ALG2,
+                                                       (double*)view.buffer_non_transpose.data(),
+                                                       handle_ptr->get_stream()));
+  return host_copy(aty);
+}
+
 template <typename f_t>
 bool test_eq(const raft::handle_t* handle_ptr,
              std::vector<f_t>& h_res,
@@ -233,8 +262,8 @@ bool test_eq(const raft::handle_t* handle_ptr,
 {
   bool is_match = true;
   for (size_t i = 0; i < h_res.size(); ++i) {
-    if (abs(h_res[i] - 2*h_gld[i]) > tolerance) {
-      std::cout << "\nmismatch " << i << "\t" << h_res[i] << "\t" << 2*h_gld[i] << "\n";
+    if (abs(h_res[i] - 2 * h_gld[i]) > tolerance) {
+      std::cout << "\nmismatch " << i << "\t" << h_res[i] << "\t" << 2 * h_gld[i] << "\n";
       is_match = false;
     }
   }
@@ -269,35 +298,63 @@ void test_spmv_functor(std::string path)
                                                                problem.reverse_constraints);
   scaling.scale_problem();
 
-  std::cout << "n_cnst "<<problem.n_constraints << " ";
-  std::cout << "n_vars "<<problem.n_variables << " ";
-  std::cout << "nnz "<<problem.nnz << "\n";
-
-  // test ax
-
-  // Ax input
-  rmm::device_uvector<double> x(problem.n_variables, handle_.get_stream());
-
-  // Ax output
-  rmm::device_uvector<double> cusp_ax(problem.n_constraints, handle_.get_stream());
-  rmm::device_uvector<double> ax(problem.n_constraints, handle_.get_stream());
-
-  thrust::fill(handle_.get_thrust_policy(), x.begin(), x.end(), 1);
-  thrust::fill(handle_.get_thrust_policy(), cusp_ax.begin(), cusp_ax.end(), 0);
-  thrust::fill(handle_.get_thrust_policy(), ax.begin(), ax.end(), 0);
-
-  auto gld_res = cusparse_call(&handle_, problem, pdhg_solver.get_cusparse_view(), x, cusp_ax);
+  std::cout << "n_cnst " << problem.n_constraints << " ";
+  std::cout << "n_vars " << problem.n_variables << " ";
+  std::cout << "nnz " << problem.nnz << "\n";
 
   detail::spmv_t<int, double> spmv(problem);
-  spmv.Ax(&handle_, make_span(x), make_span(ax), [] __device__(int idx, double x, raft::device_span<double> output)
-      {
-        output[idx] = 2*x;
-      });
-  auto ref_res = host_copy(ax);
+  // test ax
+  {
+    // Ax input
+    rmm::device_uvector<double> x(problem.n_variables, handle_.get_stream());
 
-  test_eq(&handle_, ref_res, gld_res, 1e-5);
+    // Ax output
+    rmm::device_uvector<double> cusp_ax(problem.n_constraints, handle_.get_stream());
+    rmm::device_uvector<double> ax(problem.n_constraints, handle_.get_stream());
+
+    thrust::fill(handle_.get_thrust_policy(), x.begin(), x.end(), 1);
+    thrust::fill(handle_.get_thrust_policy(), cusp_ax.begin(), cusp_ax.end(), 0);
+    thrust::fill(handle_.get_thrust_policy(), ax.begin(), ax.end(), 0);
+
+    auto gld_res = cusparse_call_ax(&handle_, problem, pdhg_solver.get_cusparse_view(), x, cusp_ax);
+
+    spmv.Ax(
+      handle_.get_stream(),
+      make_span(x),
+      make_span(ax),
+      [] __device__(int idx, double x, raft::device_span<double> output) { output[idx] = 2 * x; });
+    auto ref_res = host_copy(ax);
+
+    test_eq(&handle_, ref_res, gld_res, 1e-5);
+  }
+  {
+    // Ax input
+    rmm::device_uvector<double> x(problem.n_constraints, handle_.get_stream());
+
+    // Ax output
+    rmm::device_uvector<double> cusp_ax(problem.n_variables, handle_.get_stream());
+    rmm::device_uvector<double> ax(problem.n_variables, handle_.get_stream());
+
+    thrust::fill(handle_.get_thrust_policy(), x.begin(), x.end(), 1);
+    thrust::fill(handle_.get_thrust_policy(), cusp_ax.begin(), cusp_ax.end(), 0);
+    thrust::fill(handle_.get_thrust_policy(), ax.begin(), ax.end(), 0);
+
+    auto gld_res =
+      cusparse_call_aty(&handle_, problem, pdhg_solver.get_cusparse_view(), x, cusp_ax);
+
+    rmm::device_scalar<double> param_0(3.0, handle_.get_stream());
+    rmm::device_scalar<double> param_1(1.0, handle_.get_stream());
+    spmv.ATy(
+      handle_.get_stream(),
+      make_span(x),
+      make_span(ax),
+      [p_0 = param_0.data(), p_1 = param_1.data()] __device__(
+        int idx, double x, raft::device_span<double> output) { output[idx] = (*p_0 - *p_1) * x; });
+    auto ref_res = host_copy(ax);
+
+    test_eq(&handle_, ref_res, gld_res, 1e-5);
+  }
 }
-
 
 TEST(mip_solve, test_lb)
 {

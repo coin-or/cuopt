@@ -22,20 +22,30 @@ namespace cuopt::linear_programming::detail {
 template <typename i_t, typename f_t, i_t MAX_EDGE_PER_CNST, typename view_t>
 __device__ f_t spmv(view_t view, raft::device_span<f_t> input, i_t tid, i_t beg, i_t end)
 {
+  // f_t out = 0.;
+  // for (i_t i = tid + beg; i < end; i += MAX_EDGE_PER_CNST) {
+  //   auto coeff = view.coeff[i];
+  //   auto var   = view.elem[i];
+  //   auto in    = input[var];
+  //   out += coeff * in;
+  // }
+  // return out;
   f_t out = 0.;
+  f_t c   = 0.;
   for (i_t i = tid + beg; i < end; i += MAX_EDGE_PER_CNST) {
     auto coeff = view.coeff[i];
     auto var   = view.elem[i];
     auto in    = input[var];
-    out += coeff * in;
+    f_t y      = __fma_rn(coeff, in, -c);
+    // f_t y      = coeff * in - c;
+    f_t t = out + y;
+    c     = (t - out) - y;
+    out   = t;
   }
   return out;
 }
 
-template <typename i_t,
-          typename f_t,
-          typename view_t,
-          typename functor_t>
+template <typename i_t, typename f_t, typename view_t, typename functor_t>
 __global__ void finalize_spmv_kernel(i_t heavy_beg_id,
                                      raft::device_span<const i_t> item_offsets,
                                      raft::device_span<f_t> tmp_out,
@@ -120,11 +130,7 @@ __device__ void spmv_sub_warp(i_t id_warp_beg,
   if (head_flag && (idx < id_range_end)) { functor(item_idx, out, output); }
 }
 
-template <typename i_t,
-          typename f_t,
-          i_t BDIM,
-          typename view_t,
-          typename functor_t>
+template <typename i_t, typename f_t, i_t BDIM, typename view_t, typename functor_t>
 __device__ void spmv_warp(i_t id_warp_beg,
                           i_t id_range_end,
                           view_t view,
@@ -155,11 +161,7 @@ __device__ void spmv_warp(i_t id_warp_beg,
   if (head_flag && (idx < id_range_end)) { functor(item_idx, out, output); }
 }
 
-template <typename i_t,
-          typename f_t,
-          i_t BDIM,
-          typename view_t,
-          typename functor_t>
+template <typename i_t, typename f_t, i_t BDIM, typename view_t, typename functor_t>
 __device__ void call_spmv_sub_warp(view_t view,
                                    raft::device_span<f_t> input,
                                    raft::device_span<f_t> output,
@@ -186,11 +188,7 @@ __device__ void call_spmv_sub_warp(view_t view,
   }
 }
 
-template <typename i_t,
-          typename f_t,
-          i_t BDIM,
-          typename view_t,
-          typename functor_t>
+template <typename i_t, typename f_t, i_t BDIM, typename view_t, typename functor_t>
 __device__ void spmv_block(i_t id_block,
                            view_t view,
                            raft::device_span<f_t> input,
@@ -236,11 +234,7 @@ __device__ void call_spmv_heavy(view_t view,
   if (threadIdx.x == 0) { tmp_out[id_block] = out; }
 }
 
-template <typename i_t,
-          typename f_t,
-          i_t BDIM,
-          typename view_t,
-          typename functor_t>
+template <typename i_t, typename f_t, i_t BDIM, typename view_t, typename functor_t>
 __global__ void spmv_kernel(view_t view,
                             raft::device_span<f_t> input,
                             raft::device_span<f_t> output,
