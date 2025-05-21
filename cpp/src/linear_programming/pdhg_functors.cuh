@@ -16,6 +16,7 @@
  */
 #pragma once
 
+#include <raft/core/math.hpp>
 #include <rmm/device_scalar.hpp>
 #include <rmm/device_uvector.hpp>
 #include <utilities/copy_helpers.hpp>

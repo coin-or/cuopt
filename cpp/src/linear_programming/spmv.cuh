@@ -50,6 +50,7 @@ class spmv_t {
   spmv_t() = delete;
   void setup_lb_problem(problem_t<i_t, f_t>& problem, bool debug = false);
   void setup_lb_meta();
+  void setup(problem_t<i_t, f_t>& problem, bool debug = false);
   view_t get_A_view();
   view_t get_AT_view();
 

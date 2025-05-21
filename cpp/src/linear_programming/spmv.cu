@@ -53,28 +53,14 @@ spmv_t<i_t, f_t>::spmv_t(problem_t<i_t, f_t>& problem_, bool debug)
     cnst_binner(handle_ptr),
     vars_binner(handle_ptr)
 {
+}
+
+template <typename i_t, typename f_t>
+void spmv_t<i_t, f_t>::setup(problem_t<i_t, f_t>& problem_, bool debug)
+{
+  pb = &problem_;
   setup_lb_problem(problem_, debug);
   setup_lb_meta();
-}
-
-template <typename i_t>
-i_t lb(i_t i)
-{
-  if (i < 2) {
-    return 0;
-  } else {
-    return (1 << (i - 2));
-  }
-}
-
-template <typename i_t>
-i_t ub(i_t i)
-{
-  if (i == 0) {
-    return 0;
-  } else {
-    return (1 << (i - 1));
-  }
 }
 
 template <typename i_t, typename f_t>
@@ -151,42 +137,8 @@ void spmv_t<i_t, f_t>::setup_lb_problem(problem_t<i_t, f_t>& problem_, bool debu
                          problem_.reverse_constraints,
                          debug);
 
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"pt 5\n";
-
   cnst_bin_offsets = dist_cnst.bin_offsets_;
   vars_bin_offsets = dist_vars.bin_offsets_;
-  // if (nnz < 10000) {
-  //   compact_bins(cnst_bin_offsets, n_constraints);
-  //   compact_bins(vars_bin_offsets, n_variables);
-  // }
-
-  // if (true) {
-  //   std::cout << "cnst_bin_offsets\n";
-  //   std::cout << "bin\t(lb\tub]\tbeg_off\tcount\n";
-  //   for (int i = 0; i < static_cast<i_t>(cnst_bin_offsets.size()); ++i) {
-  //     if (i > 0) {
-  //       std::cout << i << "\t" << lb(i) << "\t" << ub(i) << "\t" << cnst_bin_offsets[i] << "\t"
-  //                 << (cnst_bin_offsets[i] - cnst_bin_offsets[i - 1]) << "\n";
-  //     } else {
-  //       std::cout << i << "\t" << lb(i) << "\t" << ub(i) << "\t" << cnst_bin_offsets[i]
-  //                 << "\tn/a\n";
-  //     }
-  //     if (cnst_bin_offsets[i] == cnst_bin_offsets.back()) {
-  //       std::cout << "\n";
-  //       break;
-  //     }
-  //   }
-  // }
-  // if (false) {
-  //   std::cout << "vars_bin_offsets\n";
-  //   for (int i = 0; i < static_cast<i_t>(vars_bin_offsets.size()); ++i) {
-  //     std::cout << i << " " << vars_bin_offsets[i] << "\n";
-  //   }
-  // }
-
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"pt 6\n";
 
   handle_ptr->sync_stream();
 }
@@ -233,7 +185,7 @@ void spmv_t<i_t, f_t>::setup_lb_meta()
                w_t_r,
                heavy_degree_cutoff,
                true);
-  std::cout << "num_blocks_heavy_cnst " << num_blocks_heavy_cnst << "\n";
+  // std::cout << "num_blocks_heavy_cnst " << num_blocks_heavy_cnst << "\n";
 
   RAFT_CHECK_CUDA(stream.synchronize());
   stream.synchronize();
