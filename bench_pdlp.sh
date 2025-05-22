@@ -7,7 +7,6 @@
 ./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/cont1/cont1.mps h_param.txt 1e-4
 ./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/cont11/cont11.mps h_param.txt 1e-4
 ./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/datt256_lp/datt256_lp.mps h_param.txt 1e-4
-./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/dlr1/dlr1.mps h_param.txt 1e-4
 ./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/ex10/ex10.mps h_param.txt 1e-4
 ./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/fhnw-binschedule1/fhnw-binschedule1.mps h_param.txt 1e-4
 ./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/fome13/fome13.mps h_param.txt 1e-4
@@ -49,6 +48,4 @@
 ./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/degme/degme.mps h_param.txt 1e-4
 ./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/dlr2/dlr2.mps h_param.txt 1e-4
 ./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/set-cover-model/set-cover-model.mps h_param.txt 1e-4
-
-#./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/physiciansched3-3/physiciansched3-3.mps evo.txt 1e-4
-#./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/ns1687037/ns1687037.mps evo.txt 1e-4
+./cpp/build/run_benchmark ~/rapids/db_cuopt/cuopt/datasets/linear_programming/dlr1/dlr1.mps h_param.txt 1e-4

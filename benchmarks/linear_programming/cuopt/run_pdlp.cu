@@ -41,8 +41,8 @@ static void parse_arguments(argparse::ArgumentParser& program)
 
   program.add_argument("--time-limit")
     .help("Time limit in seconds")
-    .default_value(3600)
-    .scan<'f', double>();
+    .default_value(3600.0)
+    .scan<'g', double>();
 
   program.add_argument("--iteration-limit")
     .help("Iteration limit")
@@ -52,7 +52,7 @@ static void parse_arguments(argparse::ArgumentParser& program)
   program.add_argument("--optimality-tolerance")
     .help("Optimality tolerance")
     .default_value(1e-4)
-    .scan<'f', double>();
+    .scan<'g', double>();
 
   program.add_argument("--pdlp-solver-mode")
     .help("Solver mode for PDLP. Possible values: Stable2 (default), Methodical1, Fast1")
@@ -99,14 +99,13 @@ static cuopt::linear_programming::pdlp_solver_settings_t<int, double> create_sol
   cuopt::linear_programming::pdlp_solver_settings_t<int, double> settings =
     cuopt::linear_programming::pdlp_solver_settings_t<int, double>{};
 
-  settings.set_time_limit(program.get<double>("--time-limit"));
-  settings.set_iteration_limit(program.get<int>("--iteration-limit"));
+  settings.time_limit      = program.get<double>("--time-limit");
+  settings.iteration_limit = program.get<int>("--iteration-limit");
   settings.set_optimality_tolerance(program.get<double>("--optimality-tolerance"));
-  settings.set_pdlp_solver_mode(
-    string_to_pdlp_solver_mode(program.get<std::string>("--pdlp-solver-mode")));
-  settings.set_method(
-    static_cast<cuopt::linear_programming::method_t>(program.get<int>("--method")));
-  settings.set_crossover(program.get<int>("--crossover"));
+  settings.pdlp_solver_mode =
+    string_to_pdlp_solver_mode(program.get<std::string>("--pdlp-solver-mode"));
+  settings.method = static_cast<cuopt::linear_programming::method_t>(program.get<int>("--method"));
+  settings.crossover = program.get<int>("--crossover");
 
   return settings;
 }

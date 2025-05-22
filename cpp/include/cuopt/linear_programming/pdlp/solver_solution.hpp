@@ -18,6 +18,7 @@
 #pragma once
 
 #include <cuopt/linear_programming/constants.h>
+#include <cuopt/error.hpp>
 #include <cuopt/linear_programming/pdlp/pdlp_warm_start_data.hpp>
 #include <cuopt/linear_programming/utilities/internals.hpp>
 
@@ -34,6 +35,7 @@ namespace cuopt::linear_programming {
 
 // Possible reasons for terminating
 enum class pdlp_termination_status_t : int8_t {
+  NoTermination    = CUOPT_TERIMINATION_STATUS_NO_TERMINATION,
   NumericalError   = CUOPT_TERIMINATION_STATUS_NUMERICAL_ERROR,
   Optimal          = CUOPT_TERIMINATION_STATUS_OPTIMAL,
   PrimalInfeasible = CUOPT_TERIMINATION_STATUS_INFEASIBLE,
@@ -41,7 +43,7 @@ enum class pdlp_termination_status_t : int8_t {
   IterationLimit   = CUOPT_TERIMINATION_STATUS_ITERATION_LIMIT,
   TimeLimit        = CUOPT_TERIMINATION_STATUS_TIME_LIMIT,
   PrimalFeasible   = CUOPT_TERIMINATION_STATUS_PRIMAL_FEASIBLE,
-  ConcurrentLimit  = CUOPT_TERIMINATION_STATUS_CONCURRENT_LIMIT,
+  ConcurrentLimit  = CUOPT_TERIMINATION_STATUS_CONCURRENT_LIMIT
 };
 
 /**
@@ -60,41 +62,44 @@ class optimization_problem_solution_t : public base_solution_t {
    */
   struct additional_termination_information_t {
     /** Number of pdlp steps taken before termination */
-    i_t number_of_steps_taken;
+    i_t number_of_steps_taken{-1};
     /** Number of pdhg steps taken before termination */
-    i_t total_number_of_attempted_steps;
+    i_t total_number_of_attempted_steps{-1};
     /** L2 norm of the primal residual (absolute primal residual) */
-    f_t l2_primal_residual;
+    f_t l2_primal_residual{std::numeric_limits<f_t>::signaling_NaN()};
     /** L2 norm of the primal residual divided by the L2 norm of the right hand side (b) */
-    f_t l2_relative_primal_residual;
+    f_t l2_relative_primal_residual{std::numeric_limits<f_t>::signaling_NaN()};
     /** L2 norm of the dual residual */
-    f_t l2_dual_residual;
+    f_t l2_dual_residual{std::numeric_limits<f_t>::signaling_NaN()};
     /** L2 norm of the dual residual divided by the L2 norm of the objective coefficient (c) */
-    f_t l2_relative_dual_residual;
+    f_t l2_relative_dual_residual{std::numeric_limits<f_t>::signaling_NaN()};
 
     /** Primal Objective */
-    f_t primal_objective;
+    f_t primal_objective{std::numeric_limits<f_t>::signaling_NaN()};
     /** Dual Objective */
-    f_t dual_objective;
+    f_t dual_objective{std::numeric_limits<f_t>::signaling_NaN()};
 
     /** Gap between primal and dual objective value */
 
-    f_t gap;
+    f_t gap{std::numeric_limits<f_t>::signaling_NaN()};
     /** Gap divided by the absolute sum of the primal and dual objective values */
-    f_t relative_gap;
+    f_t relative_gap{std::numeric_limits<f_t>::signaling_NaN()};
 
     /** Maximum error for the linear constraints and sign constraints */
-    f_t max_primal_ray_infeasibility;
+    f_t max_primal_ray_infeasibility{std::numeric_limits<f_t>::signaling_NaN()};
     /** Objective value for the extreme primal ray */
-    f_t primal_ray_linear_objective;
+    f_t primal_ray_linear_objective{std::numeric_limits<f_t>::signaling_NaN()};
 
     /** Maximum constraint error */
-    f_t max_dual_ray_infeasibility;
+    f_t max_dual_ray_infeasibility{std::numeric_limits<f_t>::signaling_NaN()};
     /** Objective value for the extreme dual ray */
-    f_t dual_ray_linear_objective;
+    f_t dual_ray_linear_objective{std::numeric_limits<f_t>::signaling_NaN()};
 
     /** Solve time in seconds */
-    double solve_time;
+    double solve_time{std::numeric_limits<double>::signaling_NaN()};
+
+    /** Whether the problem was solved by PDLP or Dual Simplex */
+    bool solved_by_pdlp{false};
   };
 
   /**
@@ -106,6 +111,17 @@ class optimization_problem_solution_t : public base_solution_t {
    * @param[in] stream_view An rmm view to a stream. All computations will go through this stream
    */
   optimization_problem_solution_t(pdlp_termination_status_t termination_status_,
+                                  rmm::cuda_stream_view stream_view);
+
+  /**
+   * @brief Construct an optimization problem solution that serves as PDLP solver output
+   * Used when an internal error has occurred
+   *
+   * @param[in] error_status_ The error object, containing info about what went wrong
+   * 'Optimal', 'PrimalInfeasible', 'DualInfeasible', 'TimeLimit'
+   * @param[in] stream_view An rmm view to a stream. All computations will go through this stream
+   */
+  optimization_problem_solution_t(cuopt::logic_error error_status_,
                                   rmm::cuda_stream_view stream_view);
   /**
    * @brief Construct an optimization problem solution that serves as PDLP solver output
@@ -187,7 +203,7 @@ class optimization_problem_solution_t : public base_solution_t {
    * @brief Returns the final status as a human readable string
    * @return The human readable solver status string
    */
-  std::string get_termination_status_string();
+  std::string get_termination_status_string() const;
   static std::string get_termination_status_string(pdlp_termination_status_t termination_status);
 
   /**
@@ -196,7 +212,7 @@ class optimization_problem_solution_t : public base_solution_t {
    * solver.
    * @return Best objective value
    */
-  f_t get_objective_value();
+  f_t get_objective_value() const;
 
   /**
    * @brief Returns the solution for the values of the primal variables as a vector of `f_t`.
@@ -226,7 +242,13 @@ class optimization_problem_solution_t : public base_solution_t {
    * @brief Get termination reason
    * @return Termination reason
    */
-  pdlp_termination_status_t get_termination_status();
+  pdlp_termination_status_t get_termination_status() const;
+
+  /**
+   * @brief Get the error status
+   * @return The error status
+   */
+  cuopt::logic_error get_error_status() const;
 
   /**
    * @brief Get the additional_termination_information_t object which contains various measures and
@@ -254,7 +276,7 @@ class optimization_problem_solution_t : public base_solution_t {
    * @param filename Name of the output file
    * @param stream_view Non-owning stream view object
    */
-  void write_to_sol_file(std::string_view filename, rmm::cuda_stream_view stream_view);
+  void write_to_sol_file(std::string_view filename, rmm::cuda_stream_view stream_view) const;
 
   /**
    * @brief Copy solution from another solution object
@@ -282,5 +304,7 @@ class optimization_problem_solution_t : public base_solution_t {
   std::vector<std::string> var_names_{};
   /** names of each of the rows in the OP */
   std::vector<std::string> row_names_{};
+  /** error struct */
+  cuopt::logic_error error_status_;
 };
 }  // namespace cuopt::linear_programming

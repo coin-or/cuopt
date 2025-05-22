@@ -17,11 +17,11 @@
 
 #pragma once
 
+#include <cuopt/error.hpp>
 #include <linear_programming/utils.cuh>
 #include <mip/presolve/trivial_presolve_helpers.cuh>
 #include <mip/problem/problem.cuh>
 #include <utilities/copy_helpers.hpp>
-#include <utilities/error.hpp>
 
 #include <thrust/count.h>
 #include <thrust/for_each.h>
@@ -277,8 +277,9 @@ void update_from_csr(problem_t<i_t, f_t>& pb)
 
   pb.n_constraints = updated_n_cnst;
   pb.n_variables   = updated_n_vars;
-  CUOPT_LOG_INFO(
-    "After trivial presolve updated %d constraints %d variables", updated_n_cnst, updated_n_vars);
+  CUOPT_LOG_INFO("After trivial presolve updated number of %d constraints %d variables",
+                 updated_n_cnst,
+                 updated_n_vars);
   // check successive cnst in coo increases by atmost 1
   // update csr offset
   pb.offsets.resize(pb.n_constraints + 1, handle_ptr->get_stream());

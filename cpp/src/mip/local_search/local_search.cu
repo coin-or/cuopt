@@ -18,16 +18,13 @@
 #include "lagrangian.cuh"
 #include "local_search.cuh"
 
+#include <cuopt/error.hpp>
+
 #include <mip/mip_constants.hpp>
 #include <mip/relaxed_lp/relaxed_lp.cuh>
 #include <mip/utils.cuh>
-
-#include <utilities/error.hpp>
-#include <utilities/timer.hpp>
-
 #include <utilities/seed_generator.cuh>
-
-#include <cuda_profiler_api.h>
+#include <utilities/timer.hpp>
 
 #include <cuda_profiler_api.h>
 
@@ -201,6 +198,7 @@ bool local_search_t<i_t, f_t>::check_fj_on_lp_optimal(solution_t<i_t, f_t>& solu
                            solution,
                            solution.problem_ptr->integer_indices,
                            solution.problem_ptr->tolerances,
+                           context.lp_state,
                            lp_run_time);
   } else {
     return is_feasible;

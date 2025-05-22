@@ -59,6 +59,8 @@ struct linear_programming_ret_t {
   /* -- /PDLP Warm Start Data -- */
 
   linear_programming::pdlp_termination_status_t termination_status_;
+  error_type_t error_status_;
+  std::string error_message_;
 
   /*Termination stats*/
   double l2_primal_residual_;
@@ -68,12 +70,15 @@ struct linear_programming_ret_t {
   double gap_;
   int nb_iterations_;
   double solve_time_;
+  bool solved_by_pdlp_;
 };
 
 struct mip_ret_t {
   std::unique_ptr<rmm::device_buffer> solution_;
 
   linear_programming::mip_termination_status_t termination_status_;
+  error_type_t error_status_;
+  std::string error_message_;
 
   /*Termination stats*/
   double objective_;

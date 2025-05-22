@@ -127,7 +127,9 @@ class Solution:
         Note: Applicable to only MILP
         Time used for pre-solve
     solve_time: Float64
-        Solve time in milliseconds
+        Solve time in seconds
+    solved_by_pdlp: bool
+        Whether the problem was solved by PDLP or Dual Simplex
     """
 
     def __init__(
@@ -156,12 +158,15 @@ class Solution:
         sum_solution_weight=0.0,
         iterations_since_last_restart=0,
         termination_status=0,
+        error_status=0,
+        error_message="",
         primal_residual=0.0,
         dual_residual=0.0,
         primal_objective=0.0,
         dual_objective=0.0,
         gap=0.0,
         nb_iterations=0,
+        solved_by_pdlp=None,
         mip_gap=0.0,
         solution_bound=0.0,
         presolve_time=0.0,
@@ -194,10 +199,13 @@ class Solution:
             iterations_since_last_restart,
         )
         self._set_termination_status(termination_status)
+        self.error_status = error_status
+        self.error_message = error_message
 
         self.primal_objective = primal_objective
         self.dual_objective = dual_objective
         self.solve_time = solve_time
+        self.solved_by_pdlp = solved_by_pdlp
         self.vars = vars
         self.lp_stats = {
             "primal_residual": primal_residual,
@@ -275,11 +283,29 @@ class Solution:
         """
         return self.termination_status.name
 
+    def get_error_status(self):
+        """
+        Returns the error status as per ErrorStatus.
+        """
+        return self.error_status
+
+    def get_error_message(self):
+        """
+        Returns the error message as per ErrorMessage.
+        """
+        return self.error_message
+
     def get_solve_time(self):
         """
         Returns the engine solve time in seconds as a float64.
         """
         return self.solve_time
+
+    def get_solved_by_pdlp(self):
+        """
+        Returns whether the problem was solved by PDLP or Dual Simplex
+        """
+        return self.solved_by_pdlp
 
     def get_vars(self):
         """

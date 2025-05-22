@@ -29,9 +29,9 @@ import msgpack_numpy
 import numpy as np
 import requests
 import solution
-import solver_settings
 
 from . import _version
+from .thin_client_solver_settings import ThinClientSolverSettings
 
 msgpack_numpy.patch()
 
@@ -161,7 +161,7 @@ def _mps_parse(LP_problem_data, solver_config):
     if type(solver_config) is dict:
         problem_data["solver_config"] = solver_config
     else:
-        problem_data["solver_config"] = solver_settings.toDict(solver_config)
+        problem_data["solver_config"] = solver_config.toDict()
 
     return problem_data
 
@@ -180,8 +180,8 @@ def create_lp_response(response_dict):
                 solve_time=sol["solver_time"],
                 termination_status=status,
                 primal_solution=np.array(sol["primal_solution"]),
+                reduced_cost=np.array(sol["reduced_cost"]),
                 primal_objective=sol["primal_objective"],
-                dual_objective=sol["dual_objective"],
                 mip_gap=sol["milp_statistics"]["mip_gap"],
                 solution_bound=sol["milp_statistics"]["solution_bound"],
                 presolve_time=sol["milp_statistics"]["presolve_time"],
@@ -192,6 +192,10 @@ def create_lp_response(response_dict):
                 max_variable_bound_violation=sol["milp_statistics"][
                     "max_variable_bound_violation"
                 ],
+                num_nodes=sol["milp_statistics"]["num_nodes"],
+                num_simplex_iterations=sol["milp_statistics"][
+                    "num_simplex_iterations"
+                ],
             )
         else:
             solution_obj = solution.Solution(
@@ -201,12 +205,14 @@ def create_lp_response(response_dict):
                 termination_status=status,
                 primal_solution=np.array(sol["primal_solution"]),
                 dual_solution=np.array(sol["dual_solution"]),
-                reduced_cost=np.array(sol["lp_statistics"]["reduced_cost"]),
+                reduced_cost=np.array(sol["reduced_cost"]),
                 primal_residual=sol["lp_statistics"]["primal_residual"],
                 dual_residual=sol["lp_statistics"]["dual_residual"],
+                gap=sol["lp_statistics"]["gap"],
+                nb_iterations=sol["lp_statistics"]["nb_iterations"],
                 primal_objective=sol["primal_objective"],
                 dual_objective=sol["dual_objective"],
-                gap=sol["lp_statistics"]["gap"],
+                solved_by_pdlp=sol["solved_by_pdlp"],
             )
         return status, solution_obj
 
@@ -674,7 +680,7 @@ class CuOptServiceSelfHostClient:
     def get_LP_solve(
         self,
         cuopt_data_models,
-        solver_config=solver_settings.SolverSettings(),
+        solver_config=ThinClientSolverSettings(),
         cache=False,
         response_type="obj",
         filepath=False,
@@ -754,7 +760,7 @@ class CuOptServiceSelfHostClient:
             )
 
         if solver_config is None:
-            solver_config = solver_settings.SolverSettings()
+            solver_config = ThinClientSolverSettings()
 
         def read_cuopt_problem_data(cuopt_data_model, filepath):
             if isinstance(cuopt_data_model, dict):

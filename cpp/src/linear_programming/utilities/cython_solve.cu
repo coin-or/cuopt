@@ -15,13 +15,13 @@
  * limitations under the License.
  */
 
+#include <cuopt/error.hpp>
 #include <cuopt/linear_programming/optimization_problem.hpp>
 #include <cuopt/linear_programming/solve.hpp>
 #include <cuopt/linear_programming/solver_settings.hpp>
 #include <cuopt/linear_programming/utilities/cython_solve.hpp>
 #include <mip/logger.hpp>
 #include <mps_parser/data_model_view.hpp>
-#include <utilities/error.hpp>
 
 #include <raft/common/nvtx.hpp>
 #include <raft/core/handle.hpp>
@@ -157,13 +157,16 @@ linear_programming_ret_t call_solve_lp(
     solution.get_pdlp_warm_start_data().sum_solution_weight_,
     solution.get_pdlp_warm_start_data().iterations_since_last_restart_,
     solution.get_termination_status(),
+    solution.get_error_status().get_error_type(),
+    solution.get_error_status().what(),
     solution.get_additional_termination_information().l2_primal_residual,
     solution.get_additional_termination_information().l2_dual_residual,
     solution.get_additional_termination_information().primal_objective,
     solution.get_additional_termination_information().dual_objective,
     solution.get_additional_termination_information().gap,
     solution.get_additional_termination_information().number_of_steps_taken,
-    solution.get_additional_termination_information().solve_time};
+    solution.get_additional_termination_information().solve_time,
+    solution.get_additional_termination_information().solved_by_pdlp};
 
   return lp_ret;
 }
@@ -188,6 +191,8 @@ mip_ret_t call_solve_mip(
   auto solution = cuopt::linear_programming::solve_mip(op_problem, solver_settings);
   mip_ret_t mip_ret{std::make_unique<rmm::device_buffer>(solution.get_solution().release()),
                     solution.get_termination_status(),
+                    solution.get_error_status().get_error_type(),
+                    solution.get_error_status().what(),
                     solution.get_objective_value(),
                     solution.get_mip_gap(),
                     solution.get_solution_bound(),
@@ -269,6 +274,14 @@ std::pair<std::vector<std::unique_ptr<solver_ret_t>>, double> call_batch_solve(
 
   // Limit parallelism as too much stream overlap gets too slow
   const int max_thread = compute_max_thread(data_models);
+
+  if (solver_settings->get_parameter<int>(CUOPT_METHOD) == CUOPT_METHOD_CONCURRENT) {
+    CUOPT_LOG_INFO("Concurrent mode not supported for batch solve. Using PDLP instead. ");
+    CUOPT_LOG_INFO(
+      "Set the CUOPT_METHOD parameter to CUOPT_METHOD_PDLP or CUOPT_METHOD_DUAL_SIMPLEX to avoid "
+      "this warning.");
+    solver_settings->set_parameter(CUOPT_METHOD, CUOPT_METHOD_PDLP);
+  }
 
 #pragma omp parallel for num_threads(max_thread)
   for (std::size_t i = 0; i < size; ++i)

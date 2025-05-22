@@ -16,6 +16,8 @@
  */
 
 #include <cuopt/linear_programming/pdlp/solver_solution.hpp>
+#include <cuopt/logger.hpp>
+#include <math_optimization/solution_writer.hpp>
 #include <mip/mip_constants.hpp>
 
 #include <raft/common/nvtx.hpp>
@@ -32,7 +34,19 @@ optimization_problem_solution_t<i_t, f_t>::optimization_problem_solution_t(
   : primal_solution_{0, stream_view},
     dual_solution_{0, stream_view},
     reduced_cost_{0, stream_view},
-    termination_status_(termination_status)
+    termination_status_(termination_status),
+    error_status_(cuopt::logic_error("", cuopt::error_type_t::Success))
+{
+}
+
+template <typename i_t, typename f_t>
+optimization_problem_solution_t<i_t, f_t>::optimization_problem_solution_t(
+  cuopt::logic_error error_status_, rmm::cuda_stream_view stream_view)
+  : primal_solution_{0, stream_view},
+    dual_solution_{0, stream_view},
+    reduced_cost_{0, stream_view},
+    termination_status_(pdlp_termination_status_t::NoTermination),
+    error_status_(error_status_)
 {
 }
 
@@ -55,7 +69,8 @@ optimization_problem_solution_t<i_t, f_t>::optimization_problem_solution_t(
     var_names_(std::move(var_names)),
     row_names_(std::move(row_names)),
     termination_stats_(std::move(termination_stats)),
-    termination_status_(termination_status)
+    termination_status_(termination_status),
+    error_status_(cuopt::logic_error("", cuopt::error_type_t::Success))
 {
 }
 
@@ -76,7 +91,8 @@ optimization_problem_solution_t<i_t, f_t>::optimization_problem_solution_t(
     var_names_(std::move(var_names)),
     row_names_(std::move(row_names)),
     termination_stats_(std::move(termination_stats)),
-    termination_status_(termination_status)
+    termination_status_(termination_status),
+    error_status_(cuopt::logic_error("", cuopt::error_type_t::Success))
 {
 }
 
@@ -99,7 +115,8 @@ optimization_problem_solution_t<i_t, f_t>::optimization_problem_solution_t(
     var_names_(var_names),
     row_names_(row_names),
     termination_stats_(termination_stats),
-    termination_status_(termination_status)
+    termination_status_(termination_status),
+    error_status_(cuopt::logic_error("", cuopt::error_type_t::Success))
 {
 }
 
@@ -135,37 +152,41 @@ void optimization_problem_solution_t<i_t, f_t>::write_additional_termination_sta
   myfile << "\t\"Additional termination information\" : { " << std::endl;
   myfile << "\t\"Number of steps taken\" : " << termination_stats_.number_of_steps_taken << ","
          << std::endl;
-  myfile << "\t\"Total number of attempted steps\" : "
-         << termination_stats_.total_number_of_attempted_steps << "," << std::endl;
-  myfile << "\t\"Total solve time (ms)\" : " << termination_stats_.solve_time << "," << std::endl;
-
-  myfile << "\t\t\"Convergence measures\" : { " << std::endl;
-  myfile << "\t\t\t\"Absolute primal residual\" : " << termination_stats_.l2_primal_residual << ","
-         << std::endl;
-  myfile << "\t\t\t\"Relative primal residual\" : "
-         << termination_stats_.l2_relative_primal_residual << "," << std::endl;
-  myfile << "\t\t\t\"Absolute dual residual\" : " << termination_stats_.l2_dual_residual << ","
-         << std::endl;
-  myfile << "\t\t\t\"Relative dual residual\" : " << termination_stats_.l2_relative_dual_residual
-         << "," << std::endl;
-  myfile << "\t\t\t\"Primal objective value\" : " << termination_stats_.primal_objective << ","
-         << std::endl;
-  myfile << "\t\t\t\"Dual objective value\" : " << termination_stats_.dual_objective << ","
-         << std::endl;
-  myfile << "\t\t\t\"Gap\" : " << termination_stats_.gap << std::endl;
-  myfile << "\t\t\t\"Relative gap\" : " << termination_stats_.relative_gap << "," << std::endl;
-  myfile << "\t\t}, " << std::endl;
-
-  myfile << "\t\t\"Infeasibility measures\" : {" << std::endl;
-  myfile << "\t\t\t\"Maximum error for the linear constraints and sign constraints\" : "
-         << termination_stats_.max_primal_ray_infeasibility << "," << std::endl;
-  myfile << "\t\t\t\"Objective value for the extreme primal ray\" : "
-         << termination_stats_.primal_ray_linear_objective << "," << std::endl;
-  myfile << "\t\t\t\"Maximum constraint error\" : " << termination_stats_.max_dual_ray_infeasibility
-         << "," << std::endl;
-  myfile << "\t\t\t\"Objective value for the extreme dual ray\" : "
-         << termination_stats_.dual_ray_linear_objective << std::endl;
-  myfile << "\t\t} " << std::endl;
+  if (termination_stats_.solved_by_pdlp) {
+    myfile << "\t\"Total number of attempted steps\" : "
+           << termination_stats_.total_number_of_attempted_steps << "," << std::endl;
+  }
+  myfile << "\t\"Total solve time\" : " << termination_stats_.solve_time;
+  if (termination_stats_.solved_by_pdlp) {
+    myfile << "," << std::endl;
+    myfile << "\t\t\"Convergence measures\" : { " << std::endl;
+    myfile << "\t\t\t\"Absolute primal residual\" : " << termination_stats_.l2_primal_residual
+           << "," << std::endl;
+    myfile << "\t\t\t\"Relative primal residual\" : "
+           << termination_stats_.l2_relative_primal_residual << "," << std::endl;
+    myfile << "\t\t\t\"Absolute dual residual\" : " << termination_stats_.l2_dual_residual << ","
+           << std::endl;
+    myfile << "\t\t\t\"Relative dual residual\" : " << termination_stats_.l2_relative_dual_residual
+           << "," << std::endl;
+    myfile << "\t\t\t\"Primal objective value\" : " << termination_stats_.primal_objective << ","
+           << std::endl;
+    myfile << "\t\t\t\"Dual objective value\" : " << termination_stats_.dual_objective << ","
+           << std::endl;
+    myfile << "\t\t\t\"Gap\" : " << termination_stats_.gap << "," << std::endl;
+    myfile << "\t\t\t\"Relative gap\" : " << termination_stats_.relative_gap << std::endl;
+    myfile << "\t\t}, " << std::endl;
+    myfile << "\t\t\"Infeasibility measures\" : {" << std::endl;
+    myfile << "\t\t\t\"Maximum error for the linear constraints and sign constraints\" : "
+           << termination_stats_.max_primal_ray_infeasibility << "," << std::endl;
+    myfile << "\t\t\t\"Objective value for the extreme primal ray\" : "
+           << termination_stats_.primal_ray_linear_objective << "," << std::endl;
+    myfile << "\t\t\t\"Maximum constraint error\" : "
+           << termination_stats_.max_dual_ray_infeasibility << "," << std::endl;
+    myfile << "\t\t\t\"Objective value for the extreme dual ray\" : "
+           << termination_stats_.dual_ray_linear_objective << std::endl;
+    myfile << "\t\t} " << std::endl;
+  } else
+    myfile << std::endl;
 
   myfile << "\t} " << std::endl;
 }
@@ -271,13 +292,13 @@ std::string optimization_problem_solution_t<i_t, f_t>::get_termination_status_st
 }
 
 template <typename i_t, typename f_t>
-std::string optimization_problem_solution_t<i_t, f_t>::get_termination_status_string()
+std::string optimization_problem_solution_t<i_t, f_t>::get_termination_status_string() const
 {
   return get_termination_status_string(termination_status_);
 }
 
 template <typename i_t, typename f_t>
-f_t optimization_problem_solution_t<i_t, f_t>::get_objective_value()
+f_t optimization_problem_solution_t<i_t, f_t>::get_objective_value() const
 {
   return termination_stats_.primal_objective;
 }
@@ -314,9 +335,15 @@ rmm::device_uvector<f_t>& optimization_problem_solution_t<i_t, f_t>::get_reduced
 }
 
 template <typename i_t, typename f_t>
-pdlp_termination_status_t optimization_problem_solution_t<i_t, f_t>::get_termination_status()
+pdlp_termination_status_t optimization_problem_solution_t<i_t, f_t>::get_termination_status() const
 {
   return termination_status_;
+}
+
+template <typename i_t, typename f_t>
+cuopt::logic_error optimization_problem_solution_t<i_t, f_t>::get_error_status() const
+{
+  return error_status_;
 }
 
 template <typename i_t, typename f_t>
@@ -331,6 +358,26 @@ pdlp_warm_start_data_t<i_t, f_t>&
 optimization_problem_solution_t<i_t, f_t>::get_pdlp_warm_start_data()
 {
   return pdlp_warm_start_data_;
+}
+
+template <typename i_t, typename f_t>
+void optimization_problem_solution_t<i_t, f_t>::write_to_sol_file(
+  std::string_view filename, rmm::cuda_stream_view stream_view) const
+{
+  auto status = get_termination_status_string();
+  if (termination_status_ != pdlp_termination_status_t::Optimal &&
+      termination_status_ != pdlp_termination_status_t::PrimalFeasible) {
+    status = "Infeasible";
+  }
+
+  auto objective_value = get_objective_value();
+  std::vector<f_t> solution;
+  solution.resize(primal_solution_.size());
+  raft::copy(
+    solution.data(), primal_solution_.data(), primal_solution_.size(), stream_view.value());
+  RAFT_CUDA_TRY(cudaStreamSynchronize(stream_view.value()));
+  solution_writer_t::write_solution_to_sol_file(
+    std::string(filename), status, objective_value, var_names_, solution);
 }
 
 #if MIP_INSTANTIATE_FLOAT
