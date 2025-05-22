@@ -183,6 +183,10 @@ add_library(cuopt SHARED
   ${CUOPT_SRC_FILES}
 )
 
+set_source_files_properties(src/linear_programming/step_size_strategy/adaptive_step_size_strategy.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/step_size_strategy/adaptive_step_size_strategy.cu  PROPERTIES CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS};--fmad=false")
+set_source_files_properties(src/linear_programming/step_size_strategy/adaptive_step_size_strategy.cu  PROPERTIES CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS};--fmad=false")
+
 set_target_properties(cuopt
   PROPERTIES BUILD_RPATH "\$ORIGIN"
   INSTALL_RPATH "\$ORIGIN"

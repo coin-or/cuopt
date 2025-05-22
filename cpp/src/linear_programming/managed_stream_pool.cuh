@@ -1,7 +1,7 @@
 #pragma once
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/cuda_stream.hpp>
+#include <rmm/cuda_stream_view.hpp>
 #include <vector>
 
 namespace cuopt::linear_programming::detail {

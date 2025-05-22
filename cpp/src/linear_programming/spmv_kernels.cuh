@@ -22,14 +22,6 @@ namespace cuopt::linear_programming::detail {
 template <typename i_t, typename f_t, i_t MAX_EDGE_PER_CNST, typename view_t>
 __device__ f_t spmv(view_t view, raft::device_span<f_t> input, i_t tid, i_t beg, i_t end)
 {
-  // f_t out = 0.;
-  // for (i_t i = tid + beg; i < end; i += MAX_EDGE_PER_CNST) {
-  //   auto coeff = view.coeff[i];
-  //   auto var   = view.elem[i];
-  //   auto in    = input[var];
-  //   out += coeff * in;
-  // }
-  // return out;
   f_t out = 0.;
   f_t c   = 0.;
   for (i_t i = tid + beg; i < end; i += MAX_EDGE_PER_CNST) {
@@ -37,10 +29,9 @@ __device__ f_t spmv(view_t view, raft::device_span<f_t> input, i_t tid, i_t beg,
     auto var   = view.elem[i];
     auto in    = input[var];
     f_t y      = __fma_rn(coeff, in, -c);
-    // f_t y      = coeff * in - c;
-    f_t t = out + y;
-    c     = (t - out) - y;
-    out   = t;
+    f_t t      = out + y;
+    c          = (t - out) - y;
+    out        = t;
   }
   return out;
 }
@@ -61,8 +52,12 @@ __global__ void finalize_spmv_kernel(i_t heavy_beg_id,
   i_t item_off_beg = item_offsets[blockIdx.x];
   i_t item_off_end = item_offsets[blockIdx.x + 1];
   f_t out          = 0.;
+  f_t c            = 0.;
   for (i_t i = threadIdx.x + item_off_beg; i < item_off_end; i += blockDim.x) {
-    out += tmp_out[i];
+    f_t y = tmp_out[i] - c;
+    f_t t = out + y;
+    c     = (t - out) - y;
+    out   = t;
   }
   out = warp_reduce(temp_storage).Sum(out);
   if (threadIdx.x == 0) { functor(item_idx, out, output); }

@@ -123,8 +123,6 @@ void create_graph(const raft::handle_t* handle_ptr,
                   rmm::device_uvector<i_t>& pb_edge,
                   bool debug)
 {
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"create_graph pt 0\n";
   //  calculate degree and store in offsets
   thrust::transform(
     handle_ptr->get_thrust_policy(),
@@ -132,13 +130,10 @@ void create_graph(const raft::handle_t* handle_ptr,
     reorg_ids.end(),
     offsets.begin(),
     [off = make_span(pb_offsets)] __device__(auto id) { return off[id + 1] - off[id]; });
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"create_graph pt 1\n";
+
   //  create offsets
   thrust::exclusive_scan(
     handle_ptr->get_thrust_policy(), offsets.begin(), offsets.end(), offsets.begin());
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"create_graph pt 2\n";
 
   // copy adjacency lists and vertex properties
   graph_data_copy<i_t, f_t>
@@ -150,8 +145,6 @@ void create_graph(const raft::handle_t* handle_ptr,
                                                              make_span(pb_coeff),
                                                              make_span(pb_edge));
 
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"create_graph pt 3\n";
   if (debug) {
     rmm::device_scalar<i_t> errors(0, handle_ptr->get_stream());
     check_data<i_t, f_t>
@@ -163,13 +156,9 @@ void create_graph(const raft::handle_t* handle_ptr,
                                                                make_span(pb_coeff),
                                                                make_span(pb_edge),
                                                                errors.data());
-    // RAFT_CHECK_CUDA(stream.synchronize());
-    // std::cerr<<"create_graph pt 4\n";
     i_t error_count = errors.value(handle_ptr->get_stream());
     if (error_count != 0) { std::cerr << "adjacency list copy mismatch\n"; }
   }
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"create_graph pt 5\n";
 }
 
 template <typename i_t>
@@ -181,7 +170,6 @@ i_t create_heavy_item_block_segments(rmm::cuda_stream_view stream,
                                      const std::vector<i_t>& bin_offsets,
                                      rmm::device_uvector<i_t> const& offsets)
 {
-  // TODO : assert that bin_offsets.back() == offsets.size() - 1
   auto heavy_id_beg   = bin_offsets[std::log2(heavy_degree_cutoff)];
   auto n_items        = offsets.size() - 1;
   auto heavy_id_count = n_items - heavy_id_beg;
@@ -235,7 +223,6 @@ std::tuple<i_t, i_t, i_t> block_meta(rmm::cuda_stream_view stream,
                                      i_t heavy_w_cut_off,
                                      bool debug = false)
 {
-  std::cout << "block_meta\n";
   i_t block_size = 256;
 
   std::vector<i_t> warp_offsets;
@@ -256,7 +243,7 @@ std::tuple<i_t, i_t, i_t> block_meta(rmm::cuda_stream_view stream,
     warp_offsets.push_back(warp_count + warp_offsets.back());
   }
 
-  if (debug) {
+  if (false) {
     std::cout << "warp_offsets and id offsets\n";
     for (size_t i = 0; i < warp_offsets.size(); ++i) {
       std::cout << i << "\t";

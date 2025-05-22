@@ -22,13 +22,18 @@ namespace cuopt::linear_programming::detail {
 
 template <typename i_t, typename f_t>
 struct identity_functor {
-  __host__ __device__ __forceinline__ void operator()(i_t idx, f_t x, raft::device_span<f_t> output) const
+  __host__ __device__ __forceinline__ void operator()(i_t idx,
+                                                      f_t x,
+                                                      raft::device_span<f_t> output) const
   {
     output[idx] = x;
   }
 };
 
-template <typename i_t, typename f_t, typename view_t, typename functor_t = identity_functor<i_t, f_t>>
+template <typename i_t,
+          typename f_t,
+          typename view_t,
+          typename functor_t = identity_functor<i_t, f_t>>
 void spmv_call(rmm::cuda_stream_view stream,
                view_t view,
                raft::device_span<f_t> input,

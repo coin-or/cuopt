@@ -82,25 +82,16 @@ void spmv_t<i_t, f_t>::setup_lb_problem(problem_t<i_t, f_t>& problem_, bool debu
   tmp_cnst_ids.resize(n_constraints, handle_ptr->get_stream());
   tmp_vars_ids.resize(n_variables, handle_ptr->get_stream());
 
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"pt 0\n";
-
   cnst_binner.setup(pb->offsets.data(), nullptr, 0, n_constraints);
   auto dist_cnst = cnst_binner.run(tmp_cnst_ids, handle_ptr);
   vars_binner.setup(pb->reverse_offsets.data(), nullptr, 0, n_variables);
   auto dist_vars = vars_binner.run(tmp_vars_ids, handle_ptr);
-
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"pt 1\n";
 
   auto cnst_bucket = dist_cnst.degree_range();
   auto vars_bucket = dist_vars.degree_range();
 
   cnst_reorg_ids.resize(cnst_bucket.vertex_ids.size(), handle_ptr->get_stream());
   vars_reorg_ids.resize(vars_bucket.vertex_ids.size(), handle_ptr->get_stream());
-
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"pt 2\n";
 
   raft::copy(cnst_reorg_ids.data(),
              cnst_bucket.vertex_ids.data(),
@@ -111,9 +102,6 @@ void spmv_t<i_t, f_t>::setup_lb_problem(problem_t<i_t, f_t>& problem_, bool debu
              vars_bucket.vertex_ids.size(),
              handle_ptr->get_stream());
 
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"pt 3\n";
-
   create_graph<i_t, f_t>(handle_ptr,
                          cnst_reorg_ids,
                          offsets,
@@ -123,9 +111,6 @@ void spmv_t<i_t, f_t>::setup_lb_problem(problem_t<i_t, f_t>& problem_, bool debu
                          problem_.coefficients,
                          problem_.variables,
                          debug);
-
-  // RAFT_CHECK_CUDA(stream.synchronize());
-  // std::cerr<<"pt 4\n";
 
   create_graph<i_t, f_t>(handle_ptr,
                          vars_reorg_ids,
@@ -185,7 +170,6 @@ void spmv_t<i_t, f_t>::setup_lb_meta()
                w_t_r,
                heavy_degree_cutoff,
                true);
-  // std::cout << "num_blocks_heavy_cnst " << num_blocks_heavy_cnst << "\n";
 
   RAFT_CHECK_CUDA(stream.synchronize());
   stream.synchronize();
