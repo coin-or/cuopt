@@ -146,6 +146,7 @@ bool feasibility_pump_t<i_t, f_t>::linear_project_onto_polytope(solution_t<i_t, 
                                                                 f_t ratio_of_set_integers,
                                                                 bool longer_lp_run)
 {
+  raft::common::nvtx::range scope("linear_project_onto_polytope");
   CUOPT_LOG_DEBUG("linear projection of fp");
   auto h_assignment            = solution.get_host_assignment();
   auto h_variable_upper_bounds = cuopt::host_copy(solution.problem_ptr->variable_upper_bounds,
@@ -252,6 +253,7 @@ template <typename i_t, typename f_t>
 bool feasibility_pump_t<i_t, f_t>::random_round_with_fj(solution_t<i_t, f_t>& solution,
                                                         timer_t& round_timer)
 {
+  raft::common::nvtx::range scope("random_round_with_fj");
   const i_t n_tries = 200;
   bool is_feasible  = false;
   rmm::device_uvector<f_t> original_assign(solution.assignment, solution.handle_ptr->get_stream());
@@ -328,48 +330,6 @@ bool feasibility_pump_t<i_t, f_t>::random_round_with_fj(solution_t<i_t, f_t>& so
              solution.assignment.size(),
              solution.handle_ptr->get_stream());
   solution.handle_ptr->sync_stream();
-  return is_feasible;
-}
-
-template <typename i_t, typename f_t>
-bool feasibility_pump_t<i_t, f_t>::round_multiple_points(solution_t<i_t, f_t>& solution)
-{
-  n_fj_single_descents     = 0;
-  const f_t max_time_limit = last_lp_time * 0.1;
-  timer_t round_timer{min(max_time_limit, timer.remaining_time())};
-  bool is_feasible = random_round_with_fj(solution, round_timer);
-  if (is_feasible) {
-    CUOPT_LOG_DEBUG("Feasible found after random round with fj");
-    return true;
-  }
-  timer_t line_segment_timer{min(1., timer.remaining_time())};
-  i_t n_points_to_search  = n_fj_single_descents;
-  bool is_feasibility_run = true;
-  // create a copy, because assignment is changing within kernel and we want a separate point_1
-  rmm::device_uvector<f_t> starting_point(solution.assignment, solution.handle_ptr->get_stream());
-  is_feasible = line_segment_search.search_line_segment(solution,
-                                                        starting_point,
-                                                        lp_optimal_solution,
-                                                        n_points_to_search,
-                                                        is_feasibility_run,
-                                                        line_segment_timer);
-  if (is_feasible) {
-    CUOPT_LOG_DEBUG("Feasible found after line segment");
-    return true;
-  }
-  // lns.config.run_lp_and_loop = false;
-  // timer_t lns_timer(min(last_lp_time * 0.1, timer.remaining_time()));
-  // is_feasible = lns.do_lns(solution, lns_timer);
-  // if (is_feasible) {
-  //   CUOPT_LOG_DEBUG("Feasible found after inevitable feasibility");
-  //   return true;
-  // }
-  // TODO add the solution with the min distance to the population, if population is given
-  is_feasible = solution.round_nearest();
-  if (is_feasible) {
-    CUOPT_LOG_DEBUG("Feasible found after nearest rounding");
-    return true;
-  }
   return is_feasible;
 }
 
