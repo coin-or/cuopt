@@ -249,94 +249,11 @@ bool feasibility_pump_t<i_t, f_t>::linear_project_onto_polytope(solution_t<i_t, 
   return true;
 }
 
-template <typename i_t, typename f_t>
-bool feasibility_pump_t<i_t, f_t>::random_round_with_fj(solution_t<i_t, f_t>& solution,
-                                                        timer_t& round_timer)
-{
-  raft::common::nvtx::range scope("random_round_with_fj");
-  const i_t n_tries = 200;
-  bool is_feasible  = false;
-  rmm::device_uvector<f_t> original_assign(solution.assignment, solution.handle_ptr->get_stream());
-  rmm::device_uvector<f_t> best_rounding(solution.assignment, solution.handle_ptr->get_stream());
-  f_t best_fj_qual = std::numeric_limits<f_t>::max();
-  i_t i;
-  for (i = 0; i < n_tries; ++i) {
-    if (round_timer.check_time_limit()) { break; }
-    CUOPT_LOG_DEBUG("Trying random with FJ");
-    is_feasible = solution.round_nearest();
-    if (is_feasible) {
-      CUOPT_LOG_DEBUG("Feasible found after random round");
-      return true;
-    }
-    // run fj_single descent
-    fj.settings.mode = fj_mode_t::GREEDY_DESCENT;
-    // fj.settings.n_of_minimums_for_exit = 1;
-    fj.settings.update_weights  = false;
-    fj.settings.feasibility_run = true;
-    fj.settings.time_limit      = round_timer.remaining_time();
-    i_t original_sync_period    = fj.settings.parameters.sync_period;
-    // iterations_per_graph is 10
-    fj.settings.parameters.sync_period = 500;
-    is_feasible                        = fj.solve(solution);
-    fj.settings.parameters.sync_period = original_sync_period;
-    cuopt_assert(solution.test_number_all_integer(), "All integers must be rounded");
-    if (is_feasible) {
-      CUOPT_LOG_DEBUG("Feasible found after random round FJ run");
-      return true;
-    }
-    f_t current_qual = solution.get_quality(fj.cstr_weights, fj.objective_weight);
-    if (current_qual < best_fj_qual) {
-      CUOPT_LOG_DEBUG("Updating best quality of roundings %f", current_qual);
-      best_fj_qual = current_qual;
-      raft::copy(best_rounding.data(),
-                 solution.assignment.data(),
-                 solution.assignment.size(),
-                 solution.handle_ptr->get_stream());
-    }
-    raft::copy(solution.assignment.data(),
-               original_assign.data(),
-               solution.assignment.size(),
-               solution.handle_ptr->get_stream());
-  }
-  n_fj_single_descents                       = i;
-  const i_t min_sols_to_run_fj               = 1;
-  const i_t non_improving_local_minima_count = 200;
-  // if at least 5 solutions are explored, run longer fj
-  if (i >= min_sols_to_run_fj) {
-    // run longer fj on best sol
-    raft::copy(solution.assignment.data(),
-               best_rounding.data(),
-               solution.assignment.size(),
-               solution.handle_ptr->get_stream());
-    rmm::device_uvector<f_t> original_weights(fj.cstr_weights, solution.handle_ptr->get_stream());
-    fj.settings.mode                   = fj_mode_t::EXIT_NON_IMPROVING;
-    fj.settings.update_weights         = true;
-    fj.settings.feasibility_run        = true;
-    fj.settings.time_limit             = 0.5;
-    fj.settings.n_of_minimums_for_exit = non_improving_local_minima_count;
-    is_feasible                        = fj.solve(solution);
-    // restore the weights
-    raft::copy(fj.cstr_weights.data(),
-               original_weights.data(),
-               fj.cstr_weights.size(),
-               solution.handle_ptr->get_stream());
-  }
-  if (is_feasible) {
-    CUOPT_LOG_DEBUG("Feasible found after %d minima FJ run", non_improving_local_minima_count);
-    return true;
-  }
-  raft::copy(solution.assignment.data(),
-             original_assign.data(),
-             solution.assignment.size(),
-             solution.handle_ptr->get_stream());
-  solution.handle_ptr->sync_stream();
-  return is_feasible;
-}
-
 // round will use inevitable infeasibility while propagating the bounds
 template <typename i_t, typename f_t>
 bool feasibility_pump_t<i_t, f_t>::round(solution_t<i_t, f_t>& solution)
 {
+  raft::common::nvtx::range fun_scope("round");
   bool result;
   CUOPT_LOG_DEBUG("Rounding the point");
   timer_t bounds_prop_timer(min(2., timer.remaining_time()));
@@ -413,6 +330,7 @@ bool feasibility_pump_t<i_t, f_t>::test_fj_feasible(solution_t<i_t, f_t>& soluti
 template <typename i_t, typename f_t>
 bool feasibility_pump_t<i_t, f_t>::handle_cycle(solution_t<i_t, f_t>& solution)
 {
+  raft::common::nvtx::range fun_scope("handle_cycle");
   CUOPT_LOG_DEBUG("running handle cycle");
   bool is_feasible       = false;
   fp_fj_cycle_time_begin = timer.remaining_time();
@@ -520,6 +438,7 @@ void feasibility_pump_t<i_t, f_t>::save_best_excess_solution(solution_t<i_t, f_t
 template <typename i_t, typename f_t>
 void feasibility_pump_t<i_t, f_t>::relax_general_integers(solution_t<i_t, f_t>& solution)
 {
+  raft::common::nvtx::range fun_scope("relax_general_integers");
   orig_variable_types.resize(solution.problem_ptr->n_variables, solution.handle_ptr->get_stream());
 
   auto var_types  = make_span(solution.problem_ptr->variable_types);
@@ -569,6 +488,7 @@ void feasibility_pump_t<i_t, f_t>::revert_relaxation(solution_t<i_t, f_t>& solut
 template <typename i_t, typename f_t>
 bool feasibility_pump_t<i_t, f_t>::run_single_fp_descent(solution_t<i_t, f_t>& solution)
 {
+  raft::common::nvtx::range fun_scope("run_single_fp_descent");
   // start by doing nearest rounding
   solution.round_nearest();
   raft::copy(last_rounding.data(),
