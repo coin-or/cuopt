@@ -50,8 +50,14 @@ struct heavy_vertex_meta_t : public thrust::unary_function<i_t, i_t> {
 
   __device__ __forceinline__ void operator()(i_t id) const
   {
+    //if (offsets[id] >= vertex_id.size()) {
+    //  printf("vid oob id %d offsets[%d] = %d\n", id, id, offsets[id]);
+    //}
     vertex_id[offsets[id]] = id;
     if (id != 0) {
+      //if (offsets[id] >= pseudo_block_id.size()) {
+      //  printf("pbid oob id %d offsets[%d] = %d\n", id, id, offsets[id]);
+      //}
       pseudo_block_id[offsets[id]] = offsets[id - 1] - offsets[id] + 1;
     } else {
       pseudo_block_id[offsets[0]] = 0;
@@ -183,6 +189,7 @@ i_t create_heavy_item_block_segments(rmm::cuda_stream_view stream,
 
   // Inclusive scan so that each block can determine which item it belongs to
   item_block_segments.set_element_to_zero_async(0, stream);
+  //std::cerr<<"inclusive_scan 0\n";
   thrust::inclusive_scan(rmm::exec_policy(stream),
                          calc_blocks_per_vertex_iter,
                          calc_blocks_per_vertex_iter + heavy_id_count,
@@ -193,23 +200,41 @@ i_t create_heavy_item_block_segments(rmm::cuda_stream_view stream,
     pseudo_block_id.resize(num_blocks, stream);
     thrust::fill(rmm::exec_policy(stream), vertex_id.begin(), vertex_id.end(), i_t{-1});
     thrust::fill(rmm::exec_policy(stream), pseudo_block_id.begin(), pseudo_block_id.end(), i_t{1});
+  //{
+  //std::cerr<<"\nitem_block_segments\n";
+  //  auto seg = host_copy(item_block_segments);
+  //  for (size_t i = 0; i < item_block_segments.size(); ++i) {
+  //    std::cout<<"("<<i<<") "<<seg[i]<<"\t";
+  //  }
+  //std::cerr<<"\n heavy_id_count "<<heavy_id_count<<"\n";
+  //}
+  //std::cerr<<"\n\n";
+  //std::cerr<<"for_each\n";
+  //std::cerr<<"vertex_id size "<<vertex_id.size()<<"\n";
+  //std::cerr<<"item_block_segments size "<<item_block_segments.size()<<"\n";
+  //std::cerr<<"pseudo_block_id size "<<pseudo_block_id.size()<<"\n";
     thrust::for_each(
       rmm::exec_policy(stream),
       thrust::make_counting_iterator<i_t>(0),
-      thrust::make_counting_iterator<i_t>(item_block_segments.size()),
+      thrust::make_counting_iterator<i_t>(item_block_segments.size()-1),
       heavy_vertex_meta_t<i_t>{
         make_span(item_block_segments), make_span(vertex_id), make_span(pseudo_block_id)});
+  //RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+  //std::cerr<<"inclusive_scan 1\n";
     thrust::inclusive_scan(rmm::exec_policy(stream),
                            vertex_id.begin(),
                            vertex_id.end(),
                            vertex_id.begin(),
                            thrust::maximum<i_t>{});
+  //RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+  //std::cerr<<"inclusive_scan 2\n";
     thrust::inclusive_scan(rmm::exec_policy(stream),
                            pseudo_block_id.begin(),
                            pseudo_block_id.end(),
                            pseudo_block_id.begin(),
                            thrust::plus<i_t>{});
   }
+  RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
   // Total number of blocks that have to be launched
   return num_blocks;
 }

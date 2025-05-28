@@ -133,6 +133,10 @@ void spmv_t<i_t, f_t>::Ax(rmm::cuda_stream_view stream,
                           functor_t functor)
 {
   raft::common::nvtx::range scope("ax");
+  //std::cerr<<"spmv_call\n";
+  //std::cerr<<"cnst_sub_warp_count "<<cnst_sub_warp_count<<"\n";
+  //std::cerr<<"warp_cnst_id_offsets.back() "<<warp_cnst_id_offsets.back_element(stream)<<"\n";
+  //std::cerr<<"cnst_med_block_count "<<cnst_med_block_count<<"\n";
   spmv_call(stream,
             get_A_view(),
             input,
@@ -150,6 +154,7 @@ void spmv_t<i_t, f_t>::Ax(rmm::cuda_stream_view stream,
             heavy_cnst_pseudo_block_ids,
             heavy_cnst_block_segments,
             functor);
+  //std::cerr<<"spmv_call done\n";
 }
 
 template <typename i_t, typename f_t>
