@@ -51,34 +51,65 @@ for FILE in conda/environments/*.yaml dependencies.yaml; do
     done
 done
 
-# Update nightly image tag
-sed_runner 's/'cuopt\:[0-9][0-9].[0-9][0-9]'/'"cuopt:${NEXT_SHORT_TAG}"'/g' .github/workflows/managed_service_nightly.yaml
-sed_runner 's/'cuopt\:[0-9][0-9].[0-9][0-9].arm'/'"cuopt:${NEXT_SHORT_TAG}.arm"'/g' .github/workflows/managed_service_nightly.yaml
-
 # CMakeLists update
+
 sed_runner 's/'"VERSION [0-9][0-9].[0-9][0-9].[0-9][0-9]"'/'"VERSION ${NEXT_FULL_TAG}"'/g' cpp/CMakeLists.txt
 sed_runner 's/'"VERSION [0-9][0-9].[0-9][0-9].[0-9][0-9]"'/'"VERSION ${NEXT_FULL_TAG}"'/g' cpp/libmps_parser/CMakeLists.txt
-
 # Server version update
 sed_runner 's/'"\"version\": \"[0-9][0-9].[0-9][0-9]\""'/'"\"version\": \"${NEXT_SHORT_TAG}\""'/g' python/cuopt_server/cuopt_server/utils/data_definition.py
 sed_runner 's/'"\"client_version\": \"[0-9][0-9].[0-9][0-9]\""'/'"\"client_version\": \"${NEXT_SHORT_TAG}\""'/g' python/cuopt_server/cuopt_server/utils/routing/data_definition.py
 sed_runner 's/'"\"client_version\": \"[0-9][0-9].[0-9][0-9]\""'/'"\"client_version\": \"${NEXT_SHORT_TAG}\""'/g' python/cuopt_server/cuopt_server/utils/linear_programming/data_definition.py
 
 # Doc update
-sed_runner 's/'"version = \"[0-9][0-9].[0-9][0-9]\""'/'"version = \"${NEXT_SHORT_TAG}\""'/g' docs/cuopt/repo.toml
+
+sed_runner 's/'"version = \"[0-9][0-9].[0-9][0-9]\""'/'"version = \"${NEXT_SHORT_TAG}\""'/g' docs/cuopt/source/conf.py
+sed_runner 's/'"PROJECT_NUMBER         = [0-9][0-9].[0-9][0-9]"'/'"PROJECT_NUMBER         = ${NEXT_SHORT_TAG}"'/g' cpp/doxygen/Doxyfile
+# Update quick-start docs
+sed_runner 's/cuopt=[0-9][0-9].[0-9][0-9].[^ ]* python=[0-9].[0-9][0-9] cuda-version=[0-9][0-9].[0-9]/cuopt='${NEXT_SHORT_TAG}'.* python=3.12 cuda-version=12.8/g' docs/cuopt/source/cuopt-python/quick-start.rst
+sed_runner 's/libcuopt=[0-9][0-9].[0-9][0-9].[^ ]* python=[0-9].[0-9][0-9] cuda-version=[0-9][0-9].[0-9]/libcuopt='${NEXT_SHORT_TAG}'.* python=3.12 cuda-version=12.8/g' docs/cuopt/source/cuopt-c/quick-start.rst
+# Update server quick-start docs
+sed_runner 's/cuopt-server-cu12==[0-9][0-9].[0-9][0-9].[^ ]* cuopt-sh-client==[0-9][0-9].[0-9][0-9].[^ ]* nvidia-cuda-runtime-cu12==[0-9][0-9].[0-9]/cuopt-server-cu12=='${NEXT_SHORT_TAG}'.* cuopt-sh-client=='${NEXT_SHORT_TAG}'.* nvidia-cuda-runtime-cu12==12.8.*/g' docs/cuopt/source/cuopt-server/quick-start.rst
+sed_runner 's/cuopt-server=[0-9][0-9].[0-9][0-9].[^ ]* cuopt-sh-client=[0-9][0-9].[0-9][0-9].[^ ]* python=[0-9].[0-9][0-9] cuda-version=[0-9][0-9].[0-9]/cuopt-server='${NEXT_SHORT_TAG}'.* cuopt-sh-client='${NEXT_SHORT_TAG}'.* python=3.12 cuda-version=12.8/g' docs/cuopt/source/cuopt-server/quick-start.rst
+
+# Update doc version
+# Update VERSIONS.json
+VERSIONS_FILE="docs/cuopt/source/versions1.json"
+# Get the current preferred version
+CURRENT_PREFERRED=$(grep -B2 '"preferred": true' "${VERSIONS_FILE}" | grep '"version"' | awk -F'"' '{print $4}')
+
+# Update project.json
+PROJECT_FILE="docs/cuopt/source/project.json"
+sed_runner 's/\("version": "\)[0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]"/\1'${NEXT_FULL_TAG}'"/g' "${PROJECT_FILE}"
+# Remove preferred and latest flags, but keep the version entry
+sed_runner '/"name": "latest",/d' "${VERSIONS_FILE}"
+sed_runner '/"preferred": true,\?/d' "${VERSIONS_FILE}"
+# Remove all version entries except the version number and remove trailing commas
+sed_runner 's/.*"url": ".*\/",\?$//g' "${VERSIONS_FILE}"
+sed_runner 's/,\s*}/}/g' "${VERSIONS_FILE}"  # Remove trailing commas before closing braces
+sed_runner 's/,\s*$//g' "${VERSIONS_FILE}"   # Remove trailing commas at end of lines
+sed_runner '/^$/d' "${VERSIONS_FILE}"
+# Add new version entry with both preferred and latest flags
+NEW_VERSION_ENTRY='    {\n      "version": "'${NEXT_SHORT_TAG}'",\n      "url": "../'${NEXT_SHORT_TAG}'/",\n      "name": "latest",\n      "preferred": true\n    },'
+sed_runner "/\[/a\\${NEW_VERSION_ENTRY}" "${VERSIONS_FILE}"
 
 # RTD update
 sed_runner "/^set(cuopt_version/ s/[0-9][0-9].[0-9][0-9].[0-9][0-9]/${NEXT_FULL_TAG}/g" python/cuopt/CMakeLists.txt
 sed_runner "/^set(cuopt_version/ s/[0-9][0-9].[0-9][0-9].[0-9][0-9]/${NEXT_FULL_TAG}/g" python/cuopt/cuopt/linear_programming/CMakeLists.txt
+sed_runner "/^set(cuopt_version/ s/[0-9][0-9].[0-9][0-9].[0-9][0-9]/${NEXT_FULL_TAG}/g" python/libcuopt/CMakeLists.txt
 
 # Update nightly
 sed_runner 's/'"cuopt_version: \"[0-9][0-9].[0-9][0-9]\""'/'"cuopt_version: \"${NEXT_SHORT_TAG}\""'/g' .github/workflows/nightly.yaml
 
+# Update Service build
+sed_runner 's/'"nvcr.io\/j9mrpofbmtxd\/test\/cuopt:[0-9][0-9].[0-9][0-9]\(\.arm\)\?"'/'"nvcr.io\/j9mrpofbmtxd\/test\/cuopt:${NEXT_SHORT_TAG}\1"'/g' .github/workflows/service_nightly.yaml
+sed_runner 's/'"nvcr.io\/0616513341838337\/cuopt:[0-9][0-9].[0-9][0-9]\(\.arm\)\?"'/'"nvcr.io\/0616513341838337\/cuopt:${NEXT_SHORT_TAG}\1"'/g' .github/workflows/service_nightly.yaml
+
 # Update branch usage
-sed_runner 's/'"branch-[0-9][0-9].[0-9][0-9]"'/'"branch-${NEXT_SHORT_TAG}"'/g' docs/cuopt/docs/resources.rst
-sed_runner 's/'"branch-[0-9][0-9].[0-9][0-9]"'/'"branch-${NEXT_SHORT_TAG}"'/g' utilities/cuopt_user_onboarding/run_onboarding.sh
-sed_runner 's/'"cuopt-self-hosted:[0-9][0-9].[0-9][0-9]"'/'"cuopt-self-hosted:${NEXT_SHORT_TAG}"'/g' .github/workflows/managed_service_nightly.yaml
-sed_runner 's/'"cuopt-managed:[0-9][0-9].[0-9][0-9]"'/'"cuopt-managed:${NEXT_SHORT_TAG}"'/g' .github/workflows/managed_service_nightly.yaml
+sed_runner 's/'"branch-[0-9][0-9].[0-9][0-9]"'/'"branch-${NEXT_SHORT_TAG}"'/g' docs/cuopt/source/resources.rst
+
+# Update README.md
+sed_runner 's/cuopt-server=[0-9][0-9].[0-9][0-9] cuopt-sh-client=[0-9][0-9].[0-9][0-9] python=[0-9].[0-9][0-9] cuda-version=[0-9][0-9].[0-9]/cuopt-server='${NEXT_SHORT_TAG}' cuopt-sh-client='${NEXT_SHORT_TAG}' python=3.12 cuda-version=12.8/g' README.md
+
 
 
 # Fixing dependencies and pyproject.toml
