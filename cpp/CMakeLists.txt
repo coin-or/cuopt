@@ -29,7 +29,7 @@ rapids_cuda_init_architectures(CUOPT)
 
 project(
   CUOPT
-  VERSION 25.05.00
+  VERSION 25.08.00
   LANGUAGES CXX CUDA C
 )
 
