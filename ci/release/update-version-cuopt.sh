@@ -76,8 +76,6 @@ sed_runner 's|cuopt:[0-9]\{2\}\.[0-9]\{1,2\}\.[0-9]\+\(-cuda12\.8-\)\(py[0-9]\+\
 # Update doc version
 # Update VERSIONS.json
 VERSIONS_FILE="docs/cuopt/source/versions1.json"
-# Get the current preferred version
-CURRENT_PREFERRED=$(grep -B2 '"preferred": true' "${VERSIONS_FILE}" | grep '"version"' | awk -F'"' '{print $4}')
 
 # Update project.json
 PROJECT_FILE="docs/cuopt/source/project.json"
