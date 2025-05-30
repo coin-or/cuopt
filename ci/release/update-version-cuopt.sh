@@ -69,7 +69,10 @@ sed_runner 's/cuopt=[0-9][0-9].[0-9][0-9].[^ ]* python=[0-9].[0-9][0-9] cuda-ver
 sed_runner 's/libcuopt=[0-9][0-9].[0-9][0-9].[^ ]* python=[0-9].[0-9][0-9] cuda-version=[0-9][0-9].[0-9]/libcuopt='${NEXT_SHORT_TAG}'.* python=3.12 cuda-version=12.8/g' docs/cuopt/source/cuopt-c/quick-start.rst
 # Update server quick-start docs
 sed_runner 's/cuopt-server-cu12==[0-9][0-9].[0-9][0-9].[^ ]* cuopt-sh-client==[0-9][0-9].[0-9][0-9].[^ ]* nvidia-cuda-runtime-cu12==[0-9][0-9].[0-9]/cuopt-server-cu12=='${NEXT_SHORT_TAG}'.* cuopt-sh-client=='${NEXT_SHORT_TAG}'.* nvidia-cuda-runtime-cu12==12.8.*/g' docs/cuopt/source/cuopt-server/quick-start.rst
-sed_runner 's/cuopt-server=[0-9][0-9].[0-9][0-9].[^ ]* cuopt-sh-client=[0-9][0-9].[0-9][0-9].[^ ]* python=[0-9].[0-9][0-9] cuda-version=[0-9][0-9].[0-9]/cuopt-server='${NEXT_SHORT_TAG}'.* cuopt-sh-client='${NEXT_SHORT_TAG}'.* python=3.12 cuda-version=12.8/g' docs/cuopt/source/cuopt-server/quick-start.rst
+sed_runner 's/cuopt-server=[0-9][0-9].[0-9][0-9].[^ ]* cuopt-sh-client=[0-9][0-9].[0-9][0-9].[^ ]* python=[0-9].[0-9][0-9]/cuopt-server='${NEXT_SHORT_TAG}'.* cuopt-sh-client='${NEXT_SHORT_TAG}'.* python=3.12/g' docs/cuopt/source/cuopt-server/quick-start.rst
+# Update docker image tags in docs
+
+
 
 # Update doc version
 # Update VERSIONS.json
@@ -108,9 +111,22 @@ sed_runner 's/'"nvcr.io\/0616513341838337\/cuopt:[0-9][0-9].[0-9][0-9]\(\.arm\)\
 sed_runner 's/'"branch-[0-9][0-9].[0-9][0-9]"'/'"branch-${NEXT_SHORT_TAG}"'/g' docs/cuopt/source/resources.rst
 
 # Update README.md
+sed_runner 's/pip install --extra-index-url=https:\/\/pypi.nvidia.com cuopt-server-cu12==[0-9][0-9].[0-9] cuopt-sh-client==[0-9][0-9].[0-9] nvidia-cuda-runtime-cu12==[0-9][0-9].[0-9].*/pip install --extra-index-url=https:\/\/pypi.nvidia.com cuopt-server-cu12=='${NEXT_SHORT_TAG}' cuopt-sh-client=='${NEXT_SHORT_TAG}' nvidia-cuda-runtime-cu12==12.8.*/g' README.md
 sed_runner 's/cuopt-server=[0-9][0-9].[0-9][0-9] cuopt-sh-client=[0-9][0-9].[0-9][0-9] python=[0-9].[0-9][0-9] cuda-version=[0-9][0-9].[0-9]/cuopt-server='${NEXT_SHORT_TAG}' cuopt-sh-client='${NEXT_SHORT_TAG}' python=3.12 cuda-version=12.8/g' README.md
+sed_runner 's/docker pull nvidia\/cuopt:[0-9][0-9].[0-9].[0-9]-cuda12.8-py312/docker pull nvidia\/cuopt:'${NEXT_FULL_TAG}'-cuda12.8-py312/g' README.md
 
+# Update quick-start docs for pip installations and Docker commands
+# Update pip install commands with extra-index-url
+sed_runner 's/pip install --extra-index-url=https:\/\/pypi.nvidia.com cuopt-cu12==[0-9][0-9].[0-9].* nvidia-cuda-runtime-cu12==[0-9][0-9].[0-9].*/pip install --extra-index-url=https:\/\/pypi.nvidia.com cuopt-cu12=='${NEXT_SHORT_TAG}'.* nvidia-cuda-runtime-cu12==12.8.*/g' docs/cuopt/source/cuopt-python/quick-start.rst
+sed_runner 's/pip install --extra-index-url=https:\/\/pypi.nvidia.com libcuopt-cu12==[0-9][0-9].[0-9].* nvidia-cuda-runtime-cu12==[0-9][0-9].[0-9].[0-9]/pip install --extra-index-url=https:\/\/pypi.nvidia.com libcuopt-cu12=='${NEXT_SHORT_TAG}'.* nvidia-cuda-runtime-cu12==12.8.0/g' docs/cuopt/source/cuopt-c/quick-start.rst
 
+# Update Docker commands with exact version format
+sed_runner 's/docker pull nvidia\/cuopt:[0-9][0-9].[0-9].[0-9]-cuda12.8-py312/docker pull nvidia\/cuopt:'${NEXT_FULL_TAG}'-cuda12.8-py312/g' docs/cuopt/source/cuopt-python/quick-start.rst
+sed_runner 's/docker run --gpus all -it --rm nvidia\/cuopt:[0-9][0-9].[0-9].[0-9]-cuda12.8-py312/docker run --gpus all -it --rm nvidia\/cuopt:'${NEXT_FULL_TAG}'-cuda12.8-py312/g' docs/cuopt/source/cuopt-python/quick-start.rst
+
+# Update Docker commands in server quick-start with exact version format
+sed_runner 's/docker pull nvidia\/cuopt:[0-9][0-9].[0-9].[0-9]-cuda12.8-py312/docker pull nvidia\/cuopt:'${NEXT_FULL_TAG}'-cuda12.8-py312/g' docs/cuopt/source/cuopt-server/quick-start.rst
+sed_runner 's/docker run --gpus all -it --rm -p 8000:8000 -e CUOPT_SERVER_PORT=8000 nvidia\/cuopt:[0-9][0-9].[0-9].[0-9]-cuda12.8-py312 \/bin\/bash -c "python3 -m cuopt_server.cuopt_service"/docker run --gpus all -it --rm -p 8000:8000 nvidia\/cuopt:'${NEXT_FULL_TAG}'-cuda12.8-py312 \/bin\/bash -c "python3 -m cuopt_server.cuopt_service"/g' docs/cuopt/source/cuopt-server/quick-start.rst
 
 # Fixing dependencies and pyproject.toml
 
