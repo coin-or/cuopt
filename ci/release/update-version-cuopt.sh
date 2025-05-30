@@ -24,9 +24,10 @@ CURRENT_TAG=$(git tag --merged HEAD | grep -xE '^v.*' | sort --version-sort | ta
 NEXT_MAJOR=$(echo "$NEXT_FULL_TAG" | awk '{split($0, a, "."); print a[1]}')
 NEXT_MINOR=$(echo "$NEXT_FULL_TAG" | awk '{split($0, a, "."); print a[2]}')
 NEXT_SHORT_TAG=${NEXT_MAJOR}.${NEXT_MINOR}
-PY_NEXT_SHORT_TAG=${NEXT_MAJOR}.$(echo "$NEXT_MINOR" | tr -d '0')
+PY_NEXT_SHORT_TAG="${NEXT_MAJOR}.$(echo "$NEXT_MINOR" | sed 's/^0*//')"
 DOCKER_TAG=$(echo "$NEXT_FULL_TAG" | sed -E 's/^([0-9]{2})\.0*([0-9]+)\.0*([0-9]+).*/\1.\2.\3/')
 echo "$DOCKER_TAG"
+echo "$PY_NEXT_SHORT_TAG"
 
 
 echo "Preparing release $CURRENT_TAG => $NEXT_FULL_TAG"
@@ -66,12 +67,19 @@ sed_runner 's/'"\"client_version\": \"[0-9][0-9].[0-9][0-9]\""'/'"\"client_versi
 
 sed_runner 's/'"version = \"[0-9][0-9].[0-9][0-9]\""'/'"version = \"${NEXT_SHORT_TAG}\""'/g' docs/cuopt/source/conf.py
 sed_runner 's/'"PROJECT_NUMBER         = [0-9][0-9].[0-9][0-9]"'/'"PROJECT_NUMBER         = ${NEXT_SHORT_TAG}"'/g' cpp/doxygen/Doxyfile
-# Update quick-start docs
+# Update quick-start docs for conda
 sed_runner 's/cuopt=[0-9][0-9].[0-9][0-9].[^ ]* python=[0-9].[0-9][0-9] cuda-version=[0-9][0-9].[0-9]/cuopt='${NEXT_SHORT_TAG}'.* python=3.12 cuda-version=12.8/g' docs/cuopt/source/cuopt-python/quick-start.rst
 sed_runner 's/libcuopt=[0-9][0-9].[0-9][0-9].[^ ]* python=[0-9].[0-9][0-9] cuda-version=[0-9][0-9].[0-9]/libcuopt='${NEXT_SHORT_TAG}'.* python=3.12 cuda-version=12.8/g' docs/cuopt/source/cuopt-c/quick-start.rst
-# Update server quick-start docs
-sed_runner 's/cuopt-server-cu12==[0-9][0-9].[0-9][0-9].[^ ]* cuopt-sh-client==[0-9][0-9].[0-9][0-9].[^ ]* nvidia-cuda-runtime-cu12==[0-9][0-9].[0-9]/cuopt-server-cu12=='${NEXT_SHORT_TAG}'.* cuopt-sh-client=='${NEXT_SHORT_TAG}'.* nvidia-cuda-runtime-cu12==12.8.*/g' docs/cuopt/source/cuopt-server/quick-start.rst
 sed_runner 's/cuopt-server=[0-9][0-9].[0-9][0-9].[^ ]* cuopt-sh-client=[0-9][0-9].[0-9][0-9].[^ ]* python=[0-9].[0-9][0-9]/cuopt-server='${NEXT_SHORT_TAG}'.* cuopt-sh-client='${NEXT_SHORT_TAG}'.* python=3.12/g' docs/cuopt/source/cuopt-server/quick-start.rst
+# Update quick-start docs for pip
+#sed_runner "s/(cuopt-cu12==)[0-9]+\.[0-9]+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" docs/cuopt/source/cuopt-python/quick-start.rst
+sed_runner "s/\(cuopt-cu12==\)[0-9]\+\.[0-9]\+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" docs/cuopt/source/cuopt-python/quick-start.rst
+#sed_runner "s/(cuopt-cu12==)[0-9]+\.[0-9]+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" docs/cuopt/source/cuopt-python/quick-start.rst
+#sed_runner "s/(cuopt-cu12==)[0-9]+\.[0-9]+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" docs/cuopt/source/cuopt-python/quick-start.rst
+
+
+
+
 # Update docker image tags in docs
 sed_runner 's|cuopt:[0-9]\{2\}\.[0-9]\{1,2\}\.[0-9]\+\(-cuda12\.8-\)\(py[0-9]\+\)|cuopt:'"${DOCKER_TAG}"'\1\2|g' docs/cuopt/source/cuopt-python/quick-start.rst
 sed_runner 's|cuopt:[0-9]\{2\}\.[0-9]\{1,2\}\.[0-9]\+\(-cuda12\.8-\)\(py[0-9]\+\)|cuopt:'"${DOCKER_TAG}"'\1\2|g' docs/cuopt/source/cuopt-server/quick-start.rst
@@ -116,31 +124,7 @@ sed_runner 's/'"branch-[0-9][0-9].[0-9][0-9]"'/'"branch-${NEXT_SHORT_TAG}"'/g' d
 # Update README.md
 sed_runner 's/pip install --extra-index-url=https:\/\/pypi.nvidia.com cuopt-server-cu12==[0-9][0-9].[0-9] cuopt-sh-client==[0-9][0-9].[0-9] nvidia-cuda-runtime-cu12==[0-9][0-9].[0-9].*/pip install --extra-index-url=https:\/\/pypi.nvidia.com cuopt-server-cu12=='${PY_NEXT_SHORT_TAG}' cuopt-sh-client=='${PY_NEXT_SHORT_TAG}' nvidia-cuda-runtime-cu12==12.8.*/g' README.md
 sed_runner 's/cuopt-server=[0-9][0-9].[0-9][0-9] cuopt-sh-client=[0-9][0-9].[0-9][0-9] python=[0-9].[0-9][0-9] cuda-version=[0-9][0-9].[0-9]/cuopt-server='${NEXT_SHORT_TAG}' cuopt-sh-client='${NEXT_SHORT_TAG}' python=3.12 cuda-version=12.8/g' README.md
-#sed_runner 's/docker pull nvidia\/cuopt:[0-9][0-9].[0-9].[0-9]-cuda12.8-py312/docker pull nvidia\/cuopt:'${DOCKER_TAG}'-cuda12.8-py312/g' README.md
 sed_runner 's|cuopt:[0-9]\{2\}\.[0-9]\{1,2\}\.[0-9]\+\(-cuda12\.8-\)\(py[0-9]\+\)|cuopt:'"${DOCKER_TAG}"'\1\2|g' README.md
-#sed_runner "s|cuopt:[0-9]{2}\.[0-9]{1,2}\.[0-9]+(-cuda12\.8-)py([0-9]+)|cuopt:${DOCKER_TAG}\\1p\\2|g" README.md
-
-
-#sed_runner 's|(cuopt:25\.)[0-9]+(\.[0-9]+-cuda[0-9]+\.[0-9]+-)py([0-9]+)|\125.8.0\2p\3|g' README.md
-#sed_runner 's|(cuopt:)[0-9]{2}\.[0-9]+\.[0-9]+(-cuda[0-9]+\.[0-9]+-)py([0-9]+)|\1'${DOCKER_TAG}'\2p\3|g' README.md
-#sed_runner "s|(cuopt:)[0-9]{2}\.[0-9]+\.[0-9]+(-cuda[0-9]+\.[0-9]+-)py([0-9]+)|\1${DOCKER_TAG}\2p\3|g" README.md
-
-
-# Update quick-start docs for pip installations and Docker commands
-# Update pip install commands with extra-index-url
-sed_runner 's/pip install --extra-index-url=https:\/\/pypi.nvidia.com cuopt-cu12==[0-9][0-9].[0-9].* nvidia-cuda-runtime-cu12==[0-9][0-9].[0-9].*/pip install --extra-index-url=https:\/\/pypi.nvidia.com cuopt-cu12=='${NEXT_SHORT_TAG}'.* nvidia-cuda-runtime-cu12==12.8.*/g' docs/cuopt/source/cuopt-python/quick-start.rst
-sed_runner 's/pip install --extra-index-url=https:\/\/pypi.nvidia.com libcuopt-cu12==[0-9][0-9].[0-9].* nvidia-cuda-runtime-cu12==[0-9][0-9].[0-9].[0-9]/pip install --extra-index-url=https:\/\/pypi.nvidia.com libcuopt-cu12=='${NEXT_SHORT_TAG}'.* nvidia-cuda-runtime-cu12==12.8.0/g' docs/cuopt/source/cuopt-c/quick-start.rst
-
-# Update Docker commands with exact version format
-# sed_runner 's|(cuopt:25\.)[0-9]+(\.[0-9]+-cuda[0-9]+\.[0-9]+-)py([0-9]+)|\125.8.0\2p\3|g' docs/cuopt/source/cuopt-python/quick-start.rst
-
-#sed_runner 's/docker pull nvidia\/cuopt:[0-9][0-9]\.[0-9]\.[0-9a-z]*-cuda12.8-py312/docker pull nvidia\/cuopt:'${DOCKER_TAG}'-cuda12.8-py312/g' docs/cuopt/source/cuopt-python/quick-start.rst
-#sed_runner 's/docker run --gpus all -it --rm nvidia\/cuopt:[0-9][0-9]\.[0-9]\.[0-9a-z]*-cuda12.8-py312/docker run --gpus all -it --rm nvidia\/cuopt:'${DOCKER_TAG}'-cuda12.8-py312/g' docs/cuopt/source/cuopt-python/quick-start.rst
-
-# Update Docker commands in server quick-start with exact version format
-#sed_runner 's/docker pull nvidia\/cuopt:[0-9][0-9]\.[0-9]\.[0-9a-z]*-cuda12.8-py312/docker pull nvidia\/cuopt:'${DOCKER_TAG}'-cuda12.8-py312/g' docs/cuopt/source/cuopt-server/quick-start.rst
-#sed_runner 's/docker run --gpus all -it --rm -p 8000:8000 -e CUOPT_SERVER_PORT=8000 nvidia\/cuopt:[0-9][0-9]\.[0-9]\.[0-9a-z]*-cuda12.8-py312 \/bin\/bash -c "python3 -m cuopt_server.cuopt_service"/docker run --gpus all -it --rm -p 8000:8000 nvidia\/cuopt:'${DOCKER_TAG}'-cuda12.8-py312 \/bin\/bash -c "python3 -m cuopt_server.cuopt_service"/g' docs/cuopt/source/cuopt-server/quick-start.rst
-# Fixing dependencies and pyproject.toml
 
 DEPENDENCIES=(
   libcuopt
