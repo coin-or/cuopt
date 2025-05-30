@@ -131,6 +131,7 @@ sed_runner 's/docker run --gpus all -it --rm -p 8000:8000 -e CUOPT_SERVER_PORT=8
 # Fixing dependencies and pyproject.toml
 
 DEPENDENCIES=(
+  libcuopt
   cuopt
   cuopt-mps-parser
 )
