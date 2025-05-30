@@ -39,7 +39,7 @@ if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_LESS 12.0.0)
 endif()
 
 set(DEPENDENT_LIB_MAJOR_VERSION "25")
-set(DEPENDENT_LIB_MINOR_VERSION "04")
+set(DEPENDENT_LIB_MINOR_VERSION "08")
 
 rapids_cmake_write_version_file(include/cuopt/version_config.hpp)
 # ##################################################################################################
