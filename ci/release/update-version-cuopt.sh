@@ -37,14 +37,14 @@ function sed_runner() {
 # Centralized version file update
 echo "${NEXT_FULL_TAG}" > VERSION
 
-dependencies='cuopt-cu12 cuopt-mps-parser'
+dependencies='libcuopt-cu12 cuopt-cu12 cuopt-mps-parser'
 for FILE in conda/environments/*.yaml dependencies.yaml; do
     for dependency in ${dependencies}; do
         sed_runner "s/- ${dependency}==.*/- ${dependency}==${NEXT_SHORT_TAG}\.*/g" "${FILE}";
     done
 done
 
-dependencies='cuopt cuopt-mps-parser'
+dependencies='libcuopt cuopt cuopt-mps-parser'
 for FILE in conda/environments/*.yaml dependencies.yaml; do
     for dependency in ${dependencies}; do
         sed_runner "s/- \(&[^ ]* \)\?${dependency}==.*/- \1${dependency}==${PY_NEXT_SHORT_TAG}\.*/g" "${FILE}";
