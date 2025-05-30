@@ -26,6 +26,7 @@ NEXT_MINOR=$(echo "$NEXT_FULL_TAG" | awk '{split($0, a, "."); print a[2]}')
 NEXT_SHORT_TAG=${NEXT_MAJOR}.${NEXT_MINOR}
 PY_NEXT_SHORT_TAG="${NEXT_MAJOR}.$(echo "$NEXT_MINOR" | sed 's/^0*//')"
 DOCKER_TAG=$(echo "$NEXT_FULL_TAG" | sed -E 's/^([0-9]{2})\.0*([0-9]+)\.0*([0-9]+).*/\1.\2.\3/')
+echo "$NEXT_SHORT_TAG"
 echo "$DOCKER_TAG"
 echo "$PY_NEXT_SHORT_TAG"
 
@@ -43,14 +44,14 @@ echo "${NEXT_FULL_TAG}" > VERSION
 dependencies='libcuopt-cu12 cuopt-cu12 cuopt-mps-parser'
 for FILE in conda/environments/*.yaml dependencies.yaml; do
     for dependency in ${dependencies}; do
-        sed_runner "s/- ${dependency}==.*/- ${dependency}==${NEXT_SHORT_TAG}\.*/g" "${FILE}";
+        sed_runner "s/\(${dependency}==\)[0-9]\+\.[0-9]\+/\1${PY_NEXT_SHORT_TAG}/" "${FILE}"
     done
 done
 
 dependencies='libcuopt cuopt cuopt-mps-parser'
 for FILE in conda/environments/*.yaml dependencies.yaml; do
     for dependency in ${dependencies}; do
-        sed_runner "s/- \(&[^ ]* \)\?${dependency}==.*/- \1${dependency}==${PY_NEXT_SHORT_TAG}\.*/g" "${FILE}";
+        sed_runner "s/\(${dependency}==\)[0-9]\+\.[0-9]\+/\1${PY_NEXT_SHORT_TAG}/" "${FILE}"
     done
 done
 
@@ -74,9 +75,9 @@ sed_runner 's/cuopt-server=[0-9][0-9].[0-9][0-9].[^ ]* cuopt-sh-client=[0-9][0-9
 # Update quick-start docs for pip
 #sed_runner "s/(cuopt-cu12==)[0-9]+\.[0-9]+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" docs/cuopt/source/cuopt-python/quick-start.rst
 sed_runner "s/\(cuopt-cu12==\)[0-9]\+\.[0-9]\+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" docs/cuopt/source/cuopt-python/quick-start.rst
-#sed_runner "s/(cuopt-cu12==)[0-9]+\.[0-9]+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" docs/cuopt/source/cuopt-python/quick-start.rst
-#sed_runner "s/(cuopt-cu12==)[0-9]+\.[0-9]+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" docs/cuopt/source/cuopt-python/quick-start.rst
-
+sed_runner "s/\(libcuopt-cu12==\)[0-9]\+\.[0-9]\+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" docs/cuopt/source/cuopt-c/quick-start.rst
+sed_runner "s/\(cuopt-server-cu12==\)[0-9]\+\.[0-9]\+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" docs/cuopt/source/cuopt-server/quick-start.rst
+sed_runner "s/\(cuopt-sh-client==\)[0-9]\+\.[0-9]\+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" docs/cuopt/source/cuopt-server/quick-start.rst
 
 
 
@@ -118,11 +119,9 @@ sed_runner 's/'"cuopt_version: \"[0-9][0-9].[0-9][0-9]\""'/'"cuopt_version: \"${
 sed_runner 's/'"nvcr.io\/j9mrpofbmtxd\/test\/cuopt:[0-9][0-9].[0-9][0-9]\(\.arm\)\?"'/'"nvcr.io\/j9mrpofbmtxd\/test\/cuopt:${NEXT_SHORT_TAG}\1"'/g' .github/workflows/service_nightly.yaml
 sed_runner 's/'"nvcr.io\/0616513341838337\/cuopt:[0-9][0-9].[0-9][0-9]\(\.arm\)\?"'/'"nvcr.io\/0616513341838337\/cuopt:${NEXT_SHORT_TAG}\1"'/g' .github/workflows/service_nightly.yaml
 
-# Update branch usage
-sed_runner 's/'"branch-[0-9][0-9].[0-9][0-9]"'/'"branch-${NEXT_SHORT_TAG}"'/g' docs/cuopt/source/resources.rst
-
 # Update README.md
-sed_runner 's/pip install --extra-index-url=https:\/\/pypi.nvidia.com cuopt-server-cu12==[0-9][0-9].[0-9] cuopt-sh-client==[0-9][0-9].[0-9] nvidia-cuda-runtime-cu12==[0-9][0-9].[0-9].*/pip install --extra-index-url=https:\/\/pypi.nvidia.com cuopt-server-cu12=='${PY_NEXT_SHORT_TAG}' cuopt-sh-client=='${PY_NEXT_SHORT_TAG}' nvidia-cuda-runtime-cu12==12.8.*/g' README.md
+sed_runner "s/\(cuopt-server-cu12==\)[0-9]\+\.[0-9]\+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" README.md
+sed_runner "s/\(cuopt-sh-client==\)[0-9]\+\.[0-9]\+\.\\*/\1${PY_NEXT_SHORT_TAG}.\*/g" README.md
 sed_runner 's/cuopt-server=[0-9][0-9].[0-9][0-9] cuopt-sh-client=[0-9][0-9].[0-9][0-9] python=[0-9].[0-9][0-9] cuda-version=[0-9][0-9].[0-9]/cuopt-server='${NEXT_SHORT_TAG}' cuopt-sh-client='${NEXT_SHORT_TAG}' python=3.12 cuda-version=12.8/g' README.md
 sed_runner 's|cuopt:[0-9]\{2\}\.[0-9]\{1,2\}\.[0-9]\+\(-cuda12\.8-\)\(py[0-9]\+\)|cuopt:'"${DOCKER_TAG}"'\1\2|g' README.md
 
@@ -134,6 +133,6 @@ DEPENDENCIES=(
 
 for DEP in "${DEPENDENCIES[@]}"; do
   for FILE in python/*/pyproject.toml; do
-    sed_runner "/\"${DEP}==/ s/==.*\"/==${PY_NEXT_SHORT_TAG}.*\"/g" "${FILE}"
+    sed_runner "s/\(${DEP}==\)[0-9]\+\.[0-9]\+/\1${PY_NEXT_SHORT_TAG}/" "${FILE}"
   done
 done
