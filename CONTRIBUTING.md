@@ -98,11 +98,13 @@ cd $CUOPT_HOME
 
 #### Building with a conda environment
 
-**Note:** Using a conda environment is the easiest way to satisfy the library's dependencies.
+**Note:** Building from source without conda is very difficult. We highly recommend that users build cuOpt inside a conda environment
 
 - Create the conda development environment:
 
-Please install conda if you don't have it already. You can install it from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html)
+Please install conda if you don't have it already. You can install [miniforge](https://conda-forge.org/download/) or [miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#linux)
+
+**Note:** We recommend using [mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html) as the package manager for the conda environment. Mamba is faster and more efficient than conda. And it's the default package manager for miniforge. If you are using mamba just replace `conda` with `mamba` in the following commands.
 
 ```bash
 # create the conda environment (assuming in base `cuopt` directory)
