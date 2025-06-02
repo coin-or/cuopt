@@ -5,7 +5,7 @@
 NVIDIA® cuOpt™ is a GPU-accelerated optimization engine that excels in mixed integer linear programming (MILP), linear programming (LP), and vehicle routing problems (VRP). It enables near real-time solutions for large-scale challenges with millions of variables and constraints, offering 
 easy integration into existing solvers and seamless deployment across hybrid and multi-cloud environments.
 
-Core engine is written in C++ which is wrapped into C API, Python API and Server API.
+The core engine is written in C++ and wrapped with a C API, Python API and Server API.
 
 For the latest stable version ensure you are on the `main` branch.
 
@@ -102,7 +102,7 @@ Review the [CONTRIBUTING.md](CONTRIBUTING.md) file for information on how to con
 ## Resources
 
 - [libcuopt (C) documentation](https://docs.nvidia.com/cuopt/user-guide/latest/cuopt-c/index.html)
-- [cuopt (Python) documentation](https://docs.nvidia.com/cuopt/user-guide/latest/cuopt-python/index.html)
+- [cuopt (Python) documentation](https://docs.nvidia.com/cuopt/user-guidindex.html)
 - [cuopt (Server) documentation](https://docs.nvidia.com/cuopt/user-guide/latest/cuopt-server/index.html)
 - [Examples and Notebooks](https://github.com/NVIDIA/cuopt-examples)
 - [Test cuopt with NVIDIA Launchable](https://brev.nvidia.com/launchable/deploy?launchableID=env-2qIG6yjGKDtdMSjXHcuZX12mDNJ): Examples notebooks are pulled and hosted on [NVIDIA Launchable](https://docs.nvidia.com/brev/latest/).
