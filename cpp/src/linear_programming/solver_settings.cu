@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-#include <thrust/scatter.h>
 #include <cuopt/error.hpp>
 #include <cuopt/linear_programming/pdlp/pdlp_warm_start_data.hpp>
 #include <cuopt/linear_programming/pdlp/solver_settings.hpp>
@@ -23,8 +22,12 @@
 #include <math_optimization/solution_writer.hpp>
 #include <mip/mip_constants.hpp>
 #include <mps_parser/utilities/span.hpp>
+
 #include <raft/util/cudart_utils.hpp>
+
 #include <rmm/exec_policy.hpp>
+
+#include <thrust/scatter.h>
 
 namespace cuopt::linear_programming {
 
