@@ -24,6 +24,7 @@
 #include <mps_parser/utilities/span.hpp>
 #include <raft/util/cudart_utils.hpp>
 #include <rmm/exec_policy.hpp>
+#include <thrust/scatter.h>
 
 namespace cuopt::linear_programming {
 
