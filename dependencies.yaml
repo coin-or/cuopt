@@ -668,7 +668,6 @@ dependencies:
               - cuda-nvtx-dev
               - cuda-nvvm
               - cuda-crt
-              - pynvjitlink=0.5.0
 
   cuda_wheels:
     specific:
