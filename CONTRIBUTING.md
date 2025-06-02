@@ -64,18 +64,9 @@ source and contribute to its development. Other operating systems may be compati
 currently tested.
 
 Building NVIDIA cuOpt with the provided conda environment is recommended for users who wish to enable all
-library features. The following instructions are for building with a conda environment. Dependencies
-for a minimal build of NVIDIA cuOpt without using conda are also listed below.
+library features. The following instructions are for building with a conda environment.
 
 ### General requirements
-
-Compilers:
-
-These will be installed while creating the Conda environment
-
-* `gcc` version 13.0+
-* `nvcc` version 12.8+
-* `cmake` version 3.30.4+
 
 CUDA/GPU Runtime:
 
