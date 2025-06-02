@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+#include <thrust/scatter.h>
 #include <cuopt/error.hpp>
 #include <cuopt/linear_programming/pdlp/pdlp_warm_start_data.hpp>
 #include <cuopt/linear_programming/pdlp/solver_settings.hpp>
