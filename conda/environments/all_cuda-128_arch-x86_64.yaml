@@ -66,7 +66,7 @@ dependencies:
 - python>=3.10,<3.13
 - raft-dask==25.8.*,>=0.0.0a0
 - rapids-build-backend>=0.3.0,<0.4.0.dev0
-- rapids-dask-dependency==25.8.*
+- rapids-dask-dependency==25.8.*,>=0.0.0a0
 - rapids-logger==0.1.*,>=0.0.0a0
 - requests
 - rmm==25.8.*,>=0.0.0a0
