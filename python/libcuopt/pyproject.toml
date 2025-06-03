@@ -37,6 +37,10 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: C++",
     "Environment :: GPU :: NVIDIA CUDA",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
     "cuopt-mps-parser==25.8.*,>=0.0.0a0",
