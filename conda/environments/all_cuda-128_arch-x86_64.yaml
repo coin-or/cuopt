@@ -81,7 +81,7 @@ dependencies:
 - sphinxcontrib-openapi
 - sphinxcontrib-websupport
 - sysroot_linux-64==2.28
-- uvicorn==0.30.*
+- uvicorn==0.34.*
 - pip:
   - nvidia_sphinx_theme
   - swagger-plugin-for-sphinx
