@@ -404,7 +404,7 @@ dependencies:
           - *jsonref
           - *msgpack_numpy
           - *pandas
-          - uvicorn==0.30.*
+          - uvicorn==0.34.*
       - output_types: conda
         packages:
           - *msgpack_python
