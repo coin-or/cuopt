@@ -915,6 +915,8 @@ def create_from_file(file_path, is_pdp=False):
         ]
     )
 
+    rows = []
+
     for item in node_list:
         row = {
             "vertex": int(item[0]),
@@ -928,10 +930,9 @@ def create_from_file(file_path, is_pdp=False):
         if is_pdp:
             row["pickup_index"] = int(item[7])
             row["delivery_index"] = int(item[8])
-        df = cudf.concat(
-            [df, cudf.DataFrame(row)],
-            ignore_index=True,
-        )
+        rows.append(row)
+
+    df = cudf.DataFrame(rows)
 
     return df, vehicle_capacity, vehicle_num
 
