@@ -350,82 +350,36 @@ void bound_presolve_t<i_t, f_t>::set_updated_bounds(const raft::handle_t* handle
 template <typename i_t, typename f_t>
 void bound_presolve_t<i_t, f_t>::calc_and_set_updated_constraint_bounds(problem_t<i_t, f_t>& pb)
 {
-  i_t cross_bound_count_0 = thrust::transform_reduce(
-    pb.handle_ptr->get_thrust_policy(),
-    thrust::make_counting_iterator(0),
-    thrust::make_counting_iterator(pb.n_constraints),
-    [cnst_lb = make_span(pb.constraint_lower_bounds),
-     cnst_ub = make_span(pb.constraint_upper_bounds)] __device__(i_t idx) -> i_t {
-      return cnst_lb[idx] > cnst_ub[idx];
-    },
-    0,
-    thrust::plus<i_t>{});
-
   calculate_activity_on_problem_bounds(pb);
 
-  i_t infeas_cnst_count = thrust::transform_reduce(
-    pb.handle_ptr->get_thrust_policy(),
-    thrust::make_counting_iterator(0),
-    thrust::make_counting_iterator(pb.n_constraints),
-    [eps     = 1e-12,
-     min_act = make_span(upd.min_activity),
-     max_act = make_span(upd.max_activity),
-     cnst_lb = make_span(pb.constraint_lower_bounds),
-     cnst_ub = make_span(pb.constraint_upper_bounds)] __device__(i_t idx) -> i_t {
-      auto min_a = min_act[idx];
-      auto max_a = max_act[idx];
-      auto c_lb  = cnst_lb[idx];
-      auto c_ub  = cnst_ub[idx];
-      // if (min_a > max_a) { raft::swapVals(min_a, max_a); }
-      i_t infeas    = (c_lb > c_ub);
-      auto new_c_lb = max(c_lb, min_a);
-      auto new_c_ub = min(c_ub, max_a);
-      if (new_c_lb > new_c_ub) {
-        printf(
-          "idx %d new_c_lb %f c_lb %f min_a %f new_c_ub %f c_ub %f max_a %f "
-          "(c_lb - c_ub > 0) == %d (min_a - max_a > 0) == %d (new_c_lb - new_c_ub > 0) == %d\n",
-          idx,
-          new_c_lb,
-          c_lb,
-          min_a,
-          new_c_ub,
-          c_ub,
-          max_a,
-          (c_lb - c_ub) > 0,
-          (min_a - max_a) > 0,
-          (new_c_lb - new_c_ub) > 0);
-      }
-      cnst_lb[idx] = new_c_lb;
-      cnst_ub[idx] = new_c_ub;
-      return infeas;
-    },
-    0,
-    thrust::plus<i_t>{});
-  i_t cross_bound_count = thrust::transform_reduce(
-    pb.handle_ptr->get_thrust_policy(),
-    thrust::make_counting_iterator(0),
-    thrust::make_counting_iterator(pb.n_constraints),
-    [cnst_lb = make_span(pb.constraint_lower_bounds),
-     cnst_ub = make_span(pb.constraint_upper_bounds)] __device__(i_t idx) -> i_t {
-      return cnst_lb[idx] > cnst_ub[idx];
-    },
-    0,
-    thrust::plus<i_t>{});
-  std::cerr << "crossing bounds " << cross_bound_count_0 << " " << cross_bound_count << " "
-            << infeas_cnst_count << "\n";
-
-  // thrust::transform(pb.handle_ptr->get_thrust_policy(),
-  //                  upd.max_activity.begin(),
-  //                  upd.max_activity.end(),
-  //                  pb.constraint_upper_bounds.begin(),
-  //                  pb.constraint_upper_bounds.begin(),
-  //                  thrust::minimum<f_t>());
-  // thrust::transform(pb.handle_ptr->get_thrust_policy(),
-  //                   upd.min_activity.begin(),
-  //                   upd.min_activity.end(),
-  //                   pb.constraint_lower_bounds.begin(),
-  //                   pb.constraint_lower_bounds.begin(),
-  //                   thrust::maximum<f_t>());
+  thrust::for_each(pb.handle_ptr->get_thrust_policy(),
+                   thrust::make_counting_iterator(0),
+                   thrust::make_counting_iterator(pb.n_constraints),
+                   [pb      = pb.view(),
+                    min_act = make_span(upd.min_activity),
+                    max_act = make_span(upd.max_activity),
+                    cnst_lb = make_span(pb.constraint_lower_bounds),
+                    cnst_ub = make_span(pb.constraint_upper_bounds)] __device__(i_t idx) -> i_t {
+                     auto min_a    = min_act[idx];
+                     auto max_a    = max_act[idx];
+                     auto c_lb     = cnst_lb[idx];
+                     auto c_ub     = cnst_ub[idx];
+                     auto new_c_lb = max(c_lb, min_a);
+                     auto new_c_ub = min(c_ub, max_a);
+                     i_t infeas    = check_infeasibility<i_t, f_t>(min_a,
+                                                                max_a,
+                                                                new_c_lb,
+                                                                new_c_ub,
+                                                                pb.tolerances.absolute_tolerance,
+                                                                pb.tolerances.relative_tolerance);
+                     if (!infeas && (new_c_lb > new_c_ub)) {
+                       new_c_lb = (new_c_lb + new_c_ub) / 2;
+                       new_c_ub = (new_c_lb + new_c_ub) / 2;
+                     }
+                     cnst_lb[idx] = new_c_lb;
+                     cnst_ub[idx] = new_c_ub;
+                     return infeas;
+                   });
 }
 
 #if MIP_INSTANTIATE_FLOAT
