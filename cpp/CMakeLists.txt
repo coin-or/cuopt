@@ -140,6 +140,9 @@ elseif(CMAKE_CUDA_LINEINFO)
 endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
 
+list(APPEND CUOPT_CXX_FLAGS -G -g -O0)
+list(APPEND CUOPT_CUDA_FLAGS -G -lineinfo -Xcompiler=-rdynamic -O0)
+
 # ##################################################################################################
 # - find CPM based dependencies  ------------------------------------------------------------------
 rapids_cpm_init()
