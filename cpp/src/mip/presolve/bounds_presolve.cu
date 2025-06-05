@@ -374,7 +374,7 @@ void bound_presolve_t<i_t, f_t>::calc_and_set_updated_constraint_bounds(problem_
                                                                 pb.tolerances.relative_tolerance);
                      if (!infeas && (new_c_lb > new_c_ub)) {
                        new_c_lb = (new_c_lb + new_c_ub) / 2;
-                       new_c_ub = (new_c_lb + new_c_ub) / 2;
+                       new_c_ub = new_c_lb;
                      }
                      cnst_lb[idx] = new_c_lb;
                      cnst_ub[idx] = new_c_ub;
