@@ -40,7 +40,7 @@ jobs:
 
           while [[ "$STATUS" != "completed" || "$CONCLUSION" == "null" ]]; do
             echo "Status: $STATUS, Conclusion: $CONCLUSION — waiting 10 seconds..."
-            sleep 10
+            sleep 60
             STATUS=$(gh run view $RUN_ID --json status,conclusion --jq '.status')
             CONCLUSION=$(gh run view $RUN_ID --json status,conclusion --jq '.conclusion')
           done
