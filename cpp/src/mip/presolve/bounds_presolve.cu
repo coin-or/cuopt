@@ -367,7 +367,7 @@ void bound_presolve_t<i_t, f_t>::calc_and_set_updated_constraint_bounds(problem_
                      auto new_c_lb = max(c_lb, min_a);
                      auto new_c_ub = min(c_ub, max_a);
                      i_t infeas    = check_infeasibility<i_t, f_t>(
-                       min_a, max_a, new_c_lb, new_c_ub, pb.tolerances.absolute_tolerance, 0);
+                       min_a, max_a, new_c_lb, new_c_ub, pb.tolerances.presolve_absolute_tolerance);
                      if (!infeas && (new_c_lb > new_c_ub)) {
                        new_c_lb = (new_c_lb + new_c_ub) / 2;
                        new_c_ub = new_c_lb;
