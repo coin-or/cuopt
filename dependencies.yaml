@@ -435,7 +435,7 @@ dependencies:
     common:
       - output_types: conda
         packages:
-          - &libcuopt_unsuffixed libcuopt==25.8.*,>=0.0.0a0
+          - &libcuopt_unsuffixed libcuopt==25.8.*
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -448,13 +448,13 @@ dependencies:
               cuda: "12.*"
               cuda_suffixed: "true"
             packages:
-              - libcuopt-cu12==25.8.*,>=0.0.0a0
+              - libcuopt-cu12==25.8.*
           - {matrix: null, packages: [*libcuopt_unsuffixed]}
   depends_on_cuopt:
     common:
       - output_types: conda
         packages:
-          - &cuopt_unsuffixed cuopt==25.8.*,>=0.0.0a0
+          - &cuopt_unsuffixed cuopt==25.8.*
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -467,13 +467,13 @@ dependencies:
               cuda: "12.*"
               cuda_suffixed: "true"
             packages:
-              - cuopt-cu12==25.8.*,>=0.0.0a0
+              - cuopt-cu12==25.8.*
           - {matrix: null, packages: [*cuopt_unsuffixed]}
   depends_on_cuopt_server:
     common:
       - output_types: conda
         packages:
-          - &cuopt_server_unsuffixed cuopt-server==25.8.*,>=0.0.0a0
+          - &cuopt_server_unsuffixed cuopt-server==25.8.*
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -486,13 +486,13 @@ dependencies:
               cuda: "12.*"
               cuda_suffixed: "true"
             packages:
-              - cuopt-server-cu12==25.8.*,>=0.0.0a0
+              - cuopt-server-cu12==25.8.*
           - {matrix: null, packages: [*cuopt_server_unsuffixed]}
   depends_on_cuopt_sh_client:
     common:
       - output_types: [conda, requirements, pyproject]
         packages:
-          - &cuopt_sh_client_unsuffixed cuopt-sh-client==25.8.*,>=0.0.0a0
+          - &cuopt_sh_client_unsuffixed cuopt-sh-client==25.8.*
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
@@ -502,7 +502,7 @@ dependencies:
     common:
       - output_types: [requirements, pyproject, conda]
         packages:
-          - cuopt-mps-parser==25.8.*,>=0.0.0a0
+          - cuopt-mps-parser==25.8.*
       - output_types: requirements
         packages:
           # pip recognizes the index as a global option for the requirements.txt file
