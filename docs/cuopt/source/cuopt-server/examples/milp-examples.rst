@@ -2,8 +2,8 @@
 MILP Python Examples
 ========================================
 
-The major difference between this example and the LP example is that some of the variables are integers, so ``variable_types`` need to be shared. 
-The OpenAPI specification for the server is available in `open-api spec <../../open-api.html>`_. The example data is structured as per the OpenAPI specification for the server, please refer `LPData <../../open-api.html#/default/postrequest_cuopt_request_post>`_ under schema section. LP and MILP share same spec.
+The major difference between this example and the LP example is that some of the variables are integers, so ``variable_types`` need to be shared.
+The OpenAPI specification for the server is available in :doc:`open-api spec <../../open-api>`. The example data is structured as per the OpenAPI specification for the server, please refer :doc:`LPData data under "POST /cuopt/request" <../../open-api>` under schema section. LP and MILP share same spec.
 
 Generic Example
 ---------------
@@ -53,7 +53,7 @@ Generic Example
     )
 
     def repoll(solution, repoll_tries):
-        # If solver is still busy solving, the job will be assigned a request id and response is sent back in the 
+        # If solver is still busy solving, the job will be assigned a request id and response is sent back in the
         # following format {"reqId": <REQUEST-ID>}.
         # Solver needs to be re-polled for response using this <REQUEST-ID>.
 
@@ -70,7 +70,7 @@ Generic Example
         return solution
 
     solution = cuopt_service_client.get_LP_solve(data, response_type="dict")
-    
+
     # Number of repoll requests to be carried out for a successful response
     repoll_tries = 500
 
@@ -86,9 +86,9 @@ The response would be as follows:
     {
         "response": {
             "solver_response": {
-                "status": 1,
+                "status": "Optimal",
                 "solution": {
-                    "problem_category": 1,
+                    "problem_category": "MIP",
                     "primal_solution": [
                         0.0,
                         5000.0
@@ -120,9 +120,10 @@ The response would be as follows:
         "reqId": "524e2e37-3494-4c16-bd06-2a9bfd768f76"
     }
 
+.. _incumbent-and-logging-callback:
 
-Incumbent Solution
-------------------
+Incumbent and Logging Callback
+------------------------------
 
 The incumbent solution can be retrieved using a callback function as follows:
 
@@ -182,7 +183,7 @@ The incumbent solution can be retrieved using a callback function as follows:
     solution = cuopt_service_client.get_LP_solve(
         data, incumbent_callback=callback, response_type="dict", logging_callback=log_callback
     )
-    
+
     print(json.dumps(solution, indent=4))
 
 Log the callback response:
@@ -210,9 +211,9 @@ Incumbent callback response:
     {
         "response": {
             "solver_response": {
-                "status": 1,
+                "status": "Optimal",
                 "solution": {
-                    "problem_category": 1,
+                    "problem_category": "MIP",
                     "primal_solution": [
                         0.0,
                         5000.0
@@ -247,11 +248,13 @@ Incumbent callback response:
 
 An example with DataModel is available in the `Examples Notebooks Repository <https://github.com/NVIDIA/cuopt-examples>`_.
 
-The ``data`` argument to ``get_LP_solve`` may be a dictionary of the format shown in `MILP Open-API spec <../../open-api.html#operation/postrequest_cuopt_request_post>`_. More details on the response can be found under responses schema in `request and solution API spec <../../open-api.html#/default/getrequest_cuopt_request__id__get>`_.
+The ``data`` argument to ``get_LP_solve`` may be a dictionary of the format shown in :doc:`MILP Open-API spec <../../open-api>`. More details on the response can be found under responses schema in :doc:`"/cuopt/request" and "/cuopt/solution" API spec <../../open-api>`.
 They can be of different format as well, please check the documentation.
 
 
-Aborting a Running Job in Thin Client 
+.. _aborting-thin-client:
+
+Aborting a Running Job in Thin Client
 -------------------------------------
 
 .. code-block:: python
@@ -331,6 +334,8 @@ In case the user needs to update solver settings through CLI, the option ``-ss``
 
 .. note::
    Batch mode is not supported for MILP.
+
+.. _aborting-cli:
 
 Aborting a Running Job In CLI
 -----------------------------

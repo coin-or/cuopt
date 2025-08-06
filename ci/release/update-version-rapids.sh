@@ -43,16 +43,18 @@ sed_runner 's/'"DEPENDENT_LIB_MAJOR_VERSION \"[0-9][0-9]\""'/'"DEPENDENT_LIB_MAJ
 sed_runner 's/'"DEPENDENT_LIB_MINOR_VERSION \"[0-9][0-9]\""'/'"DEPENDENT_LIB_MINOR_VERSION \"${NEXT_MINOR}\""'/g' cpp/CMakeLists.txt
 
 # RTD update
-dependencies='cudf cudf-cu12 cuvs cuvs-cu12 libcudf rmm rmm-cu12 librmm libraft-headers pylibraft pylibraft-cu12 raft-dask rapids-dask-dependency'
+dependencies='cudf cudf-cu12 cuvs cuvs-cu12 libcudf librmm librmm-cu12 rmm rmm-cu12 librmm libraft-headers pylibraft pylibraft-cu12 raft-dask raft-dask-cu12 rapids-dask-dependency'
 for FILE in conda/environments/*.yaml dependencies.yaml; do
     for dependency in ${dependencies}; do
-        sed_runner "s/- ${dependency}==.*/- ${dependency}==${NEXT_SHORT_TAG_PEP440}\.*/g" "${FILE}";
+        sed_runner "s/\(${dependency}==\)[0-9]\+\.[0-9]\+/\1${NEXT_SHORT_TAG_PEP440}/" "${FILE}"
     done
 done
 
 # WORKFLOWS
 for FILE in .github/workflows/*.yaml; do
   sed_runner "/shared-workflows/ s/@.*/@branch-${NEXT_SHORT_TAG}/g" "${FILE}"
+  # CI image tags of the form {rapids_version}-{something}
+  sed_runner "s/:[0-9]*\\.[0-9]*-/:${NEXT_SHORT_TAG}-/g" "${FILE}"
 done
 
 # CI
@@ -68,6 +70,7 @@ sed_runner "/DOWNLOAD.*rapids-cmake/ s/branch-[0-9][0-9].[0-9][0-9]/branch-${NEX
 DEPENDENCIES=(
   cudf
   cuvs
+  librmm
   rmm
   pylibraft
   raft-dask
@@ -76,9 +79,9 @@ DEPENDENCIES=(
 
 for DEP in "${DEPENDENCIES[@]}"; do
   for FILE in dependencies.yaml conda/environments/*.yaml; do
-    sed_runner "/-.* ${DEP}==/ s/==.*/==${NEXT_SHORT_TAG_PEP440}.*/g" "${FILE}"
+    sed_runner "s/\(${DEP}==\)[0-9]\+\.[0-9]\+/\1${NEXT_SHORT_TAG_PEP440}/" "${FILE}"
   done
   for FILE in python/*/pyproject.toml; do
-    sed_runner "/\"${DEP}==/ s/==.*\"/==${NEXT_SHORT_TAG_PEP440}.*\"/g" "${FILE}"
+    sed_runner "s/\(${DEP}==\)[0-9]\+\.[0-9]\+/\1${NEXT_SHORT_TAG_PEP440}/" "${FILE}"
   done
 done

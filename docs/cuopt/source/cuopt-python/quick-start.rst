@@ -14,11 +14,11 @@ For CUDA 12.x:
 
 .. code-block:: bash
 
-    pip install --extra-index-url=https://pypi.nvidia.com cuopt-cu12==25.5.* nvidia-cuda-runtime-cu12==12.8.*
+    pip install --extra-index-url=https://pypi.nvidia.com cuopt-cu12==25.8.* nvidia-cuda-runtime-cu12==12.8.*
 
 
 .. note::
-   For development wheels which are available as nightlies, please update `--extra-index-url` to `https://pypi.anaconda.org/rapidsai-wheels-nightly/simple/`. 
+   For development wheels which are available as nightlies, please update `--extra-index-url` to `https://pypi.anaconda.org/rapidsai-wheels-nightly/simple/`.
 
 
 Conda
@@ -26,12 +26,9 @@ Conda
 
 NVIDIA cuOpt can be installed with Conda (via `miniforge <https://github.com/conda-forge/miniforge>`_) from the ``nvidia`` channel:
 
-For CUDA 12.x:
-
 .. code-block:: bash
 
-    conda install -c rapidsai -c conda-forge -c nvidia \
-        cuopt=25.05.* python=3.12 cuda-version=12.8
+    conda install -c rapidsai -c conda-forge -c nvidia cuopt=25.08.*
 
 .. note::
    For development conda packages which are available as nightlies, please update `-c rapidsai` to `-c rapidsai-nightly`.
@@ -44,16 +41,19 @@ NVIDIA cuOpt is also available as a container from Docker Hub:
 
 .. code-block:: bash
 
-    docker pull nvidia/cuopt:latest-cuda12.8-py312
+    docker pull nvidia/cuopt:latest-cuda12.8-py3.12
 
 .. note::
-   The ``latest`` tag is the latest stable release of cuOpt. If you want to use a specific version, you can use the ``<version>-cuda12.8-py312`` tag. For example, to use cuOpt 25.5.0, you can use the ``25.5.0-cuda12.8-py312`` tag. Please refer to `cuOpt dockerhub page <https://hub.docker.com/r/nvidia/cuopt>`_ for the list of available tags. 
+   The ``latest`` tag is the latest stable release of cuOpt. If you want to use a specific version, you can use the ``<version>-cuda12.8-py3.12`` tag. For example, to use cuOpt 25.5.0, you can use the ``25.5.0-cuda12.8-py3.12`` tag. Please refer to `cuOpt dockerhub page <https://hub.docker.com/r/nvidia/cuopt>`_ for the list of available tags.
+
+.. note::
+   The nightly version of cuOpt is available as ``[VERSION]a-cuda12.8-py3.12`` tag. For example, to use cuOpt 25.8.0a, you can use the ``25.8.0a-cuda12.8-py3.12`` tag.
 
 The container includes both the Python API and self-hosted server components. To run the container:
 
 .. code-block:: bash
 
-    docker run --gpus all -it --rm nvidia/cuopt:latest-cuda12.8-py312 
+    docker run --gpus all -it --rm nvidia/cuopt:latest-cuda12.8-py3.12 /bin/bash
 
 This will start an interactive session with cuOpt pre-installed and ready to use.
 
@@ -93,7 +93,7 @@ After installation, you can verify that NVIDIA cuOpt is working correctly by run
 Example Response:
 
 .. code-block:: text
-        
+
         route  arrival_stamp  truck_id  location      type
            0            0.0         0         0     Depot
            2            2.0         0         2  Delivery

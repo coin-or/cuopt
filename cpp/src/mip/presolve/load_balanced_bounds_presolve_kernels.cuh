@@ -98,40 +98,6 @@ __global__ void lb_calc_act_heavy_kernel(i_t id_range_beg,
   if (threadIdx.x == 0) { tmp_cnst_act[blockIdx.x] = act; }
 }
 
-template <typename i_t, typename f_t, typename f_t2, i_t BDIM, typename activity_view_t>
-__global__ void lb_calc_act_heavy_kernel(i_t id_range_beg,
-                                         raft::device_span<const i_t> item_block_segments,
-                                         i_t work_per_block,
-                                         activity_view_t view,
-                                         raft::device_span<f_t2> tmp_cnst_act)
-{
-  __shared__ i_t id_map;
-  __shared__ i_t pseudo_block_id;
-  if (threadIdx.x == 0) {
-    id_map = thrust::upper_bound(
-               thrust::seq, item_block_segments.begin(), item_block_segments.end(), blockIdx.x) -
-             item_block_segments.begin();
-    pseudo_block_id = blockIdx.x - item_block_segments[id_map - 1];
-  }
-  __syncthreads();
-  auto idx         = id_range_beg + id_map;
-  i_t item_off_beg = view.offsets[idx] + work_per_block * pseudo_block_id;
-  i_t item_off_end = min(item_off_beg + work_per_block, view.offsets[idx + 1]);
-
-  typedef cub::BlockReduce<f_t, BDIM> BlockReduce;
-  __shared__ typename BlockReduce::TempStorage temp_storage;
-
-  auto act = calc_act<i_t, f_t, f_t2, BDIM>(view, threadIdx.x, item_off_beg, item_off_end);
-
-  act.x = BlockReduce(temp_storage).Sum(act.x);
-  __syncthreads();
-  act.y = BlockReduce(temp_storage).Sum(act.y);
-
-  // don't subtract constraint bounds yet
-  // to be done in post processing in finalize_calc_act_kernel
-  if (threadIdx.x == 0) { tmp_cnst_act[blockIdx.x] = act; }
-}
-
 template <bool erase_inf_cnst, typename i_t, typename f_t, typename f_t2, typename activity_view_t>
 inline __device__ void write_cnst_slack(
   activity_view_t view, i_t cnst_idx, f_t2 cnst_lb_ub, f_t2 act, f_t eps)
@@ -491,9 +457,9 @@ __global__ void lb_upd_bnd_heavy_kernel(i_t id_range_beg,
   auto bounds =
     update_bounds<i_t, f_t, f_t2, BDIM>(view, threadIdx.x, item_off_beg, item_off_end, old_bounds);
 
-  bounds.x = BlockReduce(temp_storage).Reduce(bounds.x, cub::Max());
+  bounds.x = BlockReduce(temp_storage).Reduce(bounds.x, cuda::maximum());
   __syncthreads();
-  bounds.y = BlockReduce(temp_storage).Reduce(bounds.y, cub::Min());
+  bounds.y = BlockReduce(temp_storage).Reduce(bounds.y, cuda::minimum());
 
   if (threadIdx.x == 0) {
     write_updated_bounds(&tmp_bnd[blockIdx.x], is_int, view, bounds, old_bounds);
@@ -521,9 +487,9 @@ __global__ void finalize_upd_bnd_kernel(i_t heavy_vars_beg_id,
     bounds.x = max(bounds.x, bnd.x);
     bounds.y = min(bounds.y, bnd.y);
   }
-  bounds.x = warp_reduce(temp_storage).Reduce(bounds.x, cub::Max());
+  bounds.x = warp_reduce(temp_storage).Reduce(bounds.x, cuda::maximum());
   __syncwarp();
-  bounds.y = warp_reduce(temp_storage).Reduce(bounds.y, cub::Min());
+  bounds.y = warp_reduce(temp_storage).Reduce(bounds.y, cuda::minimum());
   if (threadIdx.x == 0) { view.vars_bnd[var_idx] = bounds; }
 }
 
@@ -547,9 +513,9 @@ __global__ void lb_upd_bnd_block_kernel(i_t id_range_beg, bounds_update_view_t v
   auto bounds =
     update_bounds<i_t, f_t, f_t2, BDIM>(view, threadIdx.x, item_off_beg, item_off_end, old_bounds);
 
-  bounds.x = BlockReduce(temp_storage).Reduce(bounds.x, cub::Max());
+  bounds.x = BlockReduce(temp_storage).Reduce(bounds.x, cuda::maximum());
   __syncthreads();
-  bounds.y = BlockReduce(temp_storage).Reduce(bounds.y, cub::Min());
+  bounds.y = BlockReduce(temp_storage).Reduce(bounds.y, cuda::minimum());
 
   if (threadIdx.x == 0) {
     write_updated_bounds(&view.vars_bnd[var_idx], is_int, view, bounds, old_bounds);
@@ -596,9 +562,9 @@ __global__ void lb_upd_bnd_sub_warp_kernel(i_t id_range_beg, i_t id_range_end, a
       view, p_tid, item_off_beg, item_off_end, old_bounds);
   }
 
-  bounds.x = warp_reduce(temp_storage).Reduce(bounds.x, cub::Max());
+  bounds.x = warp_reduce(temp_storage).Reduce(bounds.x, cuda::maximum());
   __syncwarp();
-  bounds.y = warp_reduce(temp_storage).Reduce(bounds.y, cub::Min());
+  bounds.y = warp_reduce(temp_storage).Reduce(bounds.y, cuda::minimum());
 
   if (head_flag && (idx < id_range_end)) {
     write_updated_bounds(&view.vars_bnd[var_idx], is_int, view, bounds, old_bounds);
@@ -646,9 +612,9 @@ __device__ void upd_bnd_sub_warp(i_t id_warp_beg, i_t id_range_end, bounds_updat
       view, p_tid, item_off_beg, item_off_end, old_bounds);
   }
 
-  bounds.x = warp_reduce(temp_storage).Reduce(bounds.x, cub::Max());
+  bounds.x = warp_reduce(temp_storage).Reduce(bounds.x, cuda::maximum());
   __syncwarp();
-  bounds.y = warp_reduce(temp_storage).Reduce(bounds.y, cub::Min());
+  bounds.y = warp_reduce(temp_storage).Reduce(bounds.y, cuda::minimum());
 
   if (head_flag && (idx < id_range_end)) {
     write_updated_bounds(&view.vars_bnd[var_idx], is_int, view, bounds, old_bounds);

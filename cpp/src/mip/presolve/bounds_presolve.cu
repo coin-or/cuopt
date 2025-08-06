@@ -49,8 +49,7 @@ namespace cuopt::linear_programming::detail {
 // bounds (if found) are applied to the problem.
 
 template <typename i_t, typename f_t>
-struct detect_infeas_redun_t
-  : public thrust::unary_function<thrust::tuple<f_t, f_t, f_t, f_t>, thrust::tuple<i_t, i_t>> {
+struct detect_infeas_redun_t {
   __device__ __forceinline__ thrust::tuple<i_t, i_t> operator()(
     thrust::tuple<f_t, f_t, f_t, f_t> t) const
   {
@@ -203,6 +202,7 @@ termination_criterion_t bound_presolve_t<i_t, f_t>::bound_update_loop(problem_t<
   }
   pb.handle_ptr->sync_stream();
   calculate_infeasible_redundant_constraints(pb);
+  solve_iter = iter;
 
   return criteria;
 }

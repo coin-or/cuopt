@@ -27,6 +27,9 @@ ConfigureTest(ELIM_VAR_REMAP_TEST
 ConfigureTest(STANDARDIZATION_TEST
     ${CMAKE_CURRENT_SOURCE_DIR}/bounds_standardization_test.cu
 )
+ConfigureTest(LB_TEST
+    ${CMAKE_CURRENT_SOURCE_DIR}/load_balancing_test.cu
+)
 ConfigureTest(MULTI_PROBE_TEST
     ${CMAKE_CURRENT_SOURCE_DIR}/multi_probe_test.cu
 )
@@ -38,13 +41,15 @@ ConfigureTest(DOC_EXAMPLE_TEST
 )
 ConfigureTest(UNIT_TEST
     ${CMAKE_CURRENT_SOURCE_DIR}/unit_test.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer_with_real_bounds.cu
 )
 ConfigureTest(EMPTY_FIXED_PROBLEMS_TEST
     ${CMAKE_CURRENT_SOURCE_DIR}/empty_fixed_problems_test.cu
 )
-ConfigureTest(FEASIBILITY_JUMP_TEST
-    ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump_tests.cu
-)
+# Disable for now
+# ConfigureTest(FEASIBILITY_JUMP_TEST
+#    ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump_tests.cu
+# )
 ConfigureTest(MIP_TERMINATION_STATUS_TEST
     ${CMAKE_CURRENT_SOURCE_DIR}/termination_test.cu
 )

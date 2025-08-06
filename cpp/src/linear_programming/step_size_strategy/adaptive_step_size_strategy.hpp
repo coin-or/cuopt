@@ -17,6 +17,7 @@
 #pragma once
 
 #include <utilities/event_handler.cuh>
+#include <utilities/unique_pinned_ptr.hpp>
 
 #include <linear_programming/cusparse_view.hpp>
 #include <linear_programming/pdhg.hpp>
@@ -27,10 +28,6 @@
 #include <rmm/cuda_stream_view.hpp>
 #include <rmm/device_scalar.hpp>
 #include <rmm/device_uvector.hpp>
-
-#include <thrust/host_vector.h>
-#include <thrust/mr/allocator.h>
-#include <thrust/system/cuda/memory_resource.h>
 
 namespace cuopt::linear_programming::detail {
 void set_adaptive_step_size_hyper_parameters(rmm::cuda_stream_view stream_view);
@@ -59,7 +56,8 @@ class adaptive_step_size_strategy_t {
 
   adaptive_step_size_strategy_t(raft::handle_t const* handle_ptr,
                                 rmm::device_scalar<f_t>* primal_weight,
-                                rmm::device_scalar<f_t>* step_size);
+                                rmm::device_scalar<f_t>* step_size,
+                                bool is_batch_mode = false);
 
   void compute_step_sizes(pdhg_solver_t<i_t, f_t>& pdhg_solver,
                           rmm::device_scalar<f_t>& primal_step_size,
@@ -99,11 +97,9 @@ class adaptive_step_size_strategy_t {
   // Host pinned memory scalar written in kernel
   // Combines both numerical_issue and valid_step size and save the device/host memcpy
   // -1: Error ; 0: Invalid step size ; 1: Valid step size
-  thrust::host_vector<i_t,
-                      thrust::mr::stateless_resource_allocator<
-                        i_t,
-                        thrust::system::cuda::universal_host_pinned_memory_resource>>
-    valid_step_size_;
+  // TODO: Replace with thrust::universal_host_pinned_vector once the bug is fixed:
+  // https://github.com/NVIDIA/cccl/issues/5027
+  std::unique_ptr<i_t, cuda_host_deleter<i_t>> valid_step_size_;
 
   rmm::device_scalar<f_t> interaction_;
   rmm::device_scalar<f_t> movement_;

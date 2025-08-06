@@ -243,10 +243,12 @@ DI node_t<i_t, f_t, REQUEST> create_depot_node(const typename problem_t<i_t, f_t
       ? problem.fleet_info.latest_time[vehicle_id]
       : min(problem.order_info.latest_time[DEPOT], problem.fleet_info.latest_time[vehicle_id]);
 
-  node.time_dim.window_start       = earliest;
-  node.time_dim.window_end         = latest;
-  node.time_dim.departure_forward  = node.time_dim.window_start;
-  node.time_dim.departure_backward = node.time_dim.window_end;
+  node.time_dim.window_start              = earliest;
+  node.time_dim.window_end                = latest;
+  node.time_dim.departure_forward         = node.time_dim.window_start;
+  node.time_dim.departure_backward        = node.time_dim.window_end;
+  node.time_dim.latest_arrival_forward    = latest;
+  node.time_dim.earliest_arrival_backward = earliest;
 
   constexpr_for<node_t<i_t, f_t, REQUEST>::max_capacity_dim>([&](auto i) {
     if (i < node.capacity_dim.n_capacity_dimensions) { node.capacity_dim.demand[i] = 0; }
@@ -277,10 +279,12 @@ constexpr node_t<i_t, f_t, REQUEST> create_depot_node(const problem_t<i_t, f_t>*
                     : min(problem->order_info_h.latest_time[DEPOT],
                           problem->fleet_info_h.latest_time[vehicle_id]);
 
-  node.time_dim.window_start       = earliest;
-  node.time_dim.window_end         = latest;
-  node.time_dim.departure_forward  = node.time_dim.window_start;
-  node.time_dim.departure_backward = node.time_dim.window_end;
+  node.time_dim.window_start              = earliest;
+  node.time_dim.window_end                = latest;
+  node.time_dim.departure_forward         = node.time_dim.window_start;
+  node.time_dim.departure_backward        = node.time_dim.window_end;
+  node.time_dim.latest_arrival_forward    = latest;
+  node.time_dim.earliest_arrival_backward = earliest;
 
   constexpr_for<node_t<i_t, f_t, REQUEST>::max_capacity_dim>([&](auto i) {
     if (i < node.capacity_dim.n_capacity_dimensions) { node.capacity_dim.demand[i] = 0; }
@@ -349,7 +353,7 @@ class solution_t {
       max_active_nodes_for_all_routes(sol_handle_->get_stream()),
       temp_nodes(problem_.get_num_orders(), sol_handle_->get_stream()),
       temp_stack_counter(sol_handle_->get_stream()),
-      temp_int_vector(max(problem_.get_num_orders(), problem_.get_fleet_size()),
+      temp_int_vector(std::max(problem_.get_num_orders(), problem_.get_fleet_size()),
                       sol_handle_->get_stream())
   {
     raft::common::nvtx::range fun_scope("solution_t");
