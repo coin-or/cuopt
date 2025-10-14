@@ -95,10 +95,11 @@ class problem_t {
   void resize_constraints(size_t matrix_size, size_t constraint_size, size_t var_size);
   void preprocess_problem();
   bool pre_process_assignment(rmm::device_uvector<f_t>& assignment);
-  void post_process_assignment(rmm::device_uvector<f_t>& current_assignment);
+  void post_process_assignment(rmm::device_uvector<f_t>& current_assignment,
+                               bool resize_to_original_problem = true);
   void post_process_solution(solution_t<i_t, f_t>& solution);
   void compute_transpose_of_problem();
-  f_t get_user_obj_from_solver_obj(f_t solver_obj);
+  f_t get_user_obj_from_solver_obj(f_t solver_obj) const;
   void compute_integer_fixed_problem();
   void fill_integer_fixed_problem(rmm::device_uvector<f_t>& assignment,
                                   const raft::handle_t* handle_ptr);
@@ -111,65 +112,67 @@ class problem_t {
   void get_host_user_problem(
     cuopt::linear_programming::dual_simplex::user_problem_t<i_t, f_t>& user_problem) const;
 
-  void write_as_mps(const std::string& path);
+  void add_cutting_plane_at_objective(f_t objective);
+  void compute_vars_with_objective_coeffs();
 
   struct view_t {
-    DI std::pair<i_t, i_t> reverse_range_for_var(i_t v) const
+    HDI std::pair<i_t, i_t> reverse_range_for_var(i_t v) const
     {
       cuopt_assert(v >= 0 && v < n_variables, "Variable should be within the range");
       return std::make_pair(reverse_offsets[v], reverse_offsets[v + 1]);
     }
 
-    DI std::pair<i_t, i_t> range_for_constraint(i_t c) const
+    HDI std::pair<i_t, i_t> range_for_constraint(i_t c) const
     {
       return std::make_pair(offsets[c], offsets[c + 1]);
     }
 
-    DI std::pair<i_t, i_t> range_for_related_vars(i_t v) const
+    HDI std::pair<i_t, i_t> range_for_related_vars(i_t v) const
     {
       return std::make_pair(related_variables_offsets[v], related_variables_offsets[v + 1]);
     }
 
-    DI bool check_variable_within_bounds(i_t v, f_t val) const
+    HDI bool check_variable_within_bounds(i_t v, f_t val) const
     {
       const f_t int_tol = tolerances.integrality_tolerance;
+      auto bounds       = variable_bounds[v];
       bool within_bounds =
-        val <= (variable_upper_bounds[v] + int_tol) && val >= (variable_lower_bounds[v] - int_tol);
+        val <= (get_upper(bounds) + int_tol) && val >= (get_lower(bounds) - int_tol);
       return within_bounds;
     }
 
-    DI bool is_integer_var(i_t v) const { return var_t::INTEGER == variable_types[v]; }
+    HDI bool is_integer_var(i_t v) const { return var_t::INTEGER == variable_types[v]; }
 
     // check if the variable is integer according to the tolerances
     // specified for this problem
-    DI bool is_integer(f_t val) const
+    HDI bool is_integer(f_t val) const
     {
       return raft::abs(round(val) - (val)) <= tolerances.integrality_tolerance;
     }
-    DI bool integer_equal(f_t val1, f_t val2) const
+    HDI bool integer_equal(f_t val1, f_t val2) const
     {
       return raft::abs(val1 - val2) <= tolerances.integrality_tolerance;
     }
 
-    DI f_t get_random_for_var(i_t v, raft::random::PCGenerator& rng) const
+    HDI f_t get_random_for_var(i_t v, raft::random::PCGenerator& rng) const
     {
       cuopt_assert(var_t::INTEGER != variable_types[v],
                    "Random value can only be called on continuous values");
-      f_t lower_bound = variable_lower_bounds[v];
-      f_t upper_bound = variable_upper_bounds[v];
+      auto bounds = variable_bounds[v];
 
       f_t val;
-      if (isfinite(lower_bound) && isfinite(upper_bound)) {
-        f_t diff = upper_bound - lower_bound;
-        val      = diff * rng.next_float() + lower_bound;
+      if (isfinite(get_lower(bounds)) && isfinite(get_upper(bounds))) {
+        f_t diff = get_upper(bounds) - get_lower(bounds);
+        val      = diff * rng.next_float() + get_lower(bounds);
       } else {
-        auto finite_bound = isfinite(lower_bound) ? lower_bound : upper_bound;
+        auto finite_bound = isfinite(get_lower(bounds)) ? get_lower(bounds) : get_upper(bounds);
         val               = finite_bound;
       }
-      cuopt_assert(isfinite(lower_bound), "Value must be finite");
+      cuopt_assert(isfinite(get_lower(bounds)), "Value must be finite");
       return val;
     }
 
+    using f_t2 = typename type_2<f_t>::type;
     typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances;
     i_t n_variables;
     i_t n_integer_vars;
@@ -184,8 +187,7 @@ class problem_t {
     raft::device_span<i_t> variables;
     raft::device_span<i_t> offsets;
     raft::device_span<f_t> objective_coefficients;
-    raft::device_span<f_t> variable_lower_bounds;
-    raft::device_span<f_t> variable_upper_bounds;
+    raft::device_span<f_t2> variable_bounds;
     raft::device_span<f_t> constraint_lower_bounds;
     raft::device_span<f_t> constraint_upper_bounds;
     raft::device_span<var_t> variable_types;
@@ -239,8 +241,8 @@ class problem_t {
 
   /** weights in the objective function */
   rmm::device_uvector<f_t> objective_coefficients;
-  rmm::device_uvector<f_t> variable_lower_bounds;
-  rmm::device_uvector<f_t> variable_upper_bounds;
+  using f_t2 = typename type_2<f_t>::type;
+  rmm::device_uvector<f_t2> variable_bounds;
   rmm::device_uvector<f_t> constraint_lower_bounds;
   rmm::device_uvector<f_t> constraint_upper_bounds;
   /* biggest between cstr lower and upper */
@@ -263,6 +265,7 @@ class problem_t {
   std::vector<std::string> row_names{};
   /** name of the objective (only a single objective is currently allowed) */
   std::string objective_name;
+  f_t objective_offset;
   bool is_scaled_{false};
   bool preprocess_called{false};
   // this LP state keeps the warm start data of some solution of
@@ -272,6 +275,8 @@ class problem_t {
   // is always the same and only the RHS changes. Using this helps in warm start.
   lp_state_t<i_t, f_t> lp_state;
   problem_fixing_helpers_t<i_t, f_t> fixing_helpers;
+  bool cutting_plane_added{false};
+  std::pair<std::vector<i_t>, std::vector<f_t>> vars_with_objective_coeffs;
 };
 
 }  // namespace linear_programming::detail

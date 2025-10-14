@@ -21,6 +21,9 @@
 #include <dual_simplex/mip_node.hpp>
 #include <dual_simplex/simplex_solver_settings.hpp>
 #include <dual_simplex/types.hpp>
+#include <utilities/omp_helpers.hpp>
+
+#include <omp.h>
 
 namespace cuopt::linear_programming::dual_simplex {
 
@@ -37,6 +40,14 @@ class pseudo_costs_t {
 
   void update_pseudo_costs(mip_node_t<i_t, f_t>* node_ptr, f_t leaf_objective);
 
+  void resize(i_t num_variables)
+  {
+    pseudo_cost_sum_down.resize(num_variables);
+    pseudo_cost_sum_up.resize(num_variables);
+    pseudo_cost_num_down.resize(num_variables);
+    pseudo_cost_num_up.resize(num_variables);
+  }
+
   void initialized(i_t& num_initialized_down,
                    i_t& num_initialized_up,
                    f_t& pseudo_cost_down_avg,
@@ -44,18 +55,19 @@ class pseudo_costs_t {
 
   i_t variable_selection(const std::vector<i_t>& fractional,
                          const std::vector<f_t>& solution,
-                         const std::vector<f_t>& lower,
-                         const std::vector<f_t>& upper,
-                         logger_t& log) const;
+                         logger_t& log);
 
   void update_pseudo_costs_from_strong_branching(const std::vector<i_t>& fractional,
-                                                 const std::vector<f_t>& root_soln,
-                                                 const std::vector<f_t>& strong_branch_down,
-                                                 const std::vector<f_t>& strong_branch_up);
+                                                 const std::vector<f_t>& root_soln);
   std::vector<f_t> pseudo_cost_sum_up;
   std::vector<f_t> pseudo_cost_sum_down;
   std::vector<i_t> pseudo_cost_num_up;
   std::vector<i_t> pseudo_cost_num_down;
+  std::vector<f_t> strong_branch_down;
+  std::vector<f_t> strong_branch_up;
+
+  omp_mutex_t mutex;
+  omp_atomic_t<i_t> num_strong_branches_completed = 0;
 };
 
 template <typename i_t, typename f_t>

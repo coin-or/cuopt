@@ -1,6 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION & AFFILIATES. All rights
- * reserved. SPDX-License-Identifier: Apache-2.0
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION &
+ * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ template <typename i_t, typename f_t>
 static dual_simplex::user_problem_t<i_t, f_t> cuopt_problem_to_simplex_problem(
   detail::problem_t<i_t, f_t>& model)
 {
-  dual_simplex::user_problem_t<i_t, f_t> user_problem;
+  dual_simplex::user_problem_t<i_t, f_t> user_problem(model.handle_ptr);
 
   int m                  = model.n_constraints;
   int n                  = model.n_variables;
@@ -39,10 +39,7 @@ static dual_simplex::user_problem_t<i_t, f_t> cuopt_problem_to_simplex_problem(
   user_problem.num_cols  = n;
   user_problem.objective = cuopt::host_copy(model.objective_coefficients);
 
-  dual_simplex::csr_matrix_t<i_t, f_t> csr_A;
-  csr_A.m         = m;
-  csr_A.n         = n;
-  csr_A.nz_max    = nz;
+  dual_simplex::csr_matrix_t<i_t, f_t> csr_A(m, n, nz);
   csr_A.x         = cuopt::host_copy(model.coefficients);
   csr_A.j         = cuopt::host_copy(model.variables);
   csr_A.row_start = cuopt::host_copy(model.offsets);
@@ -81,9 +78,9 @@ static dual_simplex::user_problem_t<i_t, f_t> cuopt_problem_to_simplex_problem(
     }
   }
   user_problem.num_range_rows = user_problem.range_rows.size();
-  user_problem.lower          = cuopt::host_copy(model.variable_lower_bounds);
-  user_problem.upper          = cuopt::host_copy(model.variable_upper_bounds);
-  user_problem.problem_name   = model.original_problem_ptr->get_problem_name();
+  std::tie(user_problem.lower, user_problem.upper) =
+    extract_host_bounds<f_t>(model.variable_bounds, model.handle_ptr);
+  user_problem.problem_name = model.original_problem_ptr->get_problem_name();
   if (model.row_names.size() > 0) {
     user_problem.row_names.resize(m);
     for (int i = 0; i < m; ++i) {
@@ -121,10 +118,8 @@ void translate_to_crossover_problem(const detail::problem_t<i_t, f_t>& problem,
 
   std::vector<f_t> pdlp_objective = cuopt::host_copy(problem.objective_coefficients);
 
-  dual_simplex::csr_matrix_t<i_t, f_t> csr_A;
-  csr_A.m         = problem.n_constraints;
-  csr_A.n         = problem.n_variables;
-  csr_A.nz_max    = problem.nnz;
+  dual_simplex::csr_matrix_t<i_t, f_t> csr_A(
+    problem.n_constraints, problem.n_variables, problem.nnz);
   csr_A.x         = cuopt::host_copy(problem.coefficients);
   csr_A.j         = cuopt::host_copy(problem.variables);
   csr_A.row_start = cuopt::host_copy(problem.offsets);
@@ -164,8 +159,7 @@ void translate_to_crossover_problem(const detail::problem_t<i_t, f_t>& problem,
   lp.obj_constant = problem.presolve_data.objective_offset;
   lp.obj_scale    = problem.presolve_data.objective_scaling_factor;
 
-  std::vector<f_t> lower = cuopt::host_copy(problem.variable_lower_bounds);
-  std::vector<f_t> upper = cuopt::host_copy(problem.variable_upper_bounds);
+  auto [lower, upper] = extract_host_bounds<f_t>(problem.variable_bounds, problem.handle_ptr);
 
   std::vector<f_t> constraint_lower = cuopt::host_copy(problem.constraint_lower_bounds);
   std::vector<f_t> constraint_upper = cuopt::host_copy(problem.constraint_upper_bounds);

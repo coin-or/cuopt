@@ -31,6 +31,7 @@
 #   --mip-heuristics-only : Run mip heuristics only
 #   --write-log-file : Write log file
 #   --num-cpu-threads : Number of CPU threads to use
+#   --presolve : Enable presolve (default: true for MIP problems, false for LP problems)
 #   --batch-num : Batch number.  This allows to split the work across multiple batches uniformly when resources are limited.
 #   --n-batches : Number of batches
 #   --log-to-console : Log to console
@@ -74,9 +75,11 @@ Optional Arguments:
     --mip-heuristics-only  Run mip heuristics only
     --write-log-file   Write log file
     --num-cpu-threads  Number of CPU threads to use
+    --presolve         Enable presolve (default: true for MIP problems, false for LP problems)
     --batch-num        Batch number
     --n-batches        Number of batches
     --log-to-console   Log to console
+    --model-list       File containing a list of models to run
     -h, --help         Show this help message and exit
 
 Examples:
@@ -107,48 +110,68 @@ fi
 while [[ $# -gt 0 ]]; do
     case $1 in
         --path)
+            echo "MPS_DIR: $2"
             MPS_DIR="$2"
             shift 2
             ;;
         --ngpus)
+            echo "GPU_COUNT: $2"
             GPU_COUNT="$2"
             shift 2
             ;;
         --time-limit)
+            echo "TIME_LIMIT: $2"
             TIME_LIMIT="$2"
             shift 2
             ;;
         --output-dir)
+            echo "OUTPUT_DIR: $2"
             OUTPUT_DIR="$2"
             shift 2
             ;;
         --relaxation)
-            echo "Running relaxation"
+            echo "RELAXATION: true"
             RELAXATION=true
             shift
             ;;
         --mip-heuristics-only)
+            echo "MIP_HEURISTICS_ONLY: true"
             MIP_HEURISTICS_ONLY=true
             shift
             ;;
         --write-log-file)
-            WRITE_LOG_FILE="$2"
-            shift 2
+            echo "WRITE_LOG_FILE: true"
+            WRITE_LOG_FILE=true
+            shift
             ;;
         --num-cpu-threads)
+            echo "NUM_CPU_THREADS: $2"
             NUM_CPU_THREADS="$2"
             shift 2
             ;;
+        --presolve)
+            echo "PRESOLVE: $2"
+            PRESOLVE="$2"
+            shift 2
+            ;;
         --batch-num)
+            echo "BATCH_NUM: $2"
             BATCH_NUM="$2"
             shift 2
             ;;
         --n-batches)
+            echo "N_BATCHES: $2"
             N_BATCHES="$2"
             shift 2
             ;;
         --log-to-console)
+            echo "LOG_TO_CONSOLE: $2"
             LOG_TO_CONSOLE="$2"
+            shift 2
+            ;;
+        --model-list)
+            echo "MODEL_LIST: $2"
+            MODEL_LIST="$2"
             shift 2
             ;;
         *)
@@ -173,10 +196,11 @@ RELAXATION=${RELAXATION:-false}
 MIP_HEURISTICS_ONLY=${MIP_HEURISTICS_ONLY:-false}
 WRITE_LOG_FILE=${WRITE_LOG_FILE:-false}
 NUM_CPU_THREADS=${NUM_CPU_THREADS:-1}
+PRESOLVE=${PRESOLVE:-true}
 BATCH_NUM=${BATCH_NUM:-0}
 N_BATCHES=${N_BATCHES:-1}
 LOG_TO_CONSOLE=${LOG_TO_CONSOLE:-true}
-
+MODEL_LIST=${MODEL_LIST:-}
 # Determine GPU list
 if [[ -n "$CUDA_VISIBLE_DEVICES" ]]; then
     IFS=',' read -ra GPU_LIST <<< "$CUDA_VISIBLE_DEVICES"
@@ -188,8 +212,49 @@ else
 fi
 GPU_COUNT=${#GPU_LIST[@]}
 
-# Gather all mps files into an array
-mapfile -t mps_files < <(ls "$MPS_DIR"/*.mps)
+# Ensure all entries in MODEL_LIST have .mps extension
+if [[ -n "$MODEL_LIST" && -f "$MODEL_LIST" ]]; then
+    # Create a temporary file to store the updated model list
+    TMP_MODEL_LIST=$(mktemp)
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip empty lines
+        [[ -z "$line" ]] && continue
+        # If the line does not end with .mps, append it
+        if [[ "$line" != *.mps ]]; then
+            echo "${line}.mps" >> "$TMP_MODEL_LIST"
+        else
+            echo "$line" >> "$TMP_MODEL_LIST"
+        fi
+    done < "$MODEL_LIST"
+    # Overwrite the original MODEL_LIST with the updated one
+    mv "$TMP_MODEL_LIST" "$MODEL_LIST"
+fi
+
+
+# Gather all mps files into an array, either from the model list or from the directory
+if [[ -n "$MODEL_LIST" ]]; then
+    if [[ ! -f "$MODEL_LIST" ]]; then
+        echo "Model list file not found: $MODEL_LIST"
+        exit 1
+    fi
+    mapfile -t mps_files < <(grep -v '^\s*$' "$MODEL_LIST" | sed "s|^|$MPS_DIR/|")
+    # Optionally, check that all files exist
+    missing_files=()
+    for f in "${mps_files[@]}"; do
+        if [[ ! -f "$f" ]]; then
+            missing_files+=("$f")
+        fi
+    done
+    if (( ${#missing_files[@]} > 0 )); then
+        echo "The following files from the model list do not exist in $MPS_DIR:"
+        for f in "${missing_files[@]}"; do
+            echo "  $f"
+        done
+        exit 1
+    fi
+else
+    mapfile -t mps_files < <(ls "$MPS_DIR"/*.mps)
+fi
 
 # Calculate batch size and start/end indices
 batch_size=$(( (${#mps_files[@]} + N_BATCHES - 1) / N_BATCHES ))
@@ -248,7 +313,7 @@ worker() {
         echo "GPU $gpu_id processing $my_index"
 
         # Build arguments string
-        args=""      
+        args=""
         if [ -n "$NUM_CPU_THREADS" ]; then
             args="$args --num-cpu-threads $NUM_CPU_THREADS"
         fi
@@ -261,9 +326,8 @@ worker() {
         if [ "$RELAXATION" = true ]; then
             args="$args --relaxation"
         fi
-        if [ "$LOG_TO_CONSOLE" = true ]; then
-            args="$args --log-to-console $LOG_TO_CONSOLE"
-        fi
+        args="$args --log-to-console $LOG_TO_CONSOLE"
+        args="$args --presolve $PRESOLVE"
 
         CUDA_VISIBLE_DEVICES=$gpu_id cuopt_cli "$mps_file" --time-limit $TIME_LIMIT $args
     done

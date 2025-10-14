@@ -86,11 +86,17 @@ solver_settings_t<i_t, f_t>::solver_settings_t() : pdlp_settings(), mip_settings
    };
 
   // Int parameters
+  // TODO should we have Stable2 and Methodolical1 here?
   int_parameters = {
     {CUOPT_ITERATION_LIMIT, &pdlp_settings.iteration_limit, 0, std::numeric_limits<i_t>::max(), std::numeric_limits<i_t>::max()},
-    {CUOPT_PDLP_SOLVER_MODE, reinterpret_cast<int*>(&pdlp_settings.pdlp_solver_mode), CUOPT_PDLP_SOLVER_MODE_STABLE1, CUOPT_PDLP_SOLVER_MODE_FAST1, CUOPT_PDLP_SOLVER_MODE_STABLE2},
-    {CUOPT_METHOD, reinterpret_cast<int*>(&pdlp_settings.method), CUOPT_METHOD_CONCURRENT, CUOPT_METHOD_DUAL_SIMPLEX, CUOPT_METHOD_CONCURRENT},
-    {CUOPT_NUM_CPU_THREADS, &mip_settings.num_cpu_threads, -1, std::numeric_limits<i_t>::max(), -1}
+    {CUOPT_PDLP_SOLVER_MODE, reinterpret_cast<int*>(&pdlp_settings.pdlp_solver_mode), CUOPT_PDLP_SOLVER_MODE_STABLE1, CUOPT_PDLP_SOLVER_MODE_STABLE3, CUOPT_PDLP_SOLVER_MODE_STABLE3},
+    {CUOPT_METHOD, reinterpret_cast<int*>(&pdlp_settings.method), CUOPT_METHOD_CONCURRENT, CUOPT_METHOD_BARRIER, CUOPT_METHOD_CONCURRENT},
+    {CUOPT_NUM_CPU_THREADS, &mip_settings.num_cpu_threads, -1, std::numeric_limits<i_t>::max(), -1},
+    {CUOPT_AUGMENTED, &pdlp_settings.augmented, -1, 1, -1},
+    {CUOPT_FOLDING, &pdlp_settings.folding, -1, 1, -1},
+    {CUOPT_DUALIZE, &pdlp_settings.dualize, -1, 1, -1},
+    {CUOPT_ORDERING, &pdlp_settings.ordering, -1, 1, -1},
+    {CUOPT_BARRIER_DUAL_INITIAL_POINT, &pdlp_settings.barrier_dual_initial_point, -1, 1, -1}
   };
 
     // Bool parameters
@@ -104,7 +110,12 @@ solver_settings_t<i_t, f_t>::solver_settings_t() : pdlp_settings(), mip_settings
     {CUOPT_MIP_HEURISTICS_ONLY, &mip_settings.heuristics_only, false},
     {CUOPT_LOG_TO_CONSOLE, &pdlp_settings.log_to_console, true},
     {CUOPT_LOG_TO_CONSOLE, &mip_settings.log_to_console, true},
-    {CUOPT_CROSSOVER, &pdlp_settings.crossover, false}
+    {CUOPT_CROSSOVER, &pdlp_settings.crossover, false},
+    {CUOPT_ELIMINATE_DENSE_COLUMNS, &pdlp_settings.eliminate_dense_columns, true},
+    {CUOPT_CUDSS_DETERMINISTIC, &pdlp_settings.cudss_deterministic, false},
+    {CUOPT_PRESOLVE, &pdlp_settings.presolve, false},
+    {CUOPT_PRESOLVE, &mip_settings.presolve, true},
+    {CUOPT_DUAL_POSTSOLVE, &pdlp_settings.dual_postsolve, true}
   };
   // String parameters
   string_parameters = {

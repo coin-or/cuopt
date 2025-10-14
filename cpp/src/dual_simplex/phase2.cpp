@@ -29,9 +29,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
-#include <iterator>
-#include <limits>
-#include <list>
+#include <ctime>
 
 namespace cuopt::linear_programming::dual_simplex {
 
@@ -752,10 +750,9 @@ void clean_up_infeasibilities(std::vector<f_t>& squared_infeasibilities,
       const f_t squared_infeas = squared_infeasibilities[j];
       if (squared_infeas == 0.0) {
         // Set to the last element
-        const i_t sz             = infeasibility_indices.size();
-        infeasibility_indices[k] = infeasibility_indices[sz - 1];
+        const i_t new_j          = infeasibility_indices.back();
+        infeasibility_indices[k] = new_j;
         infeasibility_indices.pop_back();
-        i_t new_j = infeasibility_indices[k];
         if (squared_infeasibilities[new_j] == 0.0) { k--; }
       }
     }
@@ -1241,10 +1238,7 @@ i_t initialize_steepest_edge_norms(const lp_problem_t<i_t, f_t>& lp,
       settings.log.printf("Initialized %d of %d steepest edge norms in %.2fs\n", k, m, now);
     }
     if (toc(start_time) > settings.time_limit) { return -1; }
-    if (settings.concurrent_halt != nullptr &&
-        settings.concurrent_halt->load(std::memory_order_acquire) == 1) {
-      return -1;
-    }
+    if (settings.concurrent_halt != nullptr && *settings.concurrent_halt == 1) { return -1; }
   }
   return 0;
 }
@@ -1496,13 +1490,13 @@ void compute_delta_y(const basis_update_mpf_t<i_t, f_t>& ft,
 }
 
 template <typename i_t, typename f_t>
-void update_dual_variables(const sparse_vector_t<i_t, f_t>& delta_y_sparse,
-                           const std::vector<i_t>& delta_z_indices,
-                           const std::vector<f_t>& delta_z,
-                           f_t step_length,
-                           i_t leaving_index,
-                           std::vector<f_t>& y,
-                           std::vector<f_t>& z)
+i_t update_dual_variables(const sparse_vector_t<i_t, f_t>& delta_y_sparse,
+                          const std::vector<i_t>& delta_z_indices,
+                          const std::vector<f_t>& delta_z,
+                          f_t step_length,
+                          i_t leaving_index,
+                          std::vector<f_t>& y,
+                          std::vector<f_t>& z)
 {
   // Update dual variables
   // y <- y + steplength * delta_y
@@ -1518,6 +1512,7 @@ void update_dual_variables(const sparse_vector_t<i_t, f_t>& delta_y_sparse,
     z[j] += step_length * delta_z[j];
   }
   z[leaving_index] += step_length * delta_z[leaving_index];
+  return 0;
 }
 
 template <typename i_t, typename f_t>
@@ -2515,6 +2510,10 @@ dual::status_t dual_phase2(i_t phase,
                                                  delta_z_indices,
                                                  nonbasic_mark);
       entering_index = bfrt.compute_step_length(step_length, nonbasic_entering_index);
+      if (entering_index == -4) {
+        settings.log.printf("Numerical issues encountered in ratio test.\n");
+        return dual::status_t::NUMERICAL;
+      }
       timers.bfrt_time += timers.stop_timer();
     } else {
       entering_index = phase2::phase2_ratio_test(
@@ -2664,8 +2663,12 @@ dual::status_t dual_phase2(i_t phase,
     // Update dual variables
     // y <- y + steplength * delta_y
     // z <- z + steplength * delta_z
-    phase2::update_dual_variables(
+    i_t update_dual_variables_status = phase2::update_dual_variables(
       delta_y_sparse, delta_z_indices, delta_z, step_length, leaving_index, y, z);
+    if (update_dual_variables_status == -1) {
+      settings.log.printf("Numerical issues encountered in update_dual_variables.\n");
+      return dual::status_t::NUMERICAL;
+    }
     timers.vector_time += timers.stop_timer();
 
 #ifdef COMPUTE_DUAL_RESIDUAL
@@ -2881,6 +2884,9 @@ dual::status_t dual_phase2(i_t phase,
           settings.log.printf("Failed to repair basis. Iteration %d. %d deficient columns.\n",
                               iter,
                               static_cast<int>(deficient.size()));
+#ifdef CHECK_L_FACTOR
+          if (L.check_matrix() == -1) { settings.log.printf("Bad L after basis repair\n"); }
+#endif
           if (toc(start_time) > settings.time_limit) { return dual::status_t::TIME_LIMIT; }
           settings.threshold_partial_pivoting_tol = 1.0;
           count++;
@@ -2910,6 +2916,9 @@ dual::status_t dual_phase2(i_t phase,
         settings.log.printf("Successfully repaired basis. Iteration %d\n", iter);
       }
       reorder_basic_list(q, basic_list);
+#ifdef CHECK_L_FACTOR
+      if (L.check_matrix() == -1) { settings.log.printf("Bad L factor\n"); }
+#endif
       ft.reset(L, U, p);
       phase2::reset_basis_mark(basic_list, nonbasic_list, basic_mark, nonbasic_mark);
       if (should_recompute_x) {
@@ -2969,8 +2978,7 @@ dual::status_t dual_phase2(i_t phase,
 
     if (now > settings.time_limit) { return dual::status_t::TIME_LIMIT; }
 
-    if (settings.concurrent_halt != nullptr &&
-        settings.concurrent_halt->load(std::memory_order_acquire) == 1) {
+    if (settings.concurrent_halt != nullptr && *settings.concurrent_halt == 1) {
       return dual::status_t::CONCURRENT_LIMIT;
     }
   }

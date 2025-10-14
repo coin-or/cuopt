@@ -27,8 +27,9 @@ namespace cuopt::linear_programming::dual_simplex {
 
 template <typename i_t, typename f_t>
 struct lp_problem_t {
-  lp_problem_t(i_t m, i_t n, i_t nz)
-    : num_rows(m),
+  lp_problem_t(raft::handle_t const* handle_ptr_, i_t m, i_t n, i_t nz)
+    : handle_ptr(handle_ptr_),
+      num_rows(m),
       num_cols(n),
       objective(n),
       A(m, n, nz),
@@ -38,6 +39,7 @@ struct lp_problem_t {
       obj_constant(0.0)
   {
   }
+  raft::handle_t const* handle_ptr;
   i_t num_rows;
   i_t num_cols;
   std::vector<f_t> objective;
@@ -50,6 +52,29 @@ struct lp_problem_t {
 };
 
 template <typename i_t, typename f_t>
+struct folding_info_t {
+  folding_info_t()
+    : D(0, 0, 0),
+      C_s(0, 0, 0),
+      D_s(0, 0, 0),
+      c_tilde(0),
+      A_tilde(0, 0, 0),
+      num_upper_bounds(0),
+      previous_free_variable_pairs({}),
+      is_folded(false)
+  {
+  }
+  csc_matrix_t<i_t, f_t> D;
+  csc_matrix_t<i_t, f_t> C_s;
+  csc_matrix_t<i_t, f_t> D_s;
+  std::vector<f_t> c_tilde;
+  csc_matrix_t<i_t, f_t> A_tilde;
+  i_t num_upper_bounds;
+  std::vector<i_t> previous_free_variable_pairs;
+  bool is_folded;
+};
+
+template <typename i_t, typename f_t>
 struct presolve_info_t {
   // indices of variables in the original problem that remain in the presolved problem
   std::vector<i_t> remaining_variables;
@@ -59,13 +84,44 @@ struct presolve_info_t {
   std::vector<f_t> removed_values;
   // values of the removed reduced costs
   std::vector<f_t> removed_reduced_costs;
+  // Free variable pairs
+  std::vector<i_t> free_variable_pairs;
+  // Removed lower bounds
+  std::vector<f_t> removed_lower_bounds;
+  // indices of the constraints in the original problem that remain in the presolved problem
+  std::vector<i_t> remaining_constraints;
+  // indices of the constraints in the original problem that have been removed in the presolved
+  // problem
+  std::vector<i_t> removed_constraints;
+
+  folding_info_t<i_t, f_t> folding_info;
+};
+
+template <typename i_t, typename f_t>
+struct dualize_info_t {
+  dualize_info_t()
+    : solving_dual(false),
+      primal_problem(nullptr, 0, 0, 0),
+      zl_start(0),
+      zu_start(0),
+      equality_rows({}),
+      vars_with_upper_bounds({})
+  {
+  }
+  bool solving_dual;
+  lp_problem_t<i_t, f_t> primal_problem;
+  i_t zl_start;
+  i_t zu_start;
+  std::vector<i_t> equality_rows;
+  std::vector<i_t> vars_with_upper_bounds;
 };
 
 template <typename i_t, typename f_t>
 void convert_user_problem(const user_problem_t<i_t, f_t>& user_problem,
                           const simplex_solver_settings_t<i_t, f_t>& settings,
                           lp_problem_t<i_t, f_t>& problem,
-                          std::vector<i_t>& new_slacks);
+                          std::vector<i_t>& new_slacks,
+                          dualize_info_t<i_t, f_t>& dualize_info);
 
 template <typename i_t, typename f_t>
 void convert_user_problem_with_guess(const user_problem_t<i_t, f_t>& user_problem,
@@ -126,9 +182,21 @@ void uncrush_dual_solution(const user_problem_t<i_t, f_t>& user_problem,
 
 template <typename i_t, typename f_t>
 void uncrush_solution(const presolve_info_t<i_t, f_t>& presolve_info,
+                      const simplex_solver_settings_t<i_t, f_t>& settings,
                       const std::vector<f_t>& crushed_x,
+                      const std::vector<f_t>& crushed_y,
                       const std::vector<f_t>& crushed_z,
                       std::vector<f_t>& uncrushed_x,
+                      std::vector<f_t>& uncrushed_y,
                       std::vector<f_t>& uncrushed_z);
+
+// For pure LP bounds strengthening, var_types should be defaulted (i.e. left empty)
+template <typename i_t, typename f_t>
+bool bound_strengthening(const std::vector<char>& row_sense,
+                         const simplex_solver_settings_t<i_t, f_t>& settings,
+                         lp_problem_t<i_t, f_t>& problem,
+                         const csc_matrix_t<i_t, f_t>& Arow,
+                         const std::vector<variable_type_t>& var_types = {},
+                         const std::vector<bool>& bounds_changed       = {});
 
 }  // namespace cuopt::linear_programming::dual_simplex

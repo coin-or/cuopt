@@ -21,6 +21,14 @@ source rapids-init-pip
 package_name="libcuopt"
 package_dir="python/libcuopt"
 
+# Install rockylinux repo
+if command -v dnf &> /dev/null; then
+    bash ci/utils/update_rockylinux_repo.sh
+fi
+
+# Install Boost and TBB
+bash ci/utils/install_boost_tbb.sh
+
 export SKBUILD_CMAKE_ARGS="-DCUOPT_BUILD_WHEELS=ON;-DDISABLE_DEPRECATION_WARNING=ON"
 
 # For pull requests we are enabling assert mode.
@@ -30,6 +38,9 @@ if [ "$RAPIDS_BUILD_TYPE" = "pull-request" ]; then
 else
     echo "Building in release mode"
 fi
+
+# Install cudss
+bash ci/utils/install_cudss.sh
 
 rapids-logger "Generating build requirements"
 
@@ -59,6 +70,8 @@ EXCLUDE_ARGS=(
   --exclude "libraft.so"
   --exclude "libcublas.so.*"
   --exclude "libcublasLt.so.*"
+  --exclude "libcuda.so.1"
+  --exclude "libcudss.so.*"
   --exclude "libcurand.so.*"
   --exclude "libcusolver.so.*"
   --exclude "libcusparse.so.*"

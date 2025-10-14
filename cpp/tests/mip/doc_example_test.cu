@@ -135,6 +135,7 @@ TEST(docs, user_problem_file)
 
   settings.time_limit        = test_time_limit;
   settings.user_problem_file = user_problem_path;
+  settings.presolve          = false;
   EXPECT_EQ(solve_mip(&handle_, problem, settings).get_termination_status(),
             mip_termination_status_t::Optimal);
 
@@ -159,12 +160,16 @@ TEST(docs, user_problem_file)
   // Get solution values
   const auto& sol_values = solution.get_solution();
   // x should be approximately 37 and integer
-  EXPECT_NEAR(37.0, sol_values.element(0, handle_.get_stream()), 0.1);
-  EXPECT_NEAR(std::round(sol_values.element(0, handle_.get_stream())),
-              sol_values.element(0, handle_.get_stream()),
-              settings.tolerances.integrality_tolerance);  // Check x is integer
-  // y should be approximately 39.5
-  EXPECT_NEAR(39.5, sol_values.element(1, handle_.get_stream()), 0.1);
+  for (int i = 0; i < problem2.get_n_variables(); i++) {
+    if (problem2.get_variable_names()[i] == "x") {
+      EXPECT_NEAR(37.0, sol_values.element(i, handle_.get_stream()), 0.1);
+      EXPECT_NEAR(std::round(sol_values.element(i, handle_.get_stream())),
+                  sol_values.element(i, handle_.get_stream()),
+                  settings.tolerances.integrality_tolerance);  // Check x is integer
+    } else {                                                   // y should be approximately 39.5
+      EXPECT_NEAR(39.5, sol_values.element(i, handle_.get_stream()), 0.1);
+    }
+  }
 }
 
 }  // namespace cuopt::linear_programming::test

@@ -300,6 +300,7 @@ nitpick_ignore = [
     ("py:obj",   "cuopt_sh_client.PDLPSolverMode.is_integer"),
     ("py:obj",   "cuopt_sh_client.PDLPSolverMode.bit_count"),
     ("py:obj",   "cuopt_sh_client.PDLPSolverMode.bit_length"),
+    ("py:obj",   "data_model.DataModel.set_data_model_view"),
     ("c:type", "size_t"),
     ("c:identifier", "int32_t"),
     ("c:identifier", "int8_t"),
@@ -338,7 +339,7 @@ linkcheck_ignore = [
     r'https://api\.github\.com/.*',
     r'https://raw\.githubusercontent\.com/.*',
     r'https://gist\.github\.com/.*',
-    
+
     # GitLab (Rate Limited)
     r'https://gitlab\.com/.*',
     r'https://api\.gitlab\.com/.*',
@@ -352,4 +353,3 @@ def setup(app):
 
     app.setup_extension("sphinx.ext.autodoc")
     app.connect("autodoc-skip-member", skip_unwanted_inherited_members)
-

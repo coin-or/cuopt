@@ -23,7 +23,7 @@ General FAQ
 
     1. Log into NGC using the invite and choose the appropriate NGC org.
 
-    2. Generate an NGC API key from settings. If you have not generated an API Key, you can generate it by going to the Setup option in your profile and choose `Get API Key <https://docs.nvidia.com/ngc/gpu-cloud/ngc-private-registry-user-guide/index.html#generating-api-key>`_. Store this or generate a new one next time.
+    2. Generate an NGC API key from settings. If you have not generated an API Key, you can generate it by going to the Setup option in your profile and choose `Get API Key <https://docs.nvidia.com/ngc/latest/ngc-private-registry-user-guide.html#generating-a-personal-api-key>`_. Store this or generate a new one next time.
 
     3. Go to the container section for cuOpt and copy the pull tag for the latest image.
         - Within the Select a tag dropdown, locate the container image release that you want to run.
@@ -350,6 +350,7 @@ Linear Programming FAQs
     - Tolerance: The set tolerance usually has a massive impact on performance. Try the lowest possible value using ``set_optimality_tolerance`` until you have reached your lowest possible acceptable accuracy.
     - PDLP Solver mode: PDLP solver mode will change the way PDLP internally optimizes the problem. The mode choice can drastically impact how fast a specific problem will be solved. You should test the different modes to see which one fits your problem best.
     - Batch mode: In case you know upfront that you need to solve multiple LP problems, instead of solving them sequentially, you should use the batch mode which can solve multiple LPs in parallel.
+    - Presolve: Presolve can reduce problem size and improve solve time.
 
 .. dropdown:: What solver mode should I choose?
 
@@ -368,6 +369,12 @@ Linear Programming FAQs
     - On a H100 SXM with 80GB memory, here are few examples of the problems that can be solved:
         - 10M rows/constraints, 10M columns/variables, and 2B non-zeros in the constraint matrix.
         - 74.5M rows/constraints, 74.5M columns/variables, and 1.49B non-zeros in the constraint matrix.
+
+.. dropdown:: Does cuOpt implement presolve reductions?
+
+    We use PaPILO presolve at the root node. It is enabled by default for MIP and disabled by default for LP.
+    For LP, dual postsolve is not supported, for this reason dual solution and reduced costs are filled with Nans.
+
 
 Mixed Integer Linear Programming FAQs
 --------------------------------------

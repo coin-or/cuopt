@@ -349,7 +349,6 @@ i_t factorize_basis(const csc_matrix_t<i_t, f_t>& A,
             }
           }
         }
-        assert(Snz <= Snz_max && (Sdim > 0 && Snz > 0));
         S.col_start[Sdim] = Snz;  // Finalize S
 
         csc_matrix_t<i_t, f_t> SL(Sdim, Sdim, Snz);
@@ -566,12 +565,11 @@ i_t factorize_basis(const csc_matrix_t<i_t, f_t>& A,
   }
   q.resize(m);
   f_t fact_start = tic();
-  right_looking_lu(A, medium_tol, basic_list, q, L, U, pinv);
+  rank           = right_looking_lu(A, medium_tol, basic_list, q, L, U, pinv);
   if (verbose) {
     printf("Right Lnz+Unz %d t %.3f\n", L.col_start[m] + U.col_start[m], toc(fact_start));
   }
   inverse_permutation(pinv, p);
-  rank                    = m;
   constexpr bool check_lu = false;
   if (check_lu) {
     csc_matrix_t<i_t, f_t> C(m, m, 1);
@@ -592,7 +590,7 @@ i_t factorize_basis(const csc_matrix_t<i_t, f_t>& A,
     assert(norm_diff < 1e-3);
   }
 
-  return rank;
+  return (rank == m ? m : -1);
 }
 
 template <typename i_t, typename f_t>
@@ -626,11 +624,10 @@ i_t basis_repair(const csc_matrix_t<i_t, f_t>& A,
   assert(slacks_found == m);
 
   // Create nonbasic_map
-  std::vector<i_t> nonbasic_map(n);  // nonbasic_map[j] = p if nonbasic[p] = j, -1 if j is basic
-  for (i_t k = 0; k < m; ++k) {
-    nonbasic_map[basis_list[k]] = -1;
-  }
-  for (i_t k = 0; k < n - m; ++k) {
+  std::vector<i_t> nonbasic_map(
+    n, -1);  // nonbasic_map[j] = p if nonbasic[p] = j, -1 if j is basic/superbasic
+  const i_t num_nonbasic = nonbasic_list.size();
+  for (i_t k = 0; k < num_nonbasic; ++k) {
     nonbasic_map[nonbasic_list[k]] = k;
   }
 

@@ -62,6 +62,7 @@ class solution_t {
   bool round_nearest();
   // rounds integers to random if fractionality is between 0.25 and 0.75. otherwise, to nearest
   bool round_random_nearest(i_t n_target_random_rounds);
+  bool round_simple();
   // makes the approximate integer values up to INTEGRALITY TOLERANCE whole integers
   void correct_integer_precision();
   // does a reduction and returns if the current solution is feasible
@@ -100,7 +101,9 @@ class solution_t {
   f_t get_total_excess();
   // brings all vars within bounds
   void clamp_within_bounds();
-  mip_solution_t<i_t, f_t> get_solution(bool output_feasible, solver_stats_t<i_t, f_t> stats);
+  mip_solution_t<i_t, f_t> get_solution(bool output_feasible,
+                                        solver_stats_t<i_t, f_t> stats,
+                                        bool log_stats = true);
   f_t compute_max_constraint_violation();
   f_t compute_max_int_violation();
   f_t compute_max_variable_violation();

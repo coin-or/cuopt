@@ -42,7 +42,8 @@ enum class problem_category_t : int8_t { LP = 0, MIP = 1, IP = 2 };
  *
  * @tparam f_t  Data type of the variables and their weights in the equations
  *
- * This structure stores all the information necessary to represent the following LP:
+ * This structure stores all the information necessary to represent the
+ * following LP:
  *
  * <pre>
  * Minimize:
@@ -61,7 +62,8 @@ enum class problem_category_t : int8_t { LP = 0, MIP = 1, IP = 2 };
  *
  * Objective value can be scaled and offset accordingly:
  * objective_scaling_factor * (dot(c, x) + objective_offset)
- * please refer to the `set_objective_scaling_factor()` and `set_objective_offset()` methods.
+ * please refer to the `set_objective_scaling_factor()` and
+ * `set_objective_offset()` methods.
  */
 template <typename i_t, typename f_t>
 class optimization_problem_t {
@@ -302,9 +304,20 @@ class optimization_problem_t {
    */
   void set_row_names(const std::vector<std::string>& row_names);
 
+  /**
+   * @brief Write the problem to an MPS formatted file
+   *
+   * @param[in] mps_file_path Path to the MPS file to write
+   */
+  void write_to_mps(const std::string& mps_file_path);
+
+  /* Print scaling information */
+  void print_scaling_information() const;
+
   i_t get_n_variables() const;
   i_t get_n_constraints() const;
   i_t get_nnz() const;
+  i_t get_n_integers() const;
   raft::handle_t const* get_handle_ptr() const noexcept;
   const rmm::device_uvector<f_t>& get_constraint_matrix_values() const;
   rmm::device_uvector<f_t>& get_constraint_matrix_values();
@@ -329,6 +342,7 @@ class optimization_problem_t {
   const rmm::device_uvector<char>& get_row_types() const;
   const rmm::device_uvector<var_t>& get_variable_types() const;
   bool get_sense() const;
+  bool empty() const;
 
   std::string get_objective_name() const;
   std::string get_problem_name() const;

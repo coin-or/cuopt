@@ -55,24 +55,33 @@ class pdlp_initial_scaling_strategy_t {
                                   problem_t<i_t, f_t>& op_problem_scaled,
                                   i_t number_of_ruiz_iterations,
                                   f_t alpha,
-                                  pdhg_solver_t<i_t, f_t>& pdhg_solver,
                                   rmm::device_uvector<f_t>& A_T,
                                   rmm::device_uvector<i_t>& A_T_offsets,
                                   rmm::device_uvector<i_t>& A_T_indices,
+                                  pdhg_solver_t<i_t, f_t>* pdhg_solver_ptr,
                                   bool running_mip = false);
 
   void scale_problem();
 
+  void scale_solutions(rmm::device_uvector<f_t>& primal_solution) const;
   void scale_solutions(rmm::device_uvector<f_t>& primal_solution,
                        rmm::device_uvector<f_t>& dual_solution) const;
+  void scale_solutions(rmm::device_uvector<f_t>& primal_solution,
+                       rmm::device_uvector<f_t>& dual_solution,
+                       rmm::device_uvector<f_t>& dual_slack) const;
   void scale_primal(rmm::device_uvector<f_t>& primal_solution) const;
   void scale_dual(rmm::device_uvector<f_t>& dual_solution) const;
   void unscale_solutions(rmm::device_uvector<f_t>& primal_solution,
                          rmm::device_uvector<f_t>& dual_solution) const;
+  void unscale_solutions(rmm::device_uvector<f_t>& primal_solution,
+                         rmm::device_uvector<f_t>& dual_solution,
+                         rmm::device_uvector<f_t>& dual_slack) const;
   void unscale_solutions(solution_t<i_t, f_t>& solution) const;
   rmm::device_uvector<f_t>& get_constraint_matrix_scaling_vector();
   rmm::device_uvector<f_t>& get_variable_scaling_vector();
   const problem_t<i_t, f_t>& get_scaled_op_problem();
+
+  void bound_objective_rescaling();
 
   /**
    * @brief Gets the device-side view (with raw pointers), for ease of access
@@ -96,9 +105,15 @@ class pdlp_initial_scaling_strategy_t {
   rmm::device_uvector<f_t> iteration_constraint_matrix_scaling_;
   rmm::device_uvector<f_t> iteration_variable_scaling_;
 
+  rmm::device_scalar<f_t> bound_rescaling_;
+  rmm::device_scalar<f_t> objective_rescaling_;
+  // Since we need it on the host
+  f_t h_bound_rescaling     = std::numeric_limits<f_t>::signaling_NaN();
+  f_t h_objective_rescaling = std::numeric_limits<f_t>::signaling_NaN();
+
   rmm::device_uvector<f_t> cummulative_constraint_matrix_scaling_;
   rmm::device_uvector<f_t> cummulative_variable_scaling_;
-  pdhg_solver_t<i_t, f_t>& pdhg_solver_;
+  pdhg_solver_t<i_t, f_t>* pdhg_solver_ptr_;
   rmm::device_uvector<f_t>& A_T_;
   rmm::device_uvector<i_t>& A_T_offsets_;
   rmm::device_uvector<i_t>& A_T_indices_;

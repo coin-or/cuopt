@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import time
+
 from . import data_model_wrapper
 from .utilities import catch_cuopt_exception
 
@@ -151,6 +154,12 @@ class DataModel(data_model_wrapper.DataModel):
     """
 
     def __init__(self):
+        if os.environ.get("CUOPT_EXTRA_TIMESTAMPS", False) in (
+            True,
+            "True",
+            "true",
+        ):
+            print(f"CUOPT_CREATE_PROBLEM: {time.time()}")
         super().__init__()
 
     @catch_cuopt_exception
@@ -412,6 +421,20 @@ class DataModel(data_model_wrapper.DataModel):
         super().set_row_names(row_names)
 
     @catch_cuopt_exception
+    def set_objective_name(self, objective_name):
+        """
+        Set the objective name as string.
+        """
+        super().set_objective_name(objective_name)
+
+    @catch_cuopt_exception
+    def set_problem_name(self, problem_name):
+        """
+        Set the problem name as string.
+        """
+        super().set_problem_name(problem_name)
+
+    @catch_cuopt_exception
     def set_initial_primal_solution(self, initial_primal_solution):
         """
         Set the initial primal solution.
@@ -603,3 +626,21 @@ class DataModel(data_model_wrapper.DataModel):
 
         """
         return super().get_row_names()
+
+    @catch_cuopt_exception
+    def get_objective_name(self):
+        """
+        Get the objective name as string.
+        """
+        return super().get_objective_name()
+
+    @catch_cuopt_exception
+    def get_problem_name(self):
+        """
+        Get the problem name as string.
+        """
+        return super().get_problem_name()
+
+    @catch_cuopt_exception
+    def writeMPS(self, user_problem_file):
+        return super().writeMPS(user_problem_file)

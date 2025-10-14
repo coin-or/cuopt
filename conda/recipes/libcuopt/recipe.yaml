@@ -49,6 +49,7 @@ cache:
 
   requirements:
     build:
+      - boost
       - ${{ compiler("c") }}
       - ${{ compiler("cxx") }}
       - ${{ compiler("cuda") }} =${{ cuda_version }}
@@ -56,6 +57,9 @@ cache:
       - cuda-version =${{ cuda_version }}
       - cmake ${{ cmake_version }}
       - ninja
+      - tbb-devel
+      - zlib
+      - bzip2
     host:
       - cpp-argparse
       - cuda-version =${{ cuda_version }}
@@ -65,9 +69,14 @@ cache:
       - librmm =${{ dep_minor_version }}
       - rapids-logger =0.1
       - cuda-nvtx-dev
+      - libcudss-dev >=0.7
       - libcurand-dev
       - libcusparse-dev
       - cuda-cudart-dev
+      - boost
+      - tbb-devel
+      - zlib
+      - bzip2
 
 outputs:
   - package:
@@ -88,6 +97,14 @@ outputs:
       build:
         - cmake ${{ cmake_version }}
         - ${{ stdlib("c") }}
+        - zlib
+        - bzip2
+      host:
+        - zlib
+        - bzip2
+      run:
+        - zlib
+        - bzip2
       ignore_run_exports:
         by_name:
           - cuda-cudart
@@ -95,8 +112,11 @@ outputs:
           - cuda-version
           - gtest
           - libcurand
+          - libcudss
           - libcusparse
           - librmm
+          - libzlib
+          - libbz2
     tests:
     - package_contents:
         files:
@@ -126,26 +146,33 @@ outputs:
         - ${{ stdlib("c") }}
       host:
         - ${{ pin_subpackage("libmps-parser", exact=True) }}
+        - boost
         - cuda-version =${{ cuda_version }}
         - rapids-logger =0.1
         - librmm =${{ dep_minor_version }}
         - cuda-cudart-dev
         - libcublas
+        - libcudss-dev >=0.7
         - libcusparse-dev
       run:
         - ${{ pin_compatible("cuda-version", upper_bound="x", lower_bound="x") }}
         - ${{ pin_subpackage("libmps-parser", exact=True) }}
+        - boost
         - librmm =${{ dep_minor_version }}
         - cuda-nvrtc
+        - libcudss
       ignore_run_exports:
         by_name:
           - cuda-cudart
           - cuda-nvtx
           - cuda-version
           - gtest
+          - libcudss
           - libcurand
           - libcusparse
           - librmm
+          - libboost
+          - libboost_iostreams
     tests:
     - package_contents:
         files:
@@ -173,10 +200,12 @@ outputs:
       host:
         - ${{ pin_subpackage("libcuopt", exact=True) }}
         - ${{ pin_subpackage("libmps-parser", exact=True) }}
+        - boost
         - gmock ${{ gtest_version }}
         - gtest ${{ gtest_version }}
         - cuda-cudart-dev
         - libcublas
+        - libcudss-dev >=0.7
         - libcusparse-dev
       run:
         - gmock ${{ gtest_version }}
@@ -191,7 +220,10 @@ outputs:
           - gtest
           - libcurand
           - libcusparse
+          - libcudss
           - librmm
+          - libboost
+          - libboost_iostreams
     about:
       homepage: ${{ load_from_file("python/cuopt/pyproject.toml").project.urls.Homepage }}
       license: ${{ load_from_file("python/cuopt/pyproject.toml").project.license.text }}

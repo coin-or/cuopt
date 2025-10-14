@@ -57,7 +57,11 @@ TEST_P(TimeLimitTestFixture, time_limit)
                            method),
             CUOPT_SUCCESS);
   EXPECT_EQ(termination_status, CUOPT_TERIMINATION_STATUS_TIME_LIMIT);
-  EXPECT_NEAR(solve_time, target_solve_time, 1.0);
+
+  // Dual simplex is spending some time for factorizing the basis, and this computation does not
+  // check for time limit
+  double excess_allowed_time = 3.0;
+  EXPECT_NEAR(solve_time, target_solve_time, excess_allowed_time);
 }
 INSTANTIATE_TEST_SUITE_P(
   c_api,
@@ -67,7 +71,7 @@ INSTANTIATE_TEST_SUITE_P(
                     5,
                     CUOPT_METHOD_DUAL_SIMPLEX),  // LP, Dual Simplex
     std::make_tuple("/linear_programming/square41/square41.mps", 5, CUOPT_METHOD_PDLP),  // LP, PDLP
-    std::make_tuple("/mip/enlight_hard.mps", 5, CUOPT_METHOD_DUAL_SIMPLEX)               // MIP
+    std::make_tuple("/mip/supportcase22.mps", 15, CUOPT_METHOD_DUAL_SIMPLEX)             // MIP
     ));
 
 TEST(c_api, iteration_limit)
@@ -89,7 +93,7 @@ TEST(c_api, solve_time_bb_preemption)
             CUOPT_SUCCESS);
   EXPECT_EQ(termination_status, CUOPT_TERIMINATION_STATUS_OPTIMAL);
   EXPECT_GT(solve_time, 0);  // solve time should not be equal to 0, even on very simple instances
-                             // solved by B&B before the diversity solver has time to run
+  // solved by B&B before the diversity solver has time to run
 }
 
 TEST(c_api, bad_parameter_name) { EXPECT_EQ(test_bad_parameter_name(), CUOPT_INVALID_ARGUMENT); }
@@ -107,4 +111,12 @@ TEST(c_api, test_ranged_problem)
   EXPECT_EQ(test_ranged_problem(&termination_status, &objective), CUOPT_SUCCESS);
   EXPECT_EQ(termination_status, CUOPT_TERIMINATION_STATUS_OPTIMAL);
   EXPECT_NEAR(objective, 32.0, 1e-3);
+}
+
+TEST(c_api, test_invalid_bounds)
+{
+  // Test LP codepath
+  EXPECT_EQ(test_invalid_bounds(false), CUOPT_SUCCESS);
+  // Test MIP codepath
+  EXPECT_EQ(test_invalid_bounds(true), CUOPT_SUCCESS);
 }

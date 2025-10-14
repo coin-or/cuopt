@@ -1,6 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION & AFFILIATES. All rights
- * reserved. SPDX-License-Identifier: Apache-2.0
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION &
+ * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,27 +32,30 @@ template <typename i_t, typename f_t>
 class solver_settings_t;
 
 /**
- * @brief Enum representing the different solver modes under which PDLP can operate.
+ * @brief Enum representing the different solver modes under which PDLP can
+ * operate.
  *
- * Stable2: Best overall mode from experiments; balances speed and convergence
- * success. If you want to use the legacy version, use Stable1.
+ * Stable3: Best overall mode from experiments; balances speed and convergence
+ * success. If you want to use the legacy version, use Stable2.
  * Methodical1: Usually leads to slower individual steps but fewer are needed to
  * converge. It uses from 1.3x up to 1.7x times more memory.
  * Fast1: Less convergence success but usually yields the highest speed
  *
- * @note Default mode is Stable2.
+ * @note Default mode is Stable3.
  */
-// Forced to use an enum instead of an enum class for compatibility with the Cython layer
+// Forced to use an enum instead of an enum class for compatibility with the
+// Cython layer
 enum pdlp_solver_mode_t : int {
   Stable1     = CUOPT_PDLP_SOLVER_MODE_STABLE1,
   Stable2     = CUOPT_PDLP_SOLVER_MODE_STABLE2,
   Methodical1 = CUOPT_PDLP_SOLVER_MODE_METHODICAL1,
-  Fast1       = CUOPT_PDLP_SOLVER_MODE_FAST1
+  Fast1       = CUOPT_PDLP_SOLVER_MODE_FAST1,
+  Stable3     = CUOPT_PDLP_SOLVER_MODE_STABLE3
 };
 
 /**
- * @brief Enum representing the different methods that can be used to solve the linear programming
- * problem.
+ * @brief Enum representing the different methods that can be used to solve the
+ * linear programming problem.
  *
  * Concurrent: Use both PDLP and DualSimplex in parallel.
  * PDLP: Use the PDLP method.
@@ -63,7 +66,8 @@ enum pdlp_solver_mode_t : int {
 enum method_t : int {
   Concurrent  = CUOPT_METHOD_CONCURRENT,
   PDLP        = CUOPT_METHOD_PDLP,
-  DualSimplex = CUOPT_METHOD_DUAL_SIMPLEX
+  DualSimplex = CUOPT_METHOD_DUAL_SIMPLEX,
+  Barrier     = CUOPT_METHOD_BARRIER
 };
 
 template <typename i_t, typename f_t>
@@ -74,15 +78,15 @@ class pdlp_solver_settings_t {
   // Copy constructor for when copying in the PDLP object
   pdlp_solver_settings_t(const pdlp_solver_settings_t& other, rmm::cuda_stream_view stream_view);
   /**
-   * @brief Set both absolute and relative tolerance on the primal feasibility, dual feasibility
-   and gap.
+   * @brief Set both absolute and relative tolerance on the primal feasibility,
+   dual feasibility and gap.
    * Changing this value has a significant impact on accuracy and runtime.
    *
    * Optimality is computed as follows:
    * - dual_feasiblity < absolute_dual_tolerance + relative_dual_tolerance *
    norm_objective_coefficient (l2_norm(c))
-   * - primal_feasiblity < absolute_primal_tolerance + relative_primal_tolerance *
-   norm_constraint_bounds (l2_norm(b))
+   * - primal_feasiblity < absolute_primal_tolerance + relative_primal_tolerance
+   * norm_constraint_bounds (l2_norm(b))
    * - duality_gap < absolute_gap_tolerance + relative_gap_tolerance *
    (|primal_objective| + |dual_objective|)
    *
@@ -101,9 +105,9 @@ class pdlp_solver_settings_t {
    *
    * @note Default value is all 0.
    *
-   * @param[in] initial_primal_solution Device or host memory pointer to a floating point array of
-   * size size.
-   * cuOpt copies this data. Copy happens on the stream of the raft:handler passed to the problem.
+   * @param[in] initial_primal_solution Device or host memory pointer to a
+   * floating point array of size size. cuOpt copies this data. Copy happens on
+   * the stream of the raft:handler passed to the problem.
    * @param size Size of the initial_primal_solution array.
    */
   void set_initial_primal_solution(const f_t* initial_primal_solution,
@@ -115,9 +119,9 @@ class pdlp_solver_settings_t {
    *
    * @note Default value is all 0.
    *
-   * @param[in] initial_dual_solution Device or host memory pointer to a floating point array of
-   * size size.
-   * cuOpt copies this data. Copy happens on the stream of the raft:handler passed to the problem.
+   * @param[in] initial_dual_solution Device or host memory pointer to a
+   * floating point array of size size. cuOpt copies this data. Copy happens on
+   * the stream of the raft:handler passed to the problem.
    * @param size Size of the initial_dual_solution array.
    */
   void set_initial_dual_solution(const f_t* initial_dual_solution,
@@ -125,15 +129,17 @@ class pdlp_solver_settings_t {
                                  rmm::cuda_stream_view stream = rmm::cuda_stream_default);
 
   /**
-   * @brief Set the pdlp warm start data. This allows to restart PDLP with a previous solution
+   * @brief Set the pdlp warm start data. This allows to restart PDLP with a
+   * previous solution
    *
    * @note Interface for the C++ side. Only Stable2 and Fast1 are supported.
    *
-   * @param pdlp_warm_start_data_view Pdlp warm start data from your solution object to warm start
-   * from
-   * @param var_mapping Variables indices to scatter to in case the new problem has less variables
-   * @param constraint_mapping Constraints indices to scatter to in case the new problem has less
-   * constraints
+   * @param pdlp_warm_start_data_view Pdlp warm start data from your solution
+   * object to warm start from
+   * @param var_mapping Variables indices to scatter to in case the new problem
+   * has less variables
+   * @param constraint_mapping Constraints indices to scatter to in case the new
+   * problem has less constraints
    */
   void set_pdlp_warm_start_data(pdlp_warm_start_data_t<i_t, f_t>& pdlp_warm_start_data_view,
                                 const rmm::device_uvector<i_t>& var_mapping =
@@ -196,18 +202,27 @@ class pdlp_solver_settings_t {
   bool strict_infeasibility{false};
   i_t iteration_limit{std::numeric_limits<i_t>::max()};
   double time_limit{std::numeric_limits<double>::infinity()};
-  pdlp_solver_mode_t pdlp_solver_mode{pdlp_solver_mode_t::Stable2};
+  pdlp_solver_mode_t pdlp_solver_mode{pdlp_solver_mode_t::Stable3};
   bool log_to_console{true};
   std::string log_file{""};
   std::string sol_file{""};
   std::string user_problem_file{""};
   bool per_constraint_residual{false};
   bool crossover{false};
+  bool cudss_deterministic{false};
+  i_t folding{-1};
+  i_t augmented{-1};
+  i_t dualize{-1};
+  i_t ordering{-1};
+  i_t barrier_dual_initial_point{-1};
+  bool eliminate_dense_columns{true};
   bool save_best_primal_so_far{false};
   bool first_primal_feasible{false};
+  bool presolve{false};
+  bool dual_postsolve{true};
   method_t method{method_t::Concurrent};
   // For concurrent termination
-  std::atomic<i_t>* concurrent_halt;
+  volatile int* concurrent_halt;
   static constexpr f_t minimal_absolute_tolerance = 1.0e-12;
 
  private:
