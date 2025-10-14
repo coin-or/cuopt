@@ -86,12 +86,12 @@ repos:
         args: ["--severity=warning"]
         files: ^ci/
   - repo: https://github.com/rapidsai/pre-commit-hooks
-    rev: v0.6.0
+    rev: v0.7.0
     hooks:
       - id: verify-alpha-spec
         args:
           - --fix
-          - --rapids-version=25.08
+          - --rapids-version=25.10
           - --mode=release
   - repo: https://github.com/rapidsai/pre-commit-hooks
     rev: v0.7.0
