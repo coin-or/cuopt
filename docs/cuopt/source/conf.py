@@ -284,7 +284,7 @@ nitpick_ignore = [
     ("py:obj",   "cuopt.routing.DataModel.add_order_precedence"),
     ("py:obj",   "cuopt_sh_client.SolverMethod.denominator"),
     ("py:obj",   "cuopt_sh_client.SolverMethod.imag"),
-    ("py:obj",   "cuopt_sh_client.SolverMethod.numerator"), 
+    ("py:obj",   "cuopt_sh_client.SolverMethod.numerator"),
     ("py:obj",   "cuopt_sh_client.SolverMethod.real"),
     ("py:obj",   "cuopt_sh_client.SolverMethod.as_integer_ratio"),
     ("py:obj",   "cuopt_sh_client.SolverMethod.bit_count"),
@@ -324,6 +324,27 @@ html_search_options = {
     'type': 'default'
 }
 html_search = True
+
+# Link checker settings
+linkcheck_retries = 3
+linkcheck_timeout = 30
+linkcheck_workers = 5
+linkcheck_rate_limit_timeout = 60
+
+# GitHub and GitLab link checker exceptions
+linkcheck_ignore = [
+    # GitHub (Rate Limited)
+    r'https://github\.com/.*',
+    r'https://api\.github\.com/.*',
+    r'https://raw\.githubusercontent\.com/.*',
+    r'https://gist\.github\.com/.*',
+    
+    # GitLab (Rate Limited)
+    r'https://gitlab\.com/.*',
+    r'https://api\.gitlab\.com/.*',
+    r'https://gitlab\.org/.*',
+    r'https://api\.gitlab\.org/.*',
+]
 
 def setup(app):
     from sphinx.application import Sphinx

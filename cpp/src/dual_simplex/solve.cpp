@@ -244,7 +244,7 @@ lp_status_t solve_linear_program(const user_problem_t<i_t, f_t>& user_problem,
   f_t start_time = tic();
   lp_problem_t<i_t, f_t> original_lp(1, 1, 1);
   std::vector<i_t> new_slacks;
-  convert_user_problem(user_problem, original_lp, new_slacks);
+  convert_user_problem(user_problem, settings, original_lp, new_slacks);
   solution.resize(user_problem.num_rows, user_problem.num_cols);
   lp_solution_t<i_t, f_t> lp_solution(original_lp.num_rows, original_lp.num_cols);
   std::vector<variable_status_t> vstatus;
@@ -252,8 +252,8 @@ lp_status_t solve_linear_program(const user_problem_t<i_t, f_t>& user_problem,
   lp_status_t status = solve_linear_program_advanced(
     original_lp, start_time, settings, lp_solution, vstatus, edge_norms);
   uncrush_primal_solution(user_problem, original_lp, lp_solution.x, solution.x);
-  uncrush_primal_solution(user_problem, original_lp, lp_solution.z, solution.z);
-  solution.y                  = lp_solution.y;
+  uncrush_dual_solution(
+    user_problem, original_lp, lp_solution.y, lp_solution.z, solution.y, solution.z);
   solution.objective          = lp_solution.objective;
   solution.user_objective     = lp_solution.user_objective;
   solution.iterations         = lp_solution.iterations;
@@ -283,7 +283,7 @@ i_t solve(const user_problem_t<i_t, f_t>& problem,
     lp_problem_t<i_t, f_t> original_lp(
       problem.num_rows, problem.num_cols, problem.A.col_start[problem.A.n]);
     std::vector<i_t> new_slacks;
-    convert_user_problem(problem, original_lp, new_slacks);
+    convert_user_problem(problem, settings, original_lp, new_slacks);
     lp_solution_t<i_t, f_t> solution(original_lp.num_rows, original_lp.num_cols);
     std::vector<variable_status_t> vstatus;
     std::vector<f_t> edge_norms;

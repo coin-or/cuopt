@@ -63,6 +63,7 @@ struct presolve_info_t {
 
 template <typename i_t, typename f_t>
 void convert_user_problem(const user_problem_t<i_t, f_t>& user_problem,
+                          const simplex_solver_settings_t<i_t, f_t>& settings,
                           lp_problem_t<i_t, f_t>& problem,
                           std::vector<i_t>& new_slacks);
 
@@ -114,6 +115,14 @@ void uncrush_primal_solution(const user_problem_t<i_t, f_t>& user_problem,
                              const lp_problem_t<i_t, f_t>& problem,
                              const std::vector<f_t>& solution,
                              std::vector<f_t>& user_solution);
+
+template <typename i_t, typename f_t>
+void uncrush_dual_solution(const user_problem_t<i_t, f_t>& user_problem,
+                           const lp_problem_t<i_t, f_t>& problem,
+                           const std::vector<f_t>& y,
+                           const std::vector<f_t>& z,
+                           std::vector<f_t>& user_y,
+                           std::vector<f_t>& user_z);
 
 template <typename i_t, typename f_t>
 void uncrush_solution(const presolve_info_t<i_t, f_t>& presolve_info,

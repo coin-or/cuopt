@@ -310,7 +310,7 @@ bool solution_t<i_t, f_t>::compute_feasibility()
   compute_infeasibility();
   compute_number_of_integers();
   i_t h_n_feas_constraints = n_feasible_constraints.value(handle_ptr->get_stream());
-  is_feasible              = h_n_feas_constraints == problem_ptr->n_constraints;
+  is_feasible = h_n_feas_constraints == problem_ptr->n_constraints && test_number_all_integer();
   CUOPT_LOG_TRACE("is_feasible %d n_feasible_cstr %d all_cstr %d",
                   is_feasible,
                   h_n_feas_constraints,
@@ -541,6 +541,11 @@ f_t solution_t<i_t, f_t>::compute_max_int_violation()
 template <typename i_t, typename f_t>
 f_t solution_t<i_t, f_t>::compute_max_variable_violation()
 {
+  cuopt_assert(problem_ptr->n_variables == assignment.size(), "Size mismatch");
+  cuopt_assert(problem_ptr->n_variables == problem_ptr->variable_lower_bounds.size(),
+               "Size mismatch");
+  cuopt_assert(problem_ptr->n_variables == problem_ptr->variable_upper_bounds.size(),
+               "Size mismatch");
   return thrust::transform_reduce(
     handle_ptr->get_thrust_policy(),
     thrust::make_counting_iterator(0),

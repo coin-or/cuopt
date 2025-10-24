@@ -71,21 +71,25 @@ void test_bounds_standardization_test(std::string test_instance)
   init_handler(op_problem.get_handle_ptr());
   // run the problem constructor of MIP, so that we do bounds standardization
   detail::problem_t<int, double> standardized_problem(op_problem);
+  detail::problem_t<int, double> original_problem(op_problem);
   standardized_problem.preprocess_problem();
   detail::trivial_presolve(standardized_problem);
   detail::solution_t<int, double> solution_1(standardized_problem);
 
   mip_solver_settings_t<int, double> default_settings{};
+  detail::relaxed_lp_settings_t lp_settings;
+  lp_settings.time_limit = 120.;
+  lp_settings.tolerance  = default_settings.tolerances.absolute_tolerance;
 
   // run the problem through pdlp
-  auto result_1 = detail::get_relaxed_lp_solution(
-    standardized_problem, solution_1, default_settings.tolerances.absolute_tolerance, 120.);
+  auto result_1 = detail::get_relaxed_lp_solution(standardized_problem, solution_1, lp_settings);
   solution_1.compute_feasibility();
   bool sol_1_feasible = (int)result_1.get_termination_status() == CUOPT_TERIMINATION_STATUS_OPTIMAL;
   // the problem might not be feasible in terms of per constraint residual
   // only consider the pdlp results
   EXPECT_TRUE(sol_1_feasible);
   standardized_problem.post_process_solution(solution_1);
+  solution_1.problem_ptr = &original_problem;
   auto optimization_prob_solution =
     solution_1.get_solution(sol_1_feasible, solver_stats_t<int, double>{});
   test_objective_sanity(problem,
