@@ -191,6 +191,7 @@ bool apply_lp_polish(fj_cpu_climber_t<i_t, f_t>& fj_cpu, double budget_s)
   fj_cpu.perturb_streak        = 0;
   fj_cpu.feasible_found        = true;
   report_cpu_incumbent(fj_cpu);
+  share_cpu_incumbent(fj_cpu);
   return true;
 }
 
