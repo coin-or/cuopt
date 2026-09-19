@@ -128,6 +128,7 @@ void apply_lane_diversification(fj_cpu_climber_t<i_t, f_t>& c, int lane, int64_t
   c.use_fundamental_cycle_pivot    = lane == 3 || lane == 5 || lane == 10 || lane == 13;
   c.network_temperature            = lane == 5 ? f_t{0.05} : lane == 13 ? f_t{0.2} : f_t{0};
   c.use_pmedian_start              = lane == 5;
+  c.use_sat_search                 = lane % 2 == 1;
   c.use_equality_substitution      = lane % 4 == 0 && !c.low_latency;
   c.use_bound_prop                 = lane % 2 == 0 && !c.low_latency;
   c.use_weight_donation            = lane % 8 == 5 || lane % 8 == 6;

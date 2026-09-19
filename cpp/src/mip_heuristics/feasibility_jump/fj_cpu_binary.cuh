@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <functional>
 
 // The fast path applies to instances whose variables are all binary and whose rows carry integer
 // coefficients within int8 or int16 range. On those it runs a SIMD integer engine: exact
@@ -137,6 +138,13 @@ bool fj_bin_encode(const fj_cpu_climber_t<i_t, f_t>& c,
                    fj_bin_problem_t<coef_t>& pb,
                    int& coefficient_bits,
                    fj_bin_setup_times_t& times);
+
+template <typename coef_t>
+int fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
+                      std::vector<int8_t>& assignment,
+                      uint64_t seed,
+                      const std::function<bool()>& stop,
+                      int64_t& steps);
 
 // Returns true if the fast path ran (eligible and narrowed); false if declined, in which case the
 // caller should take the general path.
