@@ -211,7 +211,9 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
   [[maybe_unused]] i_t local_mins = 0;
   std::vector<fj_move_t> batch_moves;
   const double loop_start         = paid_setup ? solve_start : tic();
-  bool first_cross_needs_polish   = fj_cpu->use_lp_polish;
+  bool first_cross_needs_polish =
+    fj_cpu->use_lp_polish &&
+    !(fj_cpu->use_fundamental_cycle_pivot && fj_cpu->fixed_charge_network.certified);
 
   // Initialize feature tracking
   fj_cpu->iterations_since_best = 0;
@@ -279,6 +281,9 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
       recompute_slack(*fj_cpu);
     }
 
+    const bool network_iteration = try_fundamental_cycle_pivot(*fj_cpu);
+
+    if (!network_iteration) {
     fj_move_t move          = fj_move_t{-1, 0};
     fj_staged_score_t score = fj_staged_score_t::invalid();
     bool is_lift            = false;
@@ -437,6 +442,7 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
         if (move.var_idx >= 0) { apply_move(*fj_cpu, move.var_idx, move.value, true); }
       }
       ++local_mins;
+    }
     }
 
     if (fj_cpu->log_interval && fj_cpu->iterations % fj_cpu->log_interval == 0) {
