@@ -451,6 +451,14 @@ void build_one_sided_rows(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   fj_cpu.release_setup_structures();
 }
 
+template <typename i_t, typename f_t>
+struct staged_row_t {
+  i_t index;
+  std::vector<std::pair<i_t, f_t>> terms;
+  f_t lower;
+  f_t upper;
+};
+
 // Eliminate coordinates through exact equalities while retaining each pivot's domain as a row.
 // Integer pivots are accepted only when divisibility proves that every lifted value stays integral.
 // FJ usually struggles with equality-heavy models since every move may result in equality rows
@@ -506,12 +514,6 @@ std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> make_equality_reduced_climber(
     return rows[a].size() < rows[b].size();
   });
 
-  struct staged_row_t {
-    i_t index;
-    std::vector<term_t> terms;
-    f_t lower;
-    f_t upper;
-  };
   // Sparse binary scheduling models can encode resource usage as a chain of unit
   // differences. Partial elimination leaves the same equality barrier in place;
   // allow enough fill to expose the cumulative capacity rows on this class only.
@@ -588,7 +590,7 @@ std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> make_equality_reduced_climber(
     auto affected = incidence[pivot];
     std::sort(affected.begin(), affected.end());
     affected.erase(std::unique(affected.begin(), affected.end()), affected.end());
-    std::vector<staged_row_t> staged;
+    std::vector<staged_row_t<i_t, f_t>> staged;
     int64_t next_nnz = nnz - (int64_t)equation.size() + (int64_t)sub.terms.size();
     bool rejected    = false;
     for (i_t row_index : affected) {
@@ -602,10 +604,10 @@ std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> make_equality_reduced_climber(
         old.begin(), old.end(), pivot, [](const term_t& t, i_t v) { return t.first < v; });
       if (entry == old.end() || entry->first != pivot) continue;
       const f_t factor = entry->second;
-      staged_row_t replacement{row_index,
-                               {},
-                               std::fma(-factor, sub.constant, lower[row_index]),
-                               std::fma(-factor, sub.constant, upper[row_index])};
+      staged_row_t<i_t, f_t> replacement{row_index,
+                                         {},
+                                         std::fma(-factor, sub.constant, lower[row_index]),
+                                         std::fma(-factor, sub.constant, upper[row_index])};
       if ((std::isfinite(lower[row_index]) && !std::isfinite(replacement.lower)) ||
           (std::isfinite(upper[row_index]) && !std::isfinite(replacement.upper))) {
         rejected = true;
@@ -636,7 +638,7 @@ std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> make_equality_reduced_climber(
         rejected = true;
         break;
       }
-      staged.push_back(std::move(replacement));
+      staged.emplace_back(std::move(replacement));
     }
     if (rejected) continue;
 

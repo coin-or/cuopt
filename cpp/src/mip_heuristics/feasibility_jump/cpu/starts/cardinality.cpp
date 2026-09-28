@@ -12,6 +12,11 @@
 
 namespace cuopt::mathematical_optimization::mip {
 
+template <typename i_t>
+struct exact_k_row_t {
+  i_t k, begin, end;
+};
+
 template <typename i_t, typename f_t>
 void apply_exact_k_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 {
@@ -23,12 +28,9 @@ void apply_exact_k_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
            fj_cpu.hp.exact_k_budget_s;
   };
 
-  struct exact_k_row_t {
-    i_t k, begin, end;
-  };
-  std::vector<exact_k_row_t> rows;
+  std::vector<exact_k_row_t<i_t>> rows;
   for (i_t row = 0; row < fj_cpu.problem->n_constraints; ++row) {
-    if ((row & 0xFFF) == 0 && timed_out()) return;
+    if ((row % 4096) == 0 && timed_out()) return;
 
     const f_t lb = fj_cpu.problem->cstr_lb[row];
     const f_t ub = fj_cpu.problem->cstr_ub[row];
@@ -58,7 +60,7 @@ void apply_exact_k_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   }
   if (rows.empty()) return;
 
-  std::sort(rows.begin(), rows.end(), [](const exact_k_row_t& a, const exact_k_row_t& b) {
+  std::sort(rows.begin(), rows.end(), [](const exact_k_row_t<i_t>& a, const exact_k_row_t<i_t>& b) {
     return a.end - a.begin < b.end - b.begin;
   });
 
