@@ -22,7 +22,7 @@ bool apply_fixed_charge_network_start(fj_cpu_climber_t<i_t, f_t>& c, double budg
 {
   const auto& p = *c.problem;
   if (budget <= 0 || !c.n_binary_vars || c.n_binary_vars == p.n_variables) return false;
-  phase_timer_t timer(c.t_start);
+  phase_timer_t timer(c.stats.t_start);
   const auto started = std::chrono::steady_clock::now();
   auto expired       = [&] {
     return c.preemption_flag.load(std::memory_order_relaxed) ||

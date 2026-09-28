@@ -261,7 +261,7 @@ template <typename i_t, typename f_t>
 bool apply_pmedian_start(fj_cpu_climber_t<i_t, f_t>& c, double budget)
 {
   if (budget <= 0) return false;
-  phase_timer_t timer(c.t_start);
+  phase_timer_t timer(c.stats.t_start);
   const auto started = std::chrono::steady_clock::now();
   auto expired       = [&] {
     return c.preemption_flag.load(std::memory_order_relaxed) ||

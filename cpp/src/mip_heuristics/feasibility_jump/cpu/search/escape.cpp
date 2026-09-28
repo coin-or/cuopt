@@ -124,7 +124,7 @@ void perturb(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
     }
   }
 
-  ++fj_cpu.n_lhs_recompute_perturb;
+  ++fj_cpu.stats.n_lhs_recompute_perturb;
   ++fj_cpu.perturb_streak;
   recompute_slack(fj_cpu);
   retire_var_best_moves<i_t, f_t>(fj_cpu);
@@ -145,7 +145,7 @@ void restart_from_infeasible_checkpoint(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   cuopt_assert(fj_cpu.h_assignment.size() == fj_cpu.h_best_infeasible_assignment.size(),
                "incumbent_assignment span would be invalidated");
   fj_cpu.h_assignment = fj_cpu.h_best_infeasible_assignment;
-  ++fj_cpu.n_lhs_recompute_restart;
+  ++fj_cpu.stats.n_lhs_recompute_restart;
   recompute_slack(fj_cpu);
   invalidate_mtm_cache(fj_cpu);
   cuopt_func_call(audit_assignment_bounds(fj_cpu, "checkpoint restore"));
@@ -224,7 +224,7 @@ void track_infeasible_checkpoint(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
     if (severity < fj_cpu.checkpoint_severity * fj_cpu.infeasible_checkpoint_refresh_ratio) {
       fj_cpu.h_best_infeasible_assignment = fj_cpu.h_assignment;
       fj_cpu.checkpoint_severity          = severity;
-      ++fj_cpu.n_checkpoint_snapshots;
+      ++fj_cpu.stats.n_checkpoint_snapshots;
     }
     return;
   }
@@ -247,7 +247,7 @@ void track_infeasible_checkpoint(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
       for (i_t var = 0; var < fj_cpu.problem->n_variables; ++var)
         if (!soft || rng.next_double() < 0.3) randomize_variable<i_t, f_t>(fj_cpu, var, rng);
 
-      ++fj_cpu.n_lhs_recompute_restart;
+      ++fj_cpu.stats.n_lhs_recompute_restart;
       recompute_slack(fj_cpu);
       invalidate_mtm_cache(fj_cpu);
       reset_infeasible_checkpoint(fj_cpu);
@@ -270,10 +270,10 @@ void track_infeasible_checkpoint(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 
   restart_from_infeasible_checkpoint(fj_cpu);
 
-  ++fj_cpu.n_checkpoint_restores;
+  ++fj_cpu.stats.n_checkpoint_restores;
   ++fj_cpu.restores_since_improvement;
-  if (fj_cpu.restores_since_improvement > fj_cpu.max_restores_since_improvement)
-    fj_cpu.max_restores_since_improvement = fj_cpu.restores_since_improvement;
+  if (fj_cpu.restores_since_improvement > fj_cpu.stats.max_restores_since_improvement)
+    fj_cpu.stats.max_restores_since_improvement = fj_cpu.restores_since_improvement;
   fj_cpu.iters_since_infeasible_improve = 0;
 }
 

@@ -218,10 +218,10 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
   // Initialize feature tracking
   fj_cpu->iterations_since_best = 0;
   reset_infeasible_checkpoint(*fj_cpu);
-  fj_cpu->n_checkpoint_restores          = 0;
-  fj_cpu->n_checkpoint_snapshots         = 0;
-  fj_cpu->restores_since_improvement     = 0;
-  fj_cpu->max_restores_since_improvement = 0;
+  fj_cpu->stats.n_checkpoint_restores          = 0;
+  fj_cpu->stats.n_checkpoint_snapshots         = 0;
+  fj_cpu->restores_since_improvement           = 0;
+  fj_cpu->stats.max_restores_since_improvement = 0;
 
   // The recompute is O(nnz), so a fixed period costs a growing share of the budget.
   cuopt_assert(fj_cpu->settings.parameters.lhs_refresh_period > 0,
@@ -494,9 +494,9 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
                   avg_time_per_iter * 1000.0);
   CUOPT_LOG_DEBUG("%sCPUFJ checkpoint: %lld restores, %lld snapshots, max streak %d",
                   fj_cpu->log_prefix.c_str(),
-                  (long long)fj_cpu->n_checkpoint_restores,
-                  (long long)fj_cpu->n_checkpoint_snapshots,
-                  fj_cpu->max_restores_since_improvement);
+                  (long long)fj_cpu->stats.n_checkpoint_restores,
+                  (long long)fj_cpu->stats.n_checkpoint_snapshots,
+                  fj_cpu->stats.max_restores_since_improvement);
   log_batch_distribution(*fj_cpu);
 }
 

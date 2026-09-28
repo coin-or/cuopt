@@ -22,7 +22,7 @@ namespace cuopt::mathematical_optimization::mip {
 template <typename i_t, typename f_t>
 void apply_affine_equality_start(fj_cpu_climber_t<i_t, f_t>& c, double budget)
 {
-  phase_timer_t timer(c.t_start);
+  phase_timer_t timer(c.stats.t_start);
   const auto started = std::chrono::steady_clock::now();
   auto expired       = [&] {
     return c.preemption_flag.load(std::memory_order_relaxed) ||
@@ -286,7 +286,7 @@ void apply_affine_equality_start(fj_cpu_climber_t<i_t, f_t>& c, double budget)
 template <typename i_t, typename f_t>
 void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c)
 {
-  phase_timer_t timer(c.t_start);
+  phase_timer_t timer(c.stats.t_start);
   const auto& p    = *c.problem;
   const i_t n_vars = p.n_variables;
   const i_t n_rows = p.n_constraints;
