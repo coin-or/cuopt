@@ -80,23 +80,16 @@ bool solve_lp_relaxation(const simplex::user_problem_t<i_t, f_t>& relaxation,
   simplex::lp_status_t status = simplex::lp_status_t::UNSET;
   double seconds              = 0;
 
-  // solve_linear_program_advanced, whose status separates a limit -- which leaves a usable vertex
-  // behind -- from infeasibility. Guarded on f_t because dual simplex is only built for double.
-  if constexpr (std::is_same_v<f_t, double>) {
-    simplex_solver_settings_t<i_t, f_t> lp_settings;
-    lp_settings.relaxation = true;
-    lp_settings.time_limit = time_limit;
-    lp_settings.log.log    = false;
-    // The portfolio already pins one CPU per lane, and the simplex default is
-    // omp_get_max_threads() - 1, which would open a second portfolio inside this lane's worker.
-    lp_settings.num_threads = 1;
+  simplex_solver_settings_t<i_t, f_t> lp_settings;
+  lp_settings.relaxation = true;
+  lp_settings.time_limit = time_limit;
+  lp_settings.log.log    = false;
 
-    const f_t lp_start = tic();
-    simplex::lp_solution_t<i_t, f_t> lp_solution(relaxation.num_rows, relaxation.num_cols);
-    status  = simplex::solve_linear_program(relaxation, lp_settings, lp_start, lp_solution);
-    x       = std::move(lp_solution.x);
-    seconds = toc(lp_start);
-  }
+  const f_t lp_start = tic();
+  simplex::lp_solution_t<i_t, f_t> lp_solution(relaxation.num_rows, relaxation.num_cols);
+  status  = simplex::solve_linear_program(relaxation, lp_settings, lp_start, lp_solution);
+  x       = std::move(lp_solution.x);
+  seconds = toc(lp_start);
   lp_seconds += seconds;
 
   const bool usable =

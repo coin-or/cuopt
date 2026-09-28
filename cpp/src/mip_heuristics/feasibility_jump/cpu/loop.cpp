@@ -85,30 +85,32 @@ bool try_equality_substituted_solve(fj_cpu_climber_t<i_t, f_t>& c,
     time_limit - std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
   if (remaining <= 0) return false;
 
-  bool rejected_lift    = false;
-  child->work_unit_bias = c.work_unit_bias;
-  child->improvement_callback =
-    [&](f_t child_objective, const std::vector<f_t>& assignment, double work) {
-      if (assignment.size() != retained.size()) {
-        rejected_lift = true;
-        child->halted = true;
-        return;
-      }
-      const std::vector<f_t> lifted =
-        lift_equality_substituted_assignment(c, assignment, retained, substitutions);
-      if (lifted.empty()) {
-        rejected_lift = true;
-        child->halted = true;
-        return;
-      }
-      const f_t objective = child_objective + child->problem->objective_offset;
-      if (!c.feasible_found || objective < c.h_best_objective) {
-        c.h_best_assignment = lifted;
-        c.h_best_objective  = objective;
-        c.feasible_found    = true;
-      }
-      report_cpu_incumbent(c, objective, lifted, work);
-    };
+  bool rejected_lift          = false;
+  child->work_unit_bias       = c.work_unit_bias;
+  child->improvement_callback = [&](f_t, const std::vector<f_t>& assignment, double work) {
+    if (assignment.size() != retained.size()) {
+      rejected_lift = true;
+      child->halted = true;
+      return;
+    }
+    const std::vector<f_t> lifted =
+      lift_equality_substituted_assignment(c, assignment, retained, substitutions);
+    if (lifted.empty()) {
+      rejected_lift = true;
+      child->halted = true;
+      return;
+    }
+    const f_t objective = compensated_dot2_indexed(c.problem->h_obj_coeffs.data(),
+                                                   lifted.data(),
+                                                   c.problem->h_objective_vars.data(),
+                                                   c.problem->h_objective_vars.size());
+    if (!c.feasible_found || objective < c.h_best_objective) {
+      c.h_best_assignment = lifted;
+      c.h_best_objective  = objective;
+      c.feasible_found    = true;
+    }
+    report_cpu_incumbent(c, objective, lifted, work);
+  };
 
   const auto setup_stats = static_cast<const fj_stats_t<i_t>&>(c);
   cpufj_solve(child.get(), remaining, work_unit_limit);
@@ -126,11 +128,10 @@ bool try_equality_substituted_solve(fj_cpu_climber_t<i_t, f_t>& c,
     std::vector<f_t> lifted = lift_equality_substituted_assignment(
       c, child->h_best_assignment.underlying(), retained, substitutions);
     if (lifted.empty()) return c.feasible_found;
-    const f_t objective = compensated_dot2(
-      thrust::make_permutation_iterator(c.problem->h_obj_coeffs.data(),
-                                        c.problem->h_objective_vars.data()),
-      thrust::make_permutation_iterator(lifted.data(), c.problem->h_objective_vars.data()),
-      c.problem->h_objective_vars.size());
+    const f_t objective = compensated_dot2_indexed(c.problem->h_obj_coeffs.data(),
+                                                   lifted.data(),
+                                                   c.problem->h_objective_vars.data(),
+                                                   c.problem->h_objective_vars.size());
     if (!c.feasible_found || objective < c.h_best_objective) {
       c.h_best_assignment = std::move(lifted);
       c.h_best_objective  = objective;
