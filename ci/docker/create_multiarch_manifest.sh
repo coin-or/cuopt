@@ -39,12 +39,8 @@ create_manifest() {
         return 1
     fi
 
-    # Create the manifest. Purge any stale local manifest-list state first: if
-    # $manifest_name already exists on the registry (e.g. re-running for a
-    # tag like "latest" that a prior release also published), `--amend`
-    # pulls in that existing remote list and appends to it instead of
-    # replacing it, leaving duplicate per-arch entries (old digests alongside
-    # the new ones) that split ambiguously across identical platforms.
+    # Purge stale local state first - --amend on an existing tag (e.g. "latest")
+    # would merge with it instead of replacing, duplicating per-arch entries.
     echo "Creating multi-arch manifest..."
     docker manifest rm "$manifest_name" >/dev/null 2>&1 || true
     docker manifest create "$manifest_name" "$amd64_image" "$arm64_image"
