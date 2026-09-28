@@ -111,7 +111,7 @@ void apply_lane_diversification(fj_cpu_climber_t<i_t, f_t>& c, int lane, int64_t
   }
 
   {
-    phase_timer_t timer(c.t_start);
+    phase_timer_t timer(c.stats.t_start);
     switch (lane % 8) {
       case 1: apply_structural_completion_start<i_t, f_t>(c); break;
       case 3: apply_greedy_covering_start<i_t, f_t>(c); break;

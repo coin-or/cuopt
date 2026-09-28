@@ -240,7 +240,7 @@ void apply_lp_rounded_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu, f_t lane_time_li
   if (budget <= 0) return;
 
   CPUFJ_NVTX_RANGE("CPUFJ::apply_lp_rounded_start");
-  phase_timer_t timer(fj_cpu.t_lp_start);
+  phase_timer_t timer(fj_cpu.stats.t_lp_start);
 
   simplex::user_problem_t<i_t, f_t> base = *fj_cpu.problem->host_lp;
   if (fj_cpu.lp_start_feasibility_objective)
@@ -278,7 +278,7 @@ void apply_lp_rounded_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu, f_t lane_time_li
     const auto& relaxation = projection == 0 ? base : distance;
 
     std::vector<f_t> x;
-    if (!solve_lp_relaxation(relaxation, remaining, x, fj_cpu.t_lp_relaxation)) break;
+    if (!solve_lp_relaxation(relaxation, remaining, x, fj_cpu.stats.t_lp_relaxation)) break;
     // convert_user_problem appends slacks, so the model's own variables are the leading columns.
     if ((i_t)x.size() < n_variables) break;
 
@@ -320,7 +320,7 @@ void apply_lp_rounded_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu, f_t lane_time_li
       if (repair_budget > 0.01) {
         auto fixed = make_fixed_integer_lp(base, fj_cpu, rounded);
         std::vector<f_t> repaired;
-        if (solve_lp_relaxation(fixed, repair_budget, repaired, fj_cpu.t_lp_relaxation) &&
+        if (solve_lp_relaxation(fixed, repair_budget, repaired, fj_cpu.stats.t_lp_relaxation) &&
             (i_t)repaired.size() >= n_variables) {
           for (i_t var = 0; var < n_variables; ++var)
             if (!is_integer_var<i_t, f_t>(fj_cpu, var)) candidate[var] = repaired[var];
@@ -372,7 +372,7 @@ bool apply_lp_polish(fj_cpu_climber_t<i_t, f_t>& fj_cpu, double budget_s)
     has_continuous |= !is_integer_var<i_t, f_t>(fj_cpu, var);
   if (!has_continuous) return false;
 
-  phase_timer_t timer(fj_cpu.t_lp_start);
+  phase_timer_t timer(fj_cpu.stats.t_lp_start);
   simplex::user_problem_t<i_t, f_t> relaxation = *fj_cpu.problem->host_lp;
   if ((i_t)relaxation.lower.size() < n || (i_t)relaxation.upper.size() < n) return false;
 
@@ -382,7 +382,8 @@ bool apply_lp_polish(fj_cpu_climber_t<i_t, f_t>& fj_cpu, double budget_s)
   }
 
   std::vector<f_t> x;
-  if (!solve_lp_relaxation(relaxation, budget_s, x, fj_cpu.t_lp_relaxation) || (i_t)x.size() < n)
+  if (!solve_lp_relaxation(relaxation, budget_s, x, fj_cpu.stats.t_lp_relaxation) ||
+      (i_t)x.size() < n)
     return false;
 
   std::vector<f_t> completion(n);

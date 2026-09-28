@@ -76,7 +76,7 @@ bool try_equality_substituted_solve(fj_cpu_climber_t<i_t, f_t>& c,
   std::vector<i_t> retained;
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> child;
   {
-    phase_timer_t timer(c.t_start);
+    phase_timer_t timer(c.stats.t_start);
     child =
       make_equality_reduced_climber(c, std::min(0.75, 0.15 * time_limit), substitutions, retained);
   }
@@ -112,14 +112,15 @@ bool try_equality_substituted_solve(fj_cpu_climber_t<i_t, f_t>& c,
     report_cpu_incumbent(c, objective, lifted, work);
   };
 
-  const auto setup_stats = static_cast<const fj_stats_t<i_t>&>(c);
+  const auto setup_stats = c.stats;
   cpufj_solve(child.get(), remaining, work_unit_limit);
-  static_cast<fj_stats_t<i_t>&>(c) = static_cast<const fj_stats_t<i_t>&>(*child);
-  c.t_start += setup_stats.t_start;
-  c.t_bound_prop += setup_stats.t_bound_prop;
-  c.t_lp_start += setup_stats.t_lp_start;
-  c.t_features += setup_stats.t_features;
-  c.t_init_lhs += setup_stats.t_init_lhs;
+  c.stats = child->stats;
+  c.stats.t_start += setup_stats.t_start;
+  c.stats.t_bound_prop += setup_stats.t_bound_prop;
+  c.stats.t_lp_start += setup_stats.t_lp_start;
+  c.stats.t_coloring += setup_stats.t_coloring;
+  c.stats.t_features += setup_stats.t_features;
+  c.stats.t_init_lhs += setup_stats.t_init_lhs;
   c.iterations = child->iterations;
   c.work_units_elapsed.store(child->work_units_elapsed.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
@@ -204,7 +205,7 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
   const i_t refresh_period = fj_cpu->settings.parameters.lhs_refresh_period * (1 + nnz_stretch);
   // const i_t refresh_period = 5000 * (1 + nnz_stretch);
   cuopt_assert(refresh_period > 0, "refresh period overflowed");
-  fj_cpu->lhs_refresh_period_used = refresh_period;
+  fj_cpu->stats.lhs_refresh_period_used = refresh_period;
 
   // Whatever the start left behind, these rows are satisfiable on their own, so the walk should not
   // start with them in the violated set competing for the sampler's attention.
@@ -216,7 +217,7 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
           current, current + delta, fj_cpu->total_violations, fj_cpu->total_violations))
       continue;
     apply_move(*fj_cpu, var, delta, false);
-    ++fj_cpu->n_epigraph_projections;
+    ++fj_cpu->stats.n_epigraph_projections;
   }
 
   while (!fj_cpu->halted && !fj_cpu->preemption_flag.load()) {
@@ -247,11 +248,11 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
     // periodically recompute the slacks and violation scores
     // to correct any accumulated numerical errors
     if (fj_cpu->trigger_early_lhs_recomputation) {
-      ++fj_cpu->n_lhs_recompute_bigval;
+      ++fj_cpu->stats.n_lhs_recompute_bigval;
       recompute_slack(*fj_cpu);
       fj_cpu->trigger_early_lhs_recomputation = false;
     } else if (fj_cpu->iterations % refresh_period == 0) {
-      ++fj_cpu->n_lhs_recompute_periodic;
+      ++fj_cpu->stats.n_lhs_recompute_periodic;
       recompute_slack(*fj_cpu);
     }
 
@@ -298,7 +299,7 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
         project_epigraph_variable(*fj_cpu, move.var_idx) - (f_t)fj_cpu->h_assignment[move.var_idx];
       if (projected != f_t{0}) {
         move.value = projected;
-        ++fj_cpu->n_epigraph_projections;
+        ++fj_cpu->stats.n_epigraph_projections;
       }
     }
 

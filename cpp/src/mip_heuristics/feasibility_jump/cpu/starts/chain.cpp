@@ -16,7 +16,7 @@ namespace cuopt::mathematical_optimization::mip {
 template <typename i_t, typename f_t>
 void apply_precedence_completion_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 {
-  phase_timer_t timer(fj_cpu.t_start);
+  phase_timer_t timer(fj_cpu.stats.t_start);
   const i_t n_constraints = fj_cpu.problem->n_constraints;
 
   i_t lower_only = 0;

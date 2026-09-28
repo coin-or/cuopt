@@ -155,7 +155,7 @@ template <typename i_t, typename f_t>
 void precompute_problem_features(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
                                  fj_cpu_problem_t<i_t, f_t>& problem)
 {
-  phase_timer_t timer(fj_cpu.t_features);
+  phase_timer_t timer(fj_cpu.stats.t_features);
   fj_cpu.n_binary_vars  = 0;
   fj_cpu.n_integer_vars = 0;
   for (i_t i = 0; i < (i_t)fj_cpu.h_is_binary_variable.size(); i++) {

@@ -38,7 +38,7 @@ static fj_staged_score_t two_opt_compute_pair_score(
   const fj_move_t endpoints[2] = {{first, first_delta}, {second, second_delta}};
   for (const auto& [var_idx, delta] : endpoints) {
     const auto [offset_begin, offset_end] = fj_cpu.range_for_variable(var_idx);
-    fj_cpu.nnz_processed_window += offset_end - offset_begin;
+    fj_cpu.stats.nnz_processed_window += offset_end - offset_begin;
     for (i_t i = offset_begin; i < offset_end; ++i) {
       const i_t cstr_idx = fj_cpu.h_reverse_constraints[i];
       const f_t coeff    = fj_cpu.h_reverse_coefficients[i];
@@ -115,7 +115,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
     best_objective_delta = static_cast<double>(fj_cpu.problem->h_obj_coeffs[var]) * delta;
   };
 
-  ++fj_cpu.n_mtm_calls;
+  ++fj_cpu.stats.n_mtm_calls;
 
   // Each row contributes at most its share of the sampling budget. The gate below sits inside the
   // walk, so an uncapped wide row is walked in full whatever the budget says.
@@ -127,9 +127,9 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
     auto [offset_begin, offset_end] = fj_cpu.range_for_row((i_t)cstr_idx);
     const i_t width                 = offset_end - offset_begin;
     entries += std::min(width, per_row_cap);
-    fj_cpu.mtm_entries_capped += (int64_t)std::max<i_t>(0, width - per_row_cap);
+    fj_cpu.stats.mtm_entries_capped += (int64_t)std::max<i_t>(0, width - per_row_cap);
   }
-  fj_cpu.mtm_row_entries += (int64_t)entries;
+  fj_cpu.stats.mtm_row_entries += (int64_t)entries;
 
   // The exact sum over the candidate variables costs one random offset read each to set a single
   // sampling rate. The mean reverse degree estimates it in constant time.
@@ -163,7 +163,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
           // cuopt_assert(fj_cpu.check_variable_within_bounds(var_idx,
           // fj_cpu.h_assignment[var_idx] + cached_move.first), "best move is not within bounds");
         }
-        fj_cpu.hit_count++;
+        fj_cpu.stats.hit_count++;
         continue;
       }
 
@@ -215,7 +215,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
       cuopt_assert(move.var_idx >= 0, "move.var_idx is not positive");
 
       auto [score, infeasibility] = compute_score<i_t, f_t>(fj_cpu, var_idx, delta);
-      fj_cpu.miss_count++;
+      fj_cpu.stats.miss_count++;
       // reject this move if it would increase the target variable to a numerically unstable value
       if (!fj_cpu.move_numerically_stable(val, new_val, infeasibility, fj_cpu.total_violations))
         continue;

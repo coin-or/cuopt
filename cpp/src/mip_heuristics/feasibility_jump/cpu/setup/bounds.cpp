@@ -95,7 +95,7 @@ void apply_bound_propagation(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 {
   if (!fj_cpu.use_bound_prop) return;
   CPUFJ_NVTX_RANGE("CPUFJ::apply_bound_propagation");
-  phase_timer_t timer(fj_cpu.t_bound_prop);
+  phase_timer_t timer(fj_cpu.stats.t_bound_prop);
 
   const i_t n_variables   = fj_cpu.problem->n_variables;
   const i_t n_constraints = fj_cpu.problem->n_constraints;

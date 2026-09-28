@@ -49,7 +49,7 @@ void perturb(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   for (auto var_idx : sampled_vars)
     randomize_variable<i_t, f_t>(fj_cpu, var_idx, rng);
 
-  ++fj_cpu.n_lhs_recompute_perturb;
+  ++fj_cpu.stats.n_lhs_recompute_perturb;
   recompute_slack(fj_cpu);
 }
 

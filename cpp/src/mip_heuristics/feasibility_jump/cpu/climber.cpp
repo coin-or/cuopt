@@ -152,7 +152,7 @@ void finalize_fj_cpu_host_initialization(
   fj_cpu.satisfied_constraints.resize(n_constraints);
 
   {
-    phase_timer_t timer(fj_cpu.t_init_lhs);
+    phase_timer_t timer(fj_cpu.stats.t_init_lhs);
     recompute_lhs(fj_cpu);
   }
 

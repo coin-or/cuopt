@@ -893,7 +893,7 @@ struct fj_bin_engine_t {
 
   void init(fj_cpu_climber_t<i_t, f_t>& climber)
   {
-    phase_timer_t timer(climber.bin_setup.engine_init);
+    phase_timer_t timer(climber.stats.bin_setup.engine_init);
     const auto& params  = climber.settings.parameters;
     seed                = climber.settings.seed;
     rng                 = raft::random::PCGenerator((uint64_t)seed, 0, 0);
@@ -1108,16 +1108,16 @@ bool try_cpufj_binary_solve(fj_cpu_climber_t<i_t, f_t>& climber,
   static const bool disabled = std::getenv("CUOPT_NO_BINFJ") != nullptr;
   if (disabled || climber.low_latency) return false;
 
-  const fj_bin_scan_t scan = fj_bin_scan(climber, climber.bin_setup);
+  const fj_bin_scan_t scan = fj_bin_scan(climber, climber.stats.bin_setup);
   if (scan.reject != fj_binary_reject_t::none) {
     if (scan.reject == fj_binary_reject_t::non_binary_var && climber.use_integer_bit_encoding) {
       fj_bin_engine_t<i_t, f_t, int16_t> probe;
       int bits = 0;
-      if (fj_bin_encode(climber, probe.pb, bits, climber.bin_setup)) {
+      if (fj_bin_encode(climber, probe.pb, bits, climber.stats.bin_setup)) {
         if (bits == 8) {
           fj_bin_engine_t<i_t, f_t, int8_t> engine8;
           int bits8 = 0;
-          if (fj_bin_encode(climber, engine8.pb, bits8, climber.bin_setup)) {
+          if (fj_bin_encode(climber, engine8.pb, bits8, climber.stats.bin_setup)) {
             CUOPT_LOG_DEBUG("%sCPUFJ binary fast path enabled (encoded int8): %d bits, %d rows",
                             climber.log_prefix.c_str(),
                             engine8.pb.n_variables,
@@ -1145,7 +1145,7 @@ bool try_cpufj_binary_solve(fj_cpu_climber_t<i_t, f_t>& climber,
   }
 
   auto run = [&](auto& engine) -> bool {
-    fj_bin_narrow(climber, scan, engine.pb, climber.bin_setup);
+    fj_bin_narrow(climber, scan, engine.pb, climber.stats.bin_setup);
     if (engine.pb.n_variables == 0) return false;
     CUOPT_LOG_DEBUG(
       "%sCPUFJ binary fast path enabled: int%d coefficients, %d rows after one-sided split",

@@ -396,8 +396,9 @@ struct fj_cpu_climber_t : fj_tabu_t<i_t>,
                           fj_batching_t<i_t, f_t>,
                           fj_bin_bridge_t<i_t, f_t>,
                           fj_lane_policy_t<i_t, f_t>,
-                          fj_stats_t<i_t>,
                           fj_runtime_t<i_t, f_t> {
+  fj_stats_t<i_t> stats;
+
   fj_cpu_climber_t(std::atomic<bool>& preemption_flag) : fj_runtime_t<i_t, f_t>(preemption_flag)
   {
 #define ADD_INSTRUMENTED(var) \

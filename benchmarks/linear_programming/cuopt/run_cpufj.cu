@@ -673,21 +673,21 @@ int main(int argc, char** argv)
     "------------+-------------+-----------+-----------\n");
   for (int k = 0; k < n_climbers; ++k) {
     const auto& c        = *climbers[k];
-    const int64_t bitmap = 2 * c.n_moves_applied * (int64_t)c.problem->n_variables;
-    const int64_t probes = c.hit_count + c.miss_count;
+    const int64_t bitmap = 2 * c.stats.n_moves_applied * (int64_t)c.problem->n_variables;
+    const int64_t probes = c.stats.hit_count + c.stats.miss_count;
     std::printf(
       " %7d | %9lld | %10lld | %8.1f | %12lld | %5.0f | %10lld | %11lld | %9lld |"
       " %9.2f\n",
       k,
-      (long long)c.n_moves_applied,
-      (long long)c.apply_move_nnz,
-      c.n_moves_applied > 0 ? (double)c.apply_move_nnz / c.n_moves_applied : 0.0,
+      (long long)c.stats.n_moves_applied,
+      (long long)c.stats.apply_move_nnz,
+      c.stats.n_moves_applied > 0 ? (double)c.stats.apply_move_nnz / c.stats.n_moves_applied : 0.0,
       (long long)bitmap,
-      c.apply_move_nnz > 0 ? (double)bitmap / c.apply_move_nnz : 0.0,
-      (long long)c.n_version_bumps_apply,
-      (long long)c.n_version_bumps_weights,
-      (long long)c.n_mtm_cache_invalidations,
-      probes > 0 ? 100.0 * c.hit_count / probes : 0.0);
+      c.stats.apply_move_nnz > 0 ? (double)bitmap / c.stats.apply_move_nnz : 0.0,
+      (long long)c.stats.n_version_bumps_apply,
+      (long long)c.stats.n_version_bumps_weights,
+      (long long)c.stats.n_mtm_cache_invalidations,
+      probes > 0 ? 100.0 * c.stats.hit_count / probes : 0.0);
   }
 
   std::printf(
@@ -702,14 +702,16 @@ int main(int argc, char** argv)
       " %7d | %9lld | %11lld | %8.0f | %11lld | %11.0f | %11lld | %9lld | %9.1f |"
       " %10d\n",
       k,
-      (long long)c.n_mtm_calls,
-      (long long)c.mtm_row_entries,
-      c.n_mtm_calls > 0 ? (double)c.mtm_row_entries / c.n_mtm_calls : 0.0,
-      (long long)c.mtm_entries_capped,
-      c.n_mtm_calls > 0 ? (double)c.mtm_entries_capped / c.n_mtm_calls : 0.0,
-      (long long)c.n_compute_score_calls,
-      (long long)c.compute_score_nnz,
-      c.n_compute_score_calls > 0 ? (double)c.compute_score_nnz / c.n_compute_score_calls : 0.0,
+      (long long)c.stats.n_mtm_calls,
+      (long long)c.stats.mtm_row_entries,
+      c.stats.n_mtm_calls > 0 ? (double)c.stats.mtm_row_entries / c.stats.n_mtm_calls : 0.0,
+      (long long)c.stats.mtm_entries_capped,
+      c.stats.n_mtm_calls > 0 ? (double)c.stats.mtm_entries_capped / c.stats.n_mtm_calls : 0.0,
+      (long long)c.stats.n_compute_score_calls,
+      (long long)c.stats.compute_score_nnz,
+      c.stats.n_compute_score_calls > 0
+        ? (double)c.stats.compute_score_nnz / c.stats.n_compute_score_calls
+        : 0.0,
       c.nnz_samples);
   }
 
@@ -723,14 +725,14 @@ int main(int argc, char** argv)
     const auto& c = *climbers[k];
     std::printf(" %7d | %14d | %9lld | %8lld | %6lld | %7lld | %7lld | %8zu | %15lld\n",
                 k,
-                c.lhs_refresh_period_used,
-                (long long)c.n_lhs_recompute_total,
-                (long long)c.n_lhs_recompute_periodic,
-                (long long)c.n_lhs_recompute_bigval,
-                (long long)c.n_lhs_recompute_perturb,
-                (long long)c.n_lhs_recompute_restart,
+                c.stats.lhs_refresh_period_used,
+                (long long)c.stats.n_lhs_recompute_total,
+                (long long)c.stats.n_lhs_recompute_periodic,
+                (long long)c.stats.n_lhs_recompute_bigval,
+                (long long)c.stats.n_lhs_recompute_perturb,
+                (long long)c.stats.n_lhs_recompute_restart,
                 c.epigraph_vars.size(),
-                (long long)c.n_epigraph_projections);
+                (long long)c.stats.n_epigraph_projections);
   }
 
   // Everything a climber spends outside the search loop. lp solve is the simplex share of the LP
@@ -744,18 +746,19 @@ int main(int argc, char** argv)
     "----------+-----------+---------\n");
   for (int k = 0; k < n_climbers; ++k) {
     const auto& c      = *climbers[k];
-    const double total = c.t_start + c.t_bound_prop + c.t_lp_start + c.t_coloring + c.t_features +
-                         c.t_init_lhs + c.bin_setup.total();
+    const double total = c.stats.t_start + c.stats.t_bound_prop + c.stats.t_lp_start +
+                         c.stats.t_coloring + c.stats.t_features + c.stats.t_init_lhs +
+                         c.stats.bin_setup.total();
     std::printf(" %7d | %8.4f | %8.4f | %8.4f | %10.4f | %9.4f | %8.4f | %8.4f | %9.4f | %8.4f\n",
                 k,
-                c.t_start,
-                c.t_bound_prop,
-                c.t_lp_start,
-                c.t_lp_relaxation,
-                c.t_coloring,
-                c.t_features,
-                c.t_init_lhs,
-                c.bin_setup.total(),
+                c.stats.t_start,
+                c.stats.t_bound_prop,
+                c.stats.t_lp_start,
+                c.stats.t_lp_relaxation,
+                c.stats.t_coloring,
+                c.stats.t_features,
+                c.stats.t_init_lhs,
+                c.stats.bin_setup.total(),
                 total);
   }
 
@@ -767,7 +770,7 @@ int main(int argc, char** argv)
   std::printf(
     "---------+----------+------------+-----------+------------+-------------+----------\n");
   for (int k = 0; k < n_climbers; ++k) {
-    const auto& b = climbers[k]->bin_setup;
+    const auto& b = climbers[k]->stats.bin_setup;
     std::printf(" %7d | %8.4f | %10.4f | %9.4f | %10.4f | %11.4f | %9.4f\n",
                 k,
                 b.scan,
