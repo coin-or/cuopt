@@ -10,6 +10,7 @@
 #include "../internal.hpp"
 #include "../problem.hpp"
 #include "../search/api.hpp"
+#include "../search/fp.hpp"
 
 namespace cuopt::mathematical_optimization::mip {
 
@@ -72,135 +73,6 @@ void eliminate_slacks(const lp_problem_t<i_t, f_t>& problem,
 }
 
 template <typename i_t, typename f_t>
-bool solve_lp_relaxation(const simplex::user_problem_t<i_t, f_t>& relaxation,
-                         double time_limit,
-                         std::vector<f_t>& x,
-                         double& lp_seconds)
-{
-  simplex::lp_status_t status = simplex::lp_status_t::UNSET;
-  double seconds              = 0;
-
-  simplex_solver_settings_t<i_t, f_t> lp_settings;
-  lp_settings.relaxation = true;
-  lp_settings.time_limit = time_limit;
-  lp_settings.log.log    = false;
-
-  const f_t lp_start = tic();
-  simplex::lp_solution_t<i_t, f_t> lp_solution(relaxation.num_rows, relaxation.num_cols);
-  status  = simplex::solve_linear_program(relaxation, lp_settings, lp_start, lp_solution);
-  x       = std::move(lp_solution.x);
-  seconds = toc(lp_start);
-  lp_seconds += seconds;
-
-  const bool usable =
-    status == simplex::lp_status_t::OPTIMAL || status == simplex::lp_status_t::TIME_LIMIT ||
-    status == simplex::lp_status_t::ITERATION_LIMIT ||
-    status == simplex::lp_status_t::CONCURRENT_LIMIT || status == simplex::lp_status_t::WORK_LIMIT;
-  CUOPT_LOG_DEBUG("CPUFJ LP relaxation: %s after %.3fs of %.3fs%s",
-                  simplex::lp_status_to_string(status).c_str(),
-                  seconds,
-                  time_limit,
-                  usable ? "" : ", discarded");
-  return usable;
-}
-
-template <typename i_t, typename f_t>
-static simplex::user_problem_t<i_t, f_t> make_lp_distance_problem(
-  const simplex::user_problem_t<i_t, f_t>& base,
-  fj_cpu_climber_t<i_t, f_t>& fj_cpu,
-  const std::vector<f_t>& rounded)
-{
-  std::vector<i_t> integer_vars;
-  for (i_t var = 0; var < fj_cpu.problem->n_variables; ++var)
-    if (is_integer_var<i_t, f_t>(fj_cpu, var)) integer_vars.push_back(var);
-  const i_t n_distance = (i_t)integer_vars.size();
-
-  simplex::user_problem_t<i_t, f_t> result(base.handle_ptr);
-  result.num_rows = base.num_rows + 2 * n_distance;
-  result.num_cols = base.num_cols + n_distance;
-
-  // The model's own objective is dropped: this LP measures distance alone.
-  result.objective.assign(result.num_cols, f_t{0});
-  for (i_t k = 0; k < n_distance; ++k)
-    result.objective[base.num_cols + k] = f_t{1};
-
-  result.lower = base.lower;
-  result.upper = base.upper;
-  result.lower.resize(result.num_cols, f_t{0});
-  result.upper.resize(result.num_cols, std::numeric_limits<f_t>::infinity());
-
-  result.rhs       = base.rhs;
-  result.row_sense = base.row_sense;
-  result.rhs.reserve(result.num_rows);
-  result.row_sense.reserve(result.num_rows);
-  for (i_t k = 0; k < n_distance; ++k) {
-    result.rhs.push_back(rounded[integer_vars[k]]);
-    result.row_sense.push_back('L');
-    result.rhs.push_back(-rounded[integer_vars[k]]);
-    result.row_sense.push_back('L');
-  }
-  result.range_rows     = base.range_rows;
-  result.range_value    = base.range_value;
-  result.num_range_rows = base.num_range_rows;
-
-  const i_t base_nnz = base.A.col_start[base.A.n];
-  csc_matrix_t<i_t, f_t> matrix(result.num_rows, result.num_cols, base_nnz + 4 * n_distance);
-  i_t out          = 0;
-  i_t next_integer = 0;
-  for (i_t j = 0; j < base.num_cols; ++j) {
-    matrix.col_start[j] = out;
-    for (i_t p = base.A.col_start[j]; p < base.A.col_start[j + 1]; ++p) {
-      matrix.i[out]   = base.A.i[p];
-      matrix.x[out++] = base.A.x[p];
-    }
-    if (next_integer < n_distance && integer_vars[next_integer] == j) {
-      const i_t row   = base.num_rows + 2 * next_integer++;
-      matrix.i[out]   = row;
-      matrix.x[out++] = f_t{1};
-      matrix.i[out]   = row + 1;
-      matrix.x[out++] = f_t{-1};
-    }
-  }
-  for (i_t k = 0; k < n_distance; ++k) {
-    matrix.col_start[base.num_cols + k] = out;
-    const i_t row                       = base.num_rows + 2 * k;
-    matrix.i[out]                       = row;
-    matrix.x[out++]                     = f_t{-1};
-    matrix.i[out]                       = row + 1;
-    matrix.x[out++]                     = f_t{-1};
-  }
-  matrix.col_start[result.num_cols] = out;
-  cuopt_assert(out == base_nnz + 4 * n_distance, "distance problem nonzero count mismatch");
-  result.A = std::move(matrix);
-  return result;
-}
-
-template <typename i_t, typename f_t>
-static simplex::user_problem_t<i_t, f_t> make_fixed_integer_lp(
-  const simplex::user_problem_t<i_t, f_t>& base,
-  fj_cpu_climber_t<i_t, f_t>& fj_cpu,
-  const std::vector<f_t>& rounded)
-{
-  simplex::user_problem_t<i_t, f_t> fixed(base.handle_ptr);
-  fixed.num_rows = base.num_rows;
-  fixed.num_cols = base.num_cols;
-  fixed.objective.assign(base.num_cols, f_t{0});
-  fixed.rhs            = base.rhs;
-  fixed.row_sense      = base.row_sense;
-  fixed.range_rows     = base.range_rows;
-  fixed.range_value    = base.range_value;
-  fixed.num_range_rows = base.num_range_rows;
-  fixed.A              = base.A;
-  fixed.lower          = base.lower;
-  fixed.upper          = base.upper;
-  for (i_t var = 0; var < (i_t)rounded.size(); ++var) {
-    if (!is_integer_var<i_t, f_t>(fj_cpu, var)) continue;
-    fixed.lower[var] = fixed.upper[var] = rounded[var];
-  }
-  return fixed;
-}
-
-template <typename i_t, typename f_t>
 void apply_lp_rounded_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu, f_t lane_time_limit)
 {
   if (!fj_cpu.use_lp_start || !fj_cpu.problem->host_lp) return;
@@ -257,101 +129,7 @@ void apply_lp_rounded_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu, f_t lane_time_li
       base.objective[var] = f_t{1} + (f_t)objective_rng.next_double();
   }
 
-  const auto started    = std::chrono::steady_clock::now();
-  const i_t n_variables = fj_cpu.problem->n_variables;
-
-  std::vector<f_t> rounded;
-  std::vector<f_t> selected;
-  // Keep the least-infeasible rounded LP projection as the FJ starting point.
-  // total_violations sums negative excesses, so the greatest value is the least infeasible.
-  f_t selected_violation = -std::numeric_limits<f_t>::infinity();
-
-  const int32_t projections = fj_cpu.use_deep_lp_pump ? 100 : fj_cpu.hp.lp_pump_projections;
-  for (int32_t projection = 0; projection < projections; ++projection) {
-    const double remaining =
-      budget - std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-    if (remaining <= 0) break;
-
-    // Projection 0 is the plain relaxation; the rest chase the previous rounding.
-    const auto distance    = projection == 0 ? simplex::user_problem_t<i_t, f_t>(base.handle_ptr)
-                                             : make_lp_distance_problem(base, fj_cpu, rounded);
-    const auto& relaxation = projection == 0 ? base : distance;
-
-    std::vector<f_t> x;
-    if (!solve_lp_relaxation(relaxation, remaining, x, fj_cpu.stats.t_lp_relaxation)) break;
-    // convert_user_problem appends slacks, so the model's own variables are the leading columns.
-    if ((i_t)x.size() < n_variables) break;
-
-    rounded.resize(n_variables);
-    cuopt::pcgenerator_t rng(fj_cpu.settings.seed + 0x9e3779b9ULL * (uint64_t)projection);
-    bool valid = true;
-    for (i_t var = 0; var < n_variables && valid; ++var) {
-      const auto bounds = fj_cpu.h_var_bounds[var].get();
-      const f_t lower   = get_lower(bounds);
-      const f_t upper   = get_upper(bounds);
-      f_t value         = std::clamp(x[var], lower, upper);
-      if (!std::isfinite(value)) {
-        valid = false;
-        break;
-      }
-      if (is_integer_var<i_t, f_t>(fj_cpu, var)) {
-        if (monotone_integer_equalities) {
-          // Every coefficient is nonnegative, hence this preserves every equality's upper side.
-          // Clamp once more because an LP value can sit a few ulps below an integral lower bound.
-          value = std::clamp(std::floor(value), std::ceil(lower), std::floor(upper));
-        } else {
-          // Rounded up with probability equal to the fractional part, so successive projections of
-          // the same point explore different corners.
-          const f_t fraction = value - std::floor(value);
-          value              = rng.next_double() < fraction ? std::ceil(value) : std::floor(value);
-        }
-        // A variable with no integral value inside its bounds cannot form a valid start without
-        // breaking the engine's integrality invariant.
-        valid = value >= lower && value <= upper;
-      }
-      rounded[var] = value;
-    }
-    if (!valid) break;
-
-    std::vector<f_t> candidate = rounded;
-    if (fj_cpu.use_deep_lp_pump) {
-      const double repair_budget =
-        budget - std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-      if (repair_budget > 0.01) {
-        auto fixed = make_fixed_integer_lp(base, fj_cpu, rounded);
-        std::vector<f_t> repaired;
-        if (solve_lp_relaxation(fixed, repair_budget, repaired, fj_cpu.stats.t_lp_relaxation) &&
-            (i_t)repaired.size() >= n_variables) {
-          for (i_t var = 0; var < n_variables; ++var)
-            if (!is_integer_var<i_t, f_t>(fj_cpu, var)) candidate[var] = repaired[var];
-        }
-      }
-    }
-    std::copy(candidate.begin(), candidate.end(), fj_cpu.h_assignment.begin());
-    recompute_lhs(fj_cpu);
-    cuopt_assert(fj_cpu.total_violations <= f_t{0}, "total_violations should be nonpositive");
-    if (fj_cpu.total_violations > selected_violation) {
-      selected_violation = fj_cpu.total_violations;
-      selected           = candidate;
-    }
-
-    // The rounded point can already be integral-feasible. It never passed through apply_move, so
-    // the incumbent is recorded here through the same contract that path uses.
-    if (fj_cpu.violated_constraints.empty() && check_variable_feasibility<i_t, f_t>(fj_cpu)) {
-      std::copy(candidate.begin(), candidate.end(), fj_cpu.h_best_assignment.begin());
-      fj_cpu.h_best_objective =
-        fj_cpu.h_incumbent_objective - fj_cpu.settings.parameters.breakthrough_move_epsilon;
-      fj_cpu.feasible_found = true;
-      report_cpu_incumbent(fj_cpu);
-      return;
-    }
-  }
-
-  if (selected.empty()) return;
-  std::copy(selected.begin(), selected.end(), fj_cpu.h_assignment.begin());
-  std::copy(selected.begin(), selected.end(), fj_cpu.h_best_assignment.begin());
-  recompute_lhs(fj_cpu);
-  cuopt_func_call(audit_assignment_bounds(fj_cpu, "lp pump"));
+  run_cpu_feasibility_pump(fj_cpu, base, budget, monotone_integer_equalities);
 }
 
 template <typename i_t, typename f_t>
@@ -367,22 +145,22 @@ bool apply_lp_polish(fj_cpu_climber_t<i_t, f_t>& fj_cpu, double budget_s)
   if (fj_cpu.shared_incumbent)
     fj_cpu.shared_incumbent->adopt(fj_cpu.h_best_objective + f_t{1}, incumbent);
 
-  bool has_continuous = false;
-  for (i_t var = 0; var < n; ++var)
-    has_continuous |= !is_integer_var<i_t, f_t>(fj_cpu, var);
-  if (!has_continuous) return false;
-
-  phase_timer_t timer(fj_cpu.stats.t_lp_start);
-  simplex::user_problem_t<i_t, f_t> relaxation = *fj_cpu.problem->host_lp;
-  if ((i_t)relaxation.lower.size() < n || (i_t)relaxation.upper.size() < n) return false;
-
+  std::vector<i_t> fixed_variables;
+  std::vector<f_t> fixed_values;
   for (i_t var = 0; var < n; ++var) {
     if (!is_integer_var<i_t, f_t>(fj_cpu, var)) continue;
-    relaxation.lower[var] = relaxation.upper[var] = std::round(incumbent[var]);
+    fixed_variables.push_back(var);
+    fixed_values.push_back(std::round(incumbent[var]));
   }
+  if ((i_t)fixed_variables.size() == n) return false;
+
+  phase_timer_t timer(fj_cpu.stats.t_lp_start);
+  const auto& relaxation = *fj_cpu.problem->host_lp;
+  if ((i_t)relaxation.lower.size() < n || (i_t)relaxation.upper.size() < n) return false;
 
   std::vector<f_t> x;
-  if (!solve_lp_relaxation(relaxation, budget_s, x, fj_cpu.stats.t_lp_relaxation) ||
+  if (!solve_lp_with_fixed_variables(
+        relaxation, fixed_variables, fixed_values, budget_s, x, fj_cpu.stats.t_lp_relaxation) ||
       (i_t)x.size() < n)
     return false;
 
