@@ -96,7 +96,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
 {
   CPUFJ_NVTX_RANGE("CPUFJ::find_mtm_move");
 
-  cuopt::pcgenerator_t rng(fj_cpu.settings.seed + fj_cpu.iterations, 0, 0);
+  auto& rng = fj_cpu.rng;
 
   fj_move_t best_move          = fj_move_t{-1, 0};
   fj_staged_score_t best_score = fj_staged_score_t::invalid();
@@ -265,7 +265,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
 template <typename i_t>
 void sample_with_replacement(const host_contiguous_set_t<i_t>& pool,
                              i_t sample_size,
-                             uint64_t seed,
+                             cuopt::pcgenerator_t& rng,
                              std::vector<i_t>& out)
 {
   cuopt_assert(sample_size > 0, "invalid sample size");
@@ -277,7 +277,6 @@ void sample_with_replacement(const host_contiguous_set_t<i_t>& pool,
     return;
   }
   out.reserve(sample_size);
-  cuopt::pcgenerator_t rng(seed);
   for (i_t i = 0; i < sample_size; ++i) {
     out.push_back(pool.contents[rng.uniform(0, pool_size)]);
   }
@@ -290,10 +289,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move_viol(
   CPUFJ_NVTX_RANGE("CPUFJ::find_mtm_move_viol");
 
   std::vector<i_t> sampled_cstrs;
-  sample_with_replacement(fj_cpu.violated_constraints,
-                          sample_size,
-                          fj_cpu.settings.seed + fj_cpu.iterations,
-                          sampled_cstrs);
+  sample_with_replacement(fj_cpu.violated_constraints, sample_size, fj_cpu.rng, sampled_cstrs);
 
   return find_mtm_move<i_t, f_t, MTMMoveType::FJ_MTM_VIOLATED>(fj_cpu, sampled_cstrs, localmin);
 }
@@ -305,10 +301,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move_sat(
   CPUFJ_NVTX_RANGE("CPUFJ::find_mtm_move_sat");
 
   std::vector<i_t> sampled_cstrs;
-  sample_with_replacement(fj_cpu.satisfied_constraints,
-                          sample_size,
-                          fj_cpu.settings.seed + fj_cpu.iterations,
-                          sampled_cstrs);
+  sample_with_replacement(fj_cpu.satisfied_constraints, sample_size, fj_cpu.rng, sampled_cstrs);
 
   return find_mtm_move<i_t, f_t, MTMMoveType::FJ_MTM_SATISFIED>(fj_cpu, sampled_cstrs, localmin);
 }
@@ -358,7 +351,7 @@ static thrust::tuple<fj_move_t, fj_move_t, fj_staged_score_t> find_lift_2opt_mov
   const i_t n_obj = (i_t)fj_cpu.problem->h_objective_vars.size();
   if (n_obj == 0) return thrust::make_tuple(best_first, best_second, best_score);
 
-  cuopt::pcgenerator_t rng(fj_cpu.settings.seed + fj_cpu.iterations, 0, 0);
+  auto& rng         = fj_cpu.rng;
   const i_t n_draws = n_obj < fj_cpu.hp.two_opt_candidates ? n_obj : fj_cpu.hp.two_opt_candidates;
 
   for (i_t t = 0; t < n_draws; ++t) {

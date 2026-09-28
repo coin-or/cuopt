@@ -124,9 +124,8 @@ void apply_lp_rounded_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu, f_t lane_time_li
   // bounded and feasible while selecting independent vertices for the portfolio. This is gated by
   // the certificate above; ordinary objective-bearing and mixed-sign models are unchanged.
   if (monotone_integer_equalities) {
-    cuopt::pcgenerator_t objective_rng(fj_cpu.settings.seed ^ 0xd1b54a32d192ed03ULL);
     for (i_t var = 0; var < fj_cpu.problem->n_variables; ++var)
-      base.objective[var] = f_t{1} + (f_t)objective_rng.next_double();
+      base.objective[var] = f_t{1} + (f_t)fj_cpu.rng.next_double();
   }
 
   run_cpu_feasibility_pump(fj_cpu, base, budget, monotone_integer_equalities);

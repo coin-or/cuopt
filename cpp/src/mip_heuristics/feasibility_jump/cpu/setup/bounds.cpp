@@ -13,6 +13,8 @@
 
 namespace cuopt::mathematical_optimization::mip {
 
+static constexpr uint64_t fj_ambiguous_lock_rng_stream = 1;
+
 template <typename i_t, typename f_t>
 void cap_integer_domains(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t n_variables)
 {
@@ -280,8 +282,7 @@ void apply_ambiguous_lock_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 {
   if (fj_cpu.problem->nnz > fj_cpu.hp.start_nnz_limit) return;
 
-  std::mt19937 rng((uint32_t)fj_cpu.settings.seed ^ 0x9e3779b9u);
-  std::bernoulli_distribution flip(0.5);
+  cuopt::pcgenerator_t rng(fj_cpu.settings.seed, fj_ambiguous_lock_rng_stream);
   for (i_t var = 0; var < fj_cpu.problem->n_variables; ++var) {
     const f_t lower = get_lower(fj_cpu.h_var_bounds[var].get());
     const f_t upper = get_upper(fj_cpu.h_var_bounds[var].get());
@@ -304,7 +305,7 @@ void apply_ambiguous_lock_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
     }
 
     const bool ambiguous = std::abs(up - down) <= 1;
-    const bool choose_up = up < down || (ambiguous && flip(rng));
+    const bool choose_up = up < down || (ambiguous && rng.next_double() < 0.5);
     f_t value            = choose_up ? upper : lower;
     if (is_integer_var<i_t, f_t>(fj_cpu, var)) value = std::round(value);
     fj_cpu.h_assignment[var] = value;

@@ -8,7 +8,7 @@
 #include "early_cpufj.cuh"
 
 #include <mip_heuristics/mip_constants.hpp>
-#include <utilities/seed_generator.cuh>
+#include <utilities/splitmix64.hpp>
 
 #include <omp.h>
 
@@ -51,8 +51,9 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes, bool low_latency)
 
   // Tasks are not preempted, so a lane posted beyond the team size would sit in the queue for the
   // whole of presolve without running an iteration.
-  n_lanes                 = threaded ? 1 : std::clamp(n_lanes, 1, omp_get_num_threads());
-  const int64_t base_seed = cuopt::seed_generator::get_seed();
+  n_lanes = threaded ? 1 : std::clamp(n_lanes, 1, omp_get_num_threads());
+  cuopt::splitmix64_t seed_rng(seed_);
+  const int64_t base_seed = seed_rng.next_i64();
   climbers_.resize(n_lanes);
 
   auto report_incumbent = [this](f_t solver_obj, const std::vector<f_t>& assignment, double) {
@@ -62,15 +63,15 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes, bool low_latency)
 
   // Lane 0 builds the host problem representation and every other lane copies it. All of it
   // finishes before the first task is posted, so no lane reads a template another lane is running
-  // on. seed_generator steps a non-atomic global, which is why the draws stay on this thread.
+  // on.
   for (int k = 0; k < n_lanes; ++k) {
+    fj_settings_t settings;
+    settings.seed = seed_rng.next_i32();
     if (k == 0) {
-      climbers_[0] =
-        init_fj_cpu_from_optimization_problem(*this->problem_ptr_, tolerances_, preemption_flag_);
+      climbers_[0] = init_fj_cpu_from_optimization_problem(
+        *this->problem_ptr_, tolerances_, preemption_flag_, settings);
     } else {
-      fj_settings_t settings;
-      settings.seed = (int)cuopt::seed_generator::get_seed();
-      climbers_[k]  = init_fj_cpu_clone(*climbers_[0], preemption_flag_, settings);
+      climbers_[k] = init_fj_cpu_clone(*climbers_[0], preemption_flag_, settings);
     }
     climbers_[k]->low_latency = low_latency;
     apply_lane_diversification<i_t, f_t>(*climbers_[k], k, base_seed);

@@ -176,7 +176,6 @@ void run_cpu_feasibility_pump(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
     if ((i_t)x.size() < n_variables) break;
 
     rounded.resize(n_variables);
-    cuopt::pcgenerator_t rng(fj_cpu.settings.seed + 0x9e3779b9ULL * (uint64_t)projection);
     bool valid = true;
     for (i_t var = 0; var < n_variables && valid; ++var) {
       const auto bounds = fj_cpu.h_var_bounds[var].get();
@@ -196,7 +195,7 @@ void run_cpu_feasibility_pump(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
           // Rounded up with probability equal to the fractional part, so successive projections of
           // the same point explore different corners.
           const f_t fraction = value - std::floor(value);
-          value              = rng.next_double() < fraction ? std::ceil(value) : std::floor(value);
+          value = fj_cpu.rng.next_double() < fraction ? std::ceil(value) : std::floor(value);
         }
         // A variable with no integral value inside its bounds cannot form a valid start without
         // breaking the engine's integrality invariant.

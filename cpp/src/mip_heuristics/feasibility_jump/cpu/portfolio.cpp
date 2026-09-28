@@ -137,11 +137,11 @@ void apply_lane_diversification(fj_cpu_climber_t<i_t, f_t>& c, int lane, int64_t
     }
   }
 
-  std::mt19937 rng(base_seed + 7919u * lane);
-  c.mtm_viol_samples = std::uniform_int_distribution<i_t>(10, 80)(rng);
-  c.mtm_sat_samples  = std::uniform_int_distribution<i_t>(5, 50)(rng);
-  c.nnz_samples      = std::uniform_int_distribution<i_t>(1000, 20000)(rng);
-  c.perturb_interval = std::uniform_int_distribution<i_t>(10, 2000)(rng);
+  cuopt::pcgenerator_t rng(base_seed, lane);
+  c.mtm_viol_samples = rng.uniform<i_t>(10, 81);
+  c.mtm_sat_samples  = rng.uniform<i_t>(5, 51);
+  c.nnz_samples      = rng.uniform<i_t>(1000, 20001);
+  c.perturb_interval = rng.uniform<i_t>(10, 2001);
 
   static constexpr double smoothing[8] = {0.0003, 0.0, 0.001, 0.003, 0.0001, 0.0006, 0.002, 0.0003};
   static constexpr int tabu_min[8]     = {3, 1, 5, 3, 2, 6, 4, 3};
@@ -157,17 +157,17 @@ void apply_lane_diversification(fj_cpu_climber_t<i_t, f_t>& c, int lane, int64_t
     c.nnz_samples      = 100000;
   }
   if (lane == 0) {
-    c.mtm_viol_samples = std::uniform_int_distribution<i_t>(40, 100)(rng);
-    c.mtm_sat_samples  = std::uniform_int_distribution<i_t>(20, 60)(rng);
-    c.nnz_samples      = std::uniform_int_distribution<i_t>(10000, 30000)(rng);
+    c.mtm_viol_samples = rng.uniform<i_t>(40, 101);
+    c.mtm_sat_samples  = rng.uniform<i_t>(20, 61);
+    c.nnz_samples      = rng.uniform<i_t>(10000, 30001);
   }
   if (lane == 12) {
-    c.mtm_viol_samples = std::uniform_int_distribution<i_t>(50, 120)(rng);
-    c.mtm_sat_samples  = std::uniform_int_distribution<i_t>(25, 70)(rng);
+    c.mtm_viol_samples = rng.uniform<i_t>(50, 121);
+    c.mtm_sat_samples  = rng.uniform<i_t>(25, 71);
   }
   if (lane == 11) {
-    c.mtm_viol_samples = std::uniform_int_distribution<i_t>(30, 100)(rng);
-    c.mtm_sat_samples  = std::uniform_int_distribution<i_t>(15, 50)(rng);
+    c.mtm_viol_samples = rng.uniform<i_t>(30, 101);
+    c.mtm_sat_samples  = rng.uniform<i_t>(15, 51);
   }
   if (lane == 9 && extreme_hub) {
     c.mtm_viol_samples = 8;
@@ -178,7 +178,6 @@ void apply_lane_diversification(fj_cpu_climber_t<i_t, f_t>& c, int lane, int64_t
     c.use_bound_prop                 = false;
     c.use_lp_start                   = true;
     c.lp_start_feasibility_objective = true;
-    c.settings.seed += 224737;
   }
   if (extreme_hub && lane == 5) {
     c.use_lp_start = c.use_deep_lp_pump = true;

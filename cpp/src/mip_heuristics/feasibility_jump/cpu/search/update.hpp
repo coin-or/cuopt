@@ -45,8 +45,6 @@ void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, f_t delta, bool
 {
   CPUFJ_NVTX_RANGE("CPUFJ::apply_move");
 
-  cuopt::pcgenerator_t rng(fj_cpu.settings.seed + fj_cpu.iterations, 0, 0);
-
   cuopt_assert(var_idx < fj_cpu.problem->n_variables, "variable index out of bounds");
   f_t old_val = fj_cpu.h_assignment[var_idx];
   f_t new_val = old_val + delta;
@@ -204,8 +202,8 @@ void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, f_t delta, bool
   }
 
   i_t tabu_tenure = fj_cpu.settings.parameters.tabu_tenure_min +
-                    rng.next_u32() % (fj_cpu.settings.parameters.tabu_tenure_max -
-                                      fj_cpu.settings.parameters.tabu_tenure_min);
+                    fj_cpu.rng.next_u32() % (fj_cpu.settings.parameters.tabu_tenure_max -
+                                             fj_cpu.settings.parameters.tabu_tenure_min);
   if (delta > 0) {
     fj_cpu.h_tabu_lastinc[var_idx]     = fj_cpu.iterations;
     fj_cpu.h_tabu_nodec_until[var_idx] = fj_cpu.iterations + tabu_tenure;

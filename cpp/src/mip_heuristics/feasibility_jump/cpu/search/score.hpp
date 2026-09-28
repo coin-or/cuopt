@@ -181,8 +181,8 @@ void update_weights(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 {
   CPUFJ_NVTX_RANGE("CPUFJ::update_weights");
 
-  cuopt::pcgenerator_t rng(fj_cpu.settings.seed + fj_cpu.iterations, 0, 0);
-  bool smoothing = rng.next_float() <= fj_cpu.settings.parameters.weight_smoothing_probability;
+  bool smoothing =
+    fj_cpu.rng.next_float() <= fj_cpu.settings.parameters.weight_smoothing_probability;
 
   if (smoothing) {
     smooth_weights<i_t, f_t>(fj_cpu);

@@ -14,6 +14,7 @@
 #include <mip_heuristics/mip_constants.hpp>
 #include <utilities/copy_helpers.hpp>
 #include <utilities/pcgenerator.hpp>
+#include <utilities/splitmix64.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -189,10 +190,11 @@ void build_climber_portfolio(problem_t<i_t, f_t>& problem,
   cuopt_assert(!climbers.empty(), "a CPUFJ portfolio needs at least one climber");
   cuopt_assert(preemption_flags.size() == climbers.size(), "preemption flag count mismatch");
 
+  cuopt::splitmix64_t seed_rng(base_seed);
   std::vector<int64_t> lane_seeds(climbers.size());
   for (size_t k = 0; k < climbers.size(); ++k) {
     preemption_flags[k].store(false);
-    lane_seeds[k] = base_seed + k;
+    lane_seeds[k] = seed_rng.next_i32();
   }
 
   fj_settings_t settings;

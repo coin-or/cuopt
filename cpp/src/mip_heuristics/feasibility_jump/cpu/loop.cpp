@@ -145,6 +145,7 @@ template <typename i_t, typename f_t>
 void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double work_unit_limit)
 {
   const double solve_start = tic();
+  fj_cpu->rng.set_seed(fj_cpu->settings.seed);
   if (fj_cpu->use_precedence_start) apply_precedence_completion_start(*fj_cpu);
   apply_bound_propagation(*fj_cpu);
   if (fj_cpu->use_equality_substitution) {
@@ -181,8 +182,6 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
   [[maybe_unused]] i_t local_mins = 0;
   const double loop_start         = paid_setup ? solve_start : tic();
   bool first_cross_needs_polish   = fj_cpu->use_lp_polish;
-
-  fj_cpu->rng.set_seed(fj_cpu->settings.seed);
 
   // Initialize feature tracking
   fj_cpu->iterations_since_best = 0;
