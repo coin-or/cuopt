@@ -263,7 +263,7 @@ void update_weights(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
     // Only before this lane's first crossing: past that the search oscillates in and out of
     // feasibility, and draining satisfied rows costs the objective phase.
     if (fj_cpu.use_weight_donation && !fj_cpu.feasible_found)
-      donate_row_weight<i_t, f_t>(fj_cpu, cstr_idx, delta, rng);
+      donate_row_weight<i_t, f_t>(fj_cpu, cstr_idx, delta, fj_cpu.rng);
 
     // Invalidate related cached move scores
     ++fj_cpu.stats.n_version_bumps_weights;
