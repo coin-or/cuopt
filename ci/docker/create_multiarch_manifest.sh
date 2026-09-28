@@ -39,9 +39,15 @@ create_manifest() {
         return 1
     fi
 
-    # Create the manifest
+    # Create the manifest. Purge any stale local manifest-list state first: if
+    # $manifest_name already exists on the registry (e.g. re-running for a
+    # tag like "latest" that a prior release also published), `--amend`
+    # pulls in that existing remote list and appends to it instead of
+    # replacing it, leaving duplicate per-arch entries (old digests alongside
+    # the new ones) that split ambiguously across identical platforms.
     echo "Creating multi-arch manifest..."
-    docker manifest create --amend "$manifest_name" "$amd64_image" "$arm64_image"
+    docker manifest rm "$manifest_name" >/dev/null 2>&1 || true
+    docker manifest create "$manifest_name" "$amd64_image" "$arm64_image"
 
     # Annotate with architecture information
     echo "Annotating ARM64 architecture..."
