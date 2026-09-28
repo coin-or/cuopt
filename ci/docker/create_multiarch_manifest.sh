@@ -39,8 +39,6 @@ create_manifest() {
         return 1
     fi
 
-    # Purge stale local state first - --amend on an existing tag (e.g. "latest")
-    # would merge with it instead of replacing, duplicating per-arch entries.
     echo "Creating multi-arch manifest..."
     docker manifest rm "$manifest_name" >/dev/null 2>&1 || true
     docker manifest create "$manifest_name" "$amd64_image" "$arm64_image"
