@@ -59,7 +59,8 @@ bool solve_lp_with_fixed_variables(const simplex::user_problem_t<i_t, f_t>& prob
   auto fixed = problem;
   for (size_t k = 0; k < fixed_variables.size(); ++k) {
     const i_t var = fixed_variables[k];
-    cuopt_assert(var >= 0 && var < (i_t)fixed.lower.size() && var < (i_t)fixed.upper.size());
+    cuopt_assert(var >= 0 && var < (i_t)fixed.lower.size() && var < (i_t)fixed.upper.size(),
+                 "var out of bounds");
     fixed.lower[var] = fixed.upper[var] = fixed_values[k];
   }
   return solve_lp_relaxation(fixed, time_limit, assignment, solve_seconds);
