@@ -122,9 +122,9 @@ void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, f_t delta, bool
     const f_t h           = -cstr_coeff * delta;
     f_t t                 = old_slack + h;
     const f_t z           = t - old_slack;
-    f_t new_sumcomp =
-      old_sumcomp + (((old_slack - (t - z)) + (h - z)) + std::fma(-cstr_coeff, delta, -h)) -
-      cstr_coeff * delta_lo;
+    f_t new_sumcomp       = old_sumcomp +
+                      (((old_slack - (t - z)) + (h - z)) + std::fma(-cstr_coeff, delta, -h)) -
+                      cstr_coeff * delta_lo;
 
     const f_t old_value = old_slack + old_sumcomp;
     f_t new_value       = t + new_sumcomp;
@@ -189,10 +189,10 @@ void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, f_t delta, bool
 
   // Kahan compensated summation, as for the slacks. The incumbent objective is reported as-is, so
   // it cannot carry the drift of a long uncompensated chain of deltas.
-  const f_t obj_old = fj_cpu.h_incumbent_objective;
+  const f_t obj_old   = fj_cpu.h_incumbent_objective;
   const f_t obj_coeff = fj_cpu.problem->h_obj_coeffs[var_idx];
   const f_t obj_y     = obj_coeff * delta - (fj_cpu.h_objective_sumcomp - obj_coeff * delta_lo);
-  const f_t obj_t   = obj_old + obj_y;
+  const f_t obj_t     = obj_old + obj_y;
   fj_cpu.h_objective_sumcomp   = (obj_t - obj_old) - obj_y;
   fj_cpu.h_incumbent_objective = obj_t;
   // The result of this addition carries the ulp of its larger operand, not of itself, and the
