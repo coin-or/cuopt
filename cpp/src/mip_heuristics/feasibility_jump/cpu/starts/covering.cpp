@@ -66,7 +66,7 @@ void apply_greedy_covering_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
            (fj_cpu.problem->offsets[b + 1] - fj_cpu.problem->offsets[b]);
   });
 
-  const auto started         = std::chrono::steady_clock::now();
+  const double started       = tic();
   const double time_budget_s = fj_cpu.hp.covering_budget_s;
   const f_t tol              = 1e-6;
   const i_t max_passes       = 2;
@@ -75,9 +75,7 @@ void apply_greedy_covering_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 
   for (i_t pass = 0; pass < max_passes && !out_of_time; ++pass) {
     for (i_t k = 0; k < n_constraints; ++k) {
-      if ((k & 0xFFF) == 0 &&
-          std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() >
-            time_budget_s) {
+      if ((k % 4096) == 0 && toc(started) > time_budget_s) {
         out_of_time = true;
         break;
       }

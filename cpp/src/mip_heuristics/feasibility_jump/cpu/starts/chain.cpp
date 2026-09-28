@@ -26,11 +26,7 @@ void apply_precedence_completion_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   if (lower_only * fj_cpu.hp.precedence_lower_den < n_constraints * fj_cpu.hp.precedence_lower_num)
     return;
 
-  const auto started = std::chrono::steady_clock::now();
-  auto timed_out     = [&] {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() >
-           fj_cpu.hp.precedence_budget_s;
-  };
+  const double started = tic();
 
   recompute_lhs(fj_cpu);
   const auto anchor         = fj_cpu.h_assignment;
@@ -43,7 +39,7 @@ void apply_precedence_completion_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   for (i_t pass = 0; pass < fj_cpu.hp.precedence_passes; ++pass) {
     bool changed = false;
     for (i_t row = 0; row < n_constraints; ++row) {
-      if ((row & 0x1FF) == 0 && timed_out()) break;
+      if ((row % 512) == 0 && toc(started) > fj_cpu.hp.precedence_budget_s) break;
       const f_t lb = fj_cpu.problem->cstr_lb[row];
       if (!std::isfinite(lb) || std::isfinite(fj_cpu.problem->cstr_ub[row])) continue;
       const f_t lhs     = fj_cpu.h_lhs[row];
@@ -97,7 +93,7 @@ void apply_precedence_completion_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
       best          = fj_cpu.h_assignment;
       if (count == 0) break;
     }
-    if (!changed || timed_out()) break;
+    if (!changed || toc(started) > fj_cpu.hp.precedence_budget_s) break;
   }
 
   cuopt_assert(fj_cpu.h_assignment.size() == anchor.size(),

@@ -471,12 +471,10 @@ std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> make_equality_reduced_climber(
   std::vector<fj_equality_substitution_t<i_t, f_t>>& substitutions,
   std::vector<i_t>& retained)
 {
-  using term_t       = std::pair<i_t, f_t>;
-  const auto started = std::chrono::steady_clock::now();
-  auto expired       = [&] {
-    return c.preemption_flag.load(std::memory_order_relaxed) ||
-           std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() >=
-             budget;
+  using term_t         = std::pair<i_t, f_t>;
+  const double started = tic();
+  auto expired         = [&] {
+    return c.preemption_flag.load(std::memory_order_relaxed) || toc(started) >= budget;
   };
   const auto& p = *c.problem;
   std::vector<i_t> equalities;

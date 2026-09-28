@@ -71,7 +71,7 @@ bool try_equality_substituted_solve(fj_cpu_climber_t<i_t, f_t>& c,
 {
   if (!c.use_equality_substitution || c.feasible_found || c.producer_sync || time_limit <= 0)
     return false;
-  const auto started = std::chrono::steady_clock::now();
+  const double started = tic();
   std::vector<fj_equality_substitution_t<i_t, f_t>> substitutions;
   std::vector<i_t> retained;
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> child;
@@ -81,8 +81,7 @@ bool try_equality_substituted_solve(fj_cpu_climber_t<i_t, f_t>& c,
       make_equality_reduced_climber(c, std::min(0.75, 0.15 * time_limit), substitutions, retained);
   }
   if (!child) return false;
-  const double remaining =
-    time_limit - std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+  const double remaining = time_limit - toc(started);
   if (remaining <= 0) return false;
 
   bool rejected_lift          = false;
@@ -145,30 +144,21 @@ bool try_equality_substituted_solve(fj_cpu_climber_t<i_t, f_t>& c,
 template <typename i_t, typename f_t>
 void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double work_unit_limit)
 {
-  const auto solve_start = std::chrono::steady_clock::now();
+  const double solve_start = tic();
   if (fj_cpu->use_precedence_start) apply_precedence_completion_start(*fj_cpu);
   apply_bound_propagation(*fj_cpu);
   if (fj_cpu->use_equality_substitution) {
-    const double elapsed =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - solve_start).count();
+    const double elapsed = toc(solve_start);
     if (try_equality_substituted_solve(*fj_cpu, time_limit - elapsed, work_unit_limit)) return;
   }
   const double setup_time_left =
-    fj_cpu->use_equality_substitution
-      ? std::max(
-          0.0,
-          time_limit -
-            std::chrono::duration<double>(std::chrono::steady_clock::now() - solve_start).count())
-      : time_limit;
+    fj_cpu->use_equality_substitution ? std::max(0.0, time_limit - toc(solve_start)) : time_limit;
   if (!fj_cpu->feasible_found) { apply_lp_rounded_start(*fj_cpu, setup_time_left); }
 
   const bool paid_setup = fj_cpu->use_bound_prop || fj_cpu->use_lp_start ||
                           fj_cpu->use_precedence_start || fj_cpu->use_equality_substitution;
-  const double setup_seconds =
-    paid_setup
-      ? std::chrono::duration<double>(std::chrono::steady_clock::now() - solve_start).count()
-      : 0.0;
-  const double remaining = std::max(0.0, time_limit - setup_seconds);
+  const double setup_seconds = paid_setup ? toc(solve_start) : 0.0;
+  const double remaining     = std::max(0.0, time_limit - setup_seconds);
   if (remaining <= 0.0) return;
 
   if (try_cpufj_binary_solve(*fj_cpu, remaining, work_unit_limit)) return;
@@ -189,7 +179,7 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
   }
 
   [[maybe_unused]] i_t local_mins = 0;
-  const auto loop_start           = paid_setup ? solve_start : std::chrono::steady_clock::now();
+  const double loop_start         = paid_setup ? solve_start : tic();
   bool first_cross_needs_polish   = fj_cpu->use_lp_polish;
 
   fj_cpu->rng.set_seed(fj_cpu->settings.seed);
@@ -221,8 +211,7 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
   }
 
   while (!fj_cpu->halted && !fj_cpu->preemption_flag.load()) {
-    const double elapsed =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - loop_start).count();
+    const double elapsed = toc(loop_start);
     if (elapsed > time_limit) {
       CUOPT_LOG_TRACE("%sTime limit of %.4f seconds reached, breaking loop at iteration %d",
                       fj_cpu->log_prefix.c_str(),
@@ -240,8 +229,7 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
 
     if (first_cross_needs_polish && fj_cpu->feasible_found) {
       first_cross_needs_polish = false;
-      const double elapsed =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - loop_start).count();
+      const double elapsed     = toc(loop_start);
       apply_lp_polish(*fj_cpu, fj_cpu->hp.lp_polish_budget_share * (time_limit - elapsed));
     }
 
@@ -312,8 +300,7 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
       // Without this the counter stays above the interval and every later iteration perturbs.
       fj_cpu->iterations_since_best = 0;
       if (fj_cpu->use_lp_polish && fj_cpu->feasible_found) {
-        const double elapsed =
-          std::chrono::duration<double>(std::chrono::steady_clock::now() - loop_start).count();
+        const double elapsed = toc(loop_start);
         apply_lp_polish(*fj_cpu, fj_cpu->hp.lp_polish_budget_share * (time_limit - elapsed));
       }
     }
@@ -389,8 +376,7 @@ void cpufj_solve(fj_cpu_climber_t<i_t, f_t>* fj_cpu, double time_limit, double w
     fj_cpu->iterations++;
     fj_cpu->iterations_since_best++;
   }
-  const double total_time =
-    std::chrono::duration<double>(std::chrono::steady_clock::now() - loop_start).count();
+  const double total_time = toc(loop_start);
   [[maybe_unused]] double avg_time_per_iter =
     fj_cpu->iterations > 0 ? total_time / fj_cpu->iterations : 0;
   CUOPT_LOG_TRACE("%sCPUFJ Average time per iteration: %.8fms",

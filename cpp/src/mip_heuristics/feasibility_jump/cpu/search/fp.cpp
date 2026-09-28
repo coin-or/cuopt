@@ -139,7 +139,7 @@ void run_cpu_feasibility_pump(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
                               double budget,
                               bool monotone_integer_equalities)
 {
-  const auto started    = std::chrono::steady_clock::now();
+  const double started  = tic();
   const i_t n_variables = fj_cpu.problem->n_variables;
 
   std::vector<i_t> integer_vars;
@@ -162,8 +162,7 @@ void run_cpu_feasibility_pump(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
 
   const int32_t projections = fj_cpu.use_deep_lp_pump ? 100 : fj_cpu.hp.lp_pump_projections;
   for (int32_t projection = 0; projection < projections; ++projection) {
-    const double remaining =
-      budget - std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    const double remaining = budget - toc(started);
     if (remaining <= 0) break;
 
     // Projection 0 is the plain relaxation; the rest chase the previous rounding.
@@ -209,8 +208,7 @@ void run_cpu_feasibility_pump(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
 
     std::vector<f_t> candidate = rounded;
     if (fj_cpu.use_deep_lp_pump) {
-      const double repair_budget =
-        budget - std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+      const double repair_budget = budget - toc(started);
       if (repair_budget > 0.01) {
         for (size_t k = 0; k < integer_vars.size(); ++k)
           fixed_values[k] = rounded[integer_vars[k]];

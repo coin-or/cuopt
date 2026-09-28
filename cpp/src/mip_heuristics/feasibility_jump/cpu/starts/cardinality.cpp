@@ -22,15 +22,11 @@ void apply_exact_k_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 {
   if (fj_cpu.problem->nnz > fj_cpu.hp.start_nnz_limit) return;
 
-  const auto started = std::chrono::steady_clock::now();
-  auto timed_out     = [&] {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() >
-           fj_cpu.hp.exact_k_budget_s;
-  };
+  const double started = tic();
 
   std::vector<exact_k_row_t<i_t>> rows;
   for (i_t row = 0; row < fj_cpu.problem->n_constraints; ++row) {
-    if ((row % 4096) == 0 && timed_out()) return;
+    if ((row % 4096) == 0 && toc(started) > fj_cpu.hp.exact_k_budget_s) return;
 
     const f_t lb = fj_cpu.problem->cstr_lb[row];
     const f_t ub = fj_cpu.problem->cstr_ub[row];
@@ -73,7 +69,7 @@ void apply_exact_k_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   std::vector<int8_t> state(n_variables, -1);
   std::vector<i_t> free_vars;
   for (size_t index = 0; index < rows.size(); ++index) {
-    if ((index & 0xFFF) == 0 && timed_out()) break;
+    if ((index % 4096) == 0 && toc(started) > fj_cpu.hp.exact_k_budget_s) break;
     const auto& row = rows[index];
 
     i_t selected = 0;
@@ -116,16 +112,14 @@ void repair_difficult_anchor(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
       baseline <= fj_cpu.problem->n_constraints / fj_cpu.hp.anchor_repair_violated_share)
     return;
 
-  const auto started = std::chrono::steady_clock::now();
-  const auto anchor  = fj_cpu.h_assignment;
+  const double started = tic();
+  const auto anchor    = fj_cpu.h_assignment;
   const std::vector<i_t> violated(fj_cpu.violated_constraints.begin(),
                                   fj_cpu.violated_constraints.end());
   std::vector<row_repair_move_t<i_t, f_t>> candidates;
 
   for (i_t row : violated) {
-    if (std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() >
-        fj_cpu.hp.anchor_repair_budget_s)
-      break;
+    if (toc(started) > fj_cpu.hp.anchor_repair_budget_s) break;
 
     const f_t lb  = fj_cpu.problem->cstr_lb[row];
     const f_t ub  = fj_cpu.problem->cstr_ub[row];
