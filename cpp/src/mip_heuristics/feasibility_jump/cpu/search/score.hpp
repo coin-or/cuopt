@@ -213,7 +213,7 @@ void donate_row_weight(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
   const f_t donated = donor_weight - delta;
   cuopt_assert(donated >= (f_t)fj_cpu.hp.weight_donation_floor, "donation broke the weight floor");
   fj_cpu.row_state()[donor].weight = donated;
-  ++fj_cpu.n_version_bumps_weights;
+  ++fj_cpu.stats.n_version_bumps_weights;
   fj_cpu.h_cstr_version[donor]++;
 }
 

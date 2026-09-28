@@ -14,7 +14,7 @@ namespace cuopt::mathematical_optimization::mip {
 template <typename i_t, typename f_t>
 void compute_variable_coloring(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 {
-  phase_timer_t timer(fj_cpu.t_coloring);
+  phase_timer_t timer(fj_cpu.stats.t_coloring);
   const i_t n_vars  = fj_cpu.problem->n_variables;
   const i_t n_cstrs = fj_cpu.problem->n_constraints;
 
@@ -69,7 +69,7 @@ void compute_variable_coloring(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   fj_cpu.h_var_best_stamp.assign(n_vars, 0);
   fj_cpu.h_var_best_rowsum.assign(n_vars, 0);
   fj_cpu.h_var_bucket_stamp.assign(n_vars, 0);
-  fj_cpu.batch_size_hist.assign(fj_cpu.hp.batch_hist_bins, 0);
+  fj_cpu.stats.batch_size_hist.assign(fj_cpu.hp.batch_hist_bins, 0);
   fj_cpu.h_color_candidates.assign(fj_cpu.n_colors, {});
   fj_cpu.h_color_epoch.assign(fj_cpu.n_colors, 0);
   fj_cpu.var_best_epoch = 1;
@@ -129,16 +129,16 @@ void retire_var_best_moves(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 template <typename i_t, typename f_t>
 void log_batch_distribution(const fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 {
-  if (fj_cpu.n_batch_attempts == 0) return;
+  if (fj_cpu.stats.n_batch_attempts == 0) return;
 
   int32_t smallest = -1;
   int32_t median   = -1;
   int64_t seen     = 0;
-  for (size_t bin = 0; bin < fj_cpu.batch_size_hist.size(); ++bin) {
-    if (fj_cpu.batch_size_hist[bin] == 0) continue;
+  for (size_t bin = 0; bin < fj_cpu.stats.batch_size_hist.size(); ++bin) {
+    if (fj_cpu.stats.batch_size_hist[bin] == 0) continue;
     if (smallest < 0) smallest = (int32_t)bin;
-    seen += fj_cpu.batch_size_hist[bin];
-    if (median < 0 && 2 * seen > fj_cpu.n_batch_attempts) median = (int32_t)bin;
+    seen += fj_cpu.stats.batch_size_hist[bin];
+    if (median < 0 && 2 * seen > fj_cpu.stats.n_batch_attempts) median = (int32_t)bin;
   }
 
   CUOPT_LOG_DEBUG(
@@ -147,10 +147,10 @@ void log_batch_distribution(const fj_cpu_climber_t<i_t, f_t>& fj_cpu)
     fj_cpu.log_prefix.c_str(),
     smallest,
     median,
-    (long long)fj_cpu.max_batch_size,
-    (double)fj_cpu.n_batched_moves / (double)fj_cpu.n_batch_attempts,
-    (long long)fj_cpu.n_batch_attempts,
-    (long long)fj_cpu.n_batched_moves,
+    (long long)fj_cpu.stats.max_batch_size,
+    (double)fj_cpu.stats.n_batched_moves / (double)fj_cpu.stats.n_batch_attempts,
+    (long long)fj_cpu.stats.n_batch_attempts,
+    (long long)fj_cpu.stats.n_batched_moves,
     fj_cpu.n_colors,
     fj_cpu.use_move_batching ? "on" : "off");
 }
@@ -179,18 +179,20 @@ void collect_move_batch(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
     fj_cpu.h_var_best_stamp[var_idx] = 0;
   }
 
-  ++fj_cpu.n_batch_attempts;
-  fj_cpu.n_batched_moves += (int64_t)batch.size();
-  ++fj_cpu.batch_size_hist[std::min<size_t>(batch.size(), fj_cpu.batch_size_hist.size() - 1)];
-  if ((int64_t)batch.size() > fj_cpu.max_batch_size) fj_cpu.max_batch_size = (int64_t)batch.size();
-  if (fj_cpu.n_batch_attempts == fj_cpu.hp.batch_probe_attempts &&
-      (double)fj_cpu.n_batched_moves <
+  ++fj_cpu.stats.n_batch_attempts;
+  fj_cpu.stats.n_batched_moves += (int64_t)batch.size();
+  ++fj_cpu.stats
+      .batch_size_hist[std::min<size_t>(batch.size(), fj_cpu.stats.batch_size_hist.size() - 1)];
+  if ((int64_t)batch.size() > fj_cpu.stats.max_batch_size)
+    fj_cpu.stats.max_batch_size = (int64_t)batch.size();
+  if (fj_cpu.stats.n_batch_attempts == fj_cpu.hp.batch_probe_attempts &&
+      (double)fj_cpu.stats.n_batched_moves <
         fj_cpu.hp.batch_min_yield * (double)fj_cpu.hp.batch_probe_attempts) {
     fj_cpu.use_move_batching = false;
     CUOPT_LOG_DEBUG("%sCPUFJ move batching off: %lld companions over %lld attempts",
                     fj_cpu.log_prefix.c_str(),
-                    (long long)fj_cpu.n_batched_moves,
-                    (long long)fj_cpu.n_batch_attempts);
+                    (long long)fj_cpu.stats.n_batched_moves,
+                    (long long)fj_cpu.stats.n_batch_attempts);
   }
 }
 

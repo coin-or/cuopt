@@ -234,7 +234,7 @@ void finalize_fj_cpu_host_initialization_from_template(
     fj_cpu.h_var_best_stamp.assign(n_variables, 0);
     fj_cpu.h_var_best_rowsum.assign(n_variables, 0);
     fj_cpu.h_var_bucket_stamp.assign(n_variables, 0);
-    fj_cpu.batch_size_hist.assign(fj_cpu.hp.batch_hist_bins, 0);
+    fj_cpu.stats.batch_size_hist.assign(fj_cpu.hp.batch_hist_bins, 0);
     fj_cpu.h_color_candidates.assign(fj_cpu.n_colors, {});
     fj_cpu.h_color_epoch.assign(fj_cpu.n_colors, 0);
     fj_cpu.var_best_epoch = 1;
