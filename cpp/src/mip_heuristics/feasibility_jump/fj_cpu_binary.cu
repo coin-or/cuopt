@@ -1313,8 +1313,8 @@ struct fj_bin_engine_t {
 
     infeasible_restart_window           = climber.infeasible_restart_window;
     infeasible_restart_max_streak       = climber.infeasible_restart_max_streak;
-    infeasible_restart_degrade_ratio    = (double)climber.infeasible_restart_degrade_ratio;
-    infeasible_checkpoint_refresh_ratio = (double)climber.infeasible_checkpoint_refresh_ratio;
+    infeasible_restart_degrade_ratio    = climber.infeasible_restart_degrade_ratio;
+    infeasible_checkpoint_refresh_ratio = climber.infeasible_checkpoint_refresh_ratio;
     cuopt_assert(infeasible_restart_window > 0, "invalid infeasible restart window");
     cuopt_assert(infeasible_restart_max_streak > 0, "invalid infeasible restart streak cap");
     cuopt_assert(infeasible_restart_degrade_ratio >= 1.0, "degrade ratio should be at least one");
