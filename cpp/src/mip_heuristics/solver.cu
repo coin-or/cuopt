@@ -5,7 +5,8 @@
  */
 /* clang-format on */
 
-#include <mip_heuristics/mip_constants.hpp>
+#include <mip_heuristics/lns_thread_budget.hpp>
+#include "../../../experiments/hive_lns/bridge.cuh"
 #include "diversity/diversity_manager.cuh"
 #include "local_search/local_search.cuh"
 #include "local_search/rounding/simple_rounding.cuh"
@@ -24,8 +25,10 @@
 #define DETECT_SYMMETRY_AFTER_PRESOLVE
 
 #include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
+#include <mip_heuristics/feasibility_jump/persistent_lns_bridge.cuh>
 #include <mip_heuristics/presolve/conflict_graph/clique_table.cuh>
 #include <mip_heuristics/structural/early_structural.cuh>
+#include <utilities/scope_guard.hpp>
 
 #include <raft/sparse/detail/cusparse_wrappers.h>
 #include <raft/core/cusparse_macros.hpp>
@@ -196,6 +199,11 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
                 "preprocess_problem should be called before running the solver");
 
   diversity_manager_t<i_t, f_t> dm(context);
+  std::unique_ptr<persistent_lns_bridge_t<i_t, f_t>> persistent_lns;
+  // Runs before the mapping bridge and population are destroyed, including early returns.
+  cuopt::scope_guard stop_persistent_lns([&] {
+    if (context.early_cpufj_ptr) context.early_cpufj_ptr->stop();
+  });
   if (context.problem_ptr->empty) {
     CUOPT_LOG_INFO("Problem fully reduced in presolve");
     sol.set_problem_fully_reduced();
@@ -216,13 +224,13 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     CUOPT_LOG_DEBUG("Presolve time limit: %g", presolve_time_limit);
   bool presolve_success = run_presolve ? dm.run_presolve(presolve_time_limit, timer_) : true;
 
-  // Stop early CPUFJ after cuopt presolve (probing cache) but before main solve
+  // Retain the two LNS workers on the Papilo model throughout the solve. Joining
+  // only feasibility lanes releases their capacity for the main solver.
   if (context.early_cpufj_ptr) {
-    context.early_cpufj_ptr->stop();
-    if (context.early_cpufj_ptr->solution_found()) {
-      CUOPT_LOG_DEBUG("Early CPUFJ found incumbent with user-space objective %g during presolve",
-                      context.early_cpufj_ptr->get_best_user_objective());
-    }
+    context.early_cpufj_ptr->stop(/*keep_lns=*/true);
+    // Freeze initial_upper_bound while main solver setup reads it. Replay the
+    // latest incumbent into the common publication gate after installing the bridge.
+    context.early_cpufj_ptr->set_incumbent_callback({});
   }
 
   if (context.early_structural_ptr) {
@@ -334,6 +342,15 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
   mip::probing_implied_bound_t<i_t, f_t> probing_implied_bound;
 
   i_t num_threads = omp_get_num_threads();
+  const i_t persistent_lns_threads =
+    context.early_cpufj_ptr ? context.early_cpufj_ptr->improvement_lane_count() : 0;
+  const i_t lns_threads =
+    persistent_lns_threads
+      ? persistent_lns_threads
+      : lns_worker_count(num_threads,
+                         context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC);
+  CUOPT_LOG_INFO(
+    "LNS thread budget: %d workers within %d OpenMP threads", lns_threads, num_threads);
 
   if (!context.settings.heuristics_only) {
     // Convert the presolved problem to user_problem_t
@@ -349,7 +366,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     // Fill in the settings for branch and bound
     branch_and_bound_settings.time_limit           = timer_.get_time_limit();
     branch_and_bound_settings.node_limit           = context.settings.node_limit;
-    branch_and_bound_settings.num_threads          = std::max(num_threads - 1, 1);
+    branch_and_bound_settings.num_threads          = std::max(num_threads - 1 - lns_threads, 1);
     branch_and_bound_settings.print_presolve_stats = false;
     branch_and_bound_settings.absolute_mip_gap_tol = context.settings.tolerances.absolute_mip_gap;
     branch_and_bound_settings.relative_mip_gap_tol = context.settings.tolerances.relative_mip_gap;
@@ -485,8 +502,26 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     }
   }
 
+  if (persistent_lns_threads) {
+    try {
+      persistent_lns =
+        std::make_unique<persistent_lns_bridge_t<i_t, f_t>>(*context.problem_ptr, dm.population);
+      context.early_cpufj_ptr->set_lns_source(
+        [&persistent_lns](auto& x) { return persistent_lns->snapshot(x); });
+      context.early_cpufj_ptr->set_incumbent_callback(
+        [&persistent_lns](f_t, f_t, const auto& x, const char* origin) {
+          persistent_lns->submit(x, origin);
+        },
+        /*replay_best=*/true);
+      CUOPT_LOG_INFO("Persistent LNS pair continuing after cuOpt presolve");
+    } catch (const std::exception& e) {
+      CUOPT_LOG_WARN("Persistent LNS handoff failed: %s", e.what());
+      context.early_cpufj_ptr->stop();
+    }
+  }
+
   std::unique_ptr<mip::root_structural_t<i_t, f_t>> root_structural;
-  if (num_threads >= CUOPT_MIP_ROOT_STRUCTURAL_REQUIRED_THREAD_COUNT &&
+  if (num_threads - lns_threads >= CUOPT_MIP_ROOT_STRUCTURAL_REQUIRED_THREAD_COUNT &&
       context.settings.determinism_mode != CUOPT_MODE_DETERMINISTIC &&
       !context.settings.heuristics_only) {
     root_structural = std::make_unique<mip::root_structural_t<i_t, f_t>>(
@@ -498,6 +533,11 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
       });
     if (!root_structural->recognized()) { root_structural.reset(); }
   }
+
+  // Launch outside the taskgroup: LNS can keep improving while B&B finishes,
+  // and finish() can signal it before waiting for its task after the group ends.
+  hive_lns_bridge_t<i_t, f_t> lns_worker(
+    context, dm.population, timer_, cuopt::hive_lns::run_lns, !persistent_lns_threads);
 
 #pragma omp taskgroup
   {
@@ -520,6 +560,8 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     sol                           = dm.run_solver();
   }  // implicit barrier for all tasks created in B&B and heuristics
 
+  if (context.early_cpufj_ptr) context.early_cpufj_ptr->stop();
+  lns_worker.finish();
   dm.population.add_external_solutions_to_population();
   if (dm.population.is_feasible() &&
       (!sol.get_feasible() ||
@@ -535,6 +577,17 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     if (branch_and_bound_sol.get_feasible() &&
         (!sol.get_feasible() || branch_and_bound_sol.get_objective() < sol.get_objective())) {
       sol = std::move(branch_and_bound_sol);
+    }
+  }
+
+  if (!lns_worker.best_assignment().empty()) {
+    solution_t<i_t, f_t> lns_sol(*context.problem_ptr);
+    lns_sol.copy_new_assignment(lns_worker.best_assignment());
+    lns_sol.compute_feasibility();
+    if (!lns_sol.get_feasible()) {
+      CUOPT_LOG_WARN("Ignoring LNS final candidate that failed solver feasibility checks");
+    } else if (!sol.get_feasible() || lns_sol.get_objective() < sol.get_objective()) {
+      sol = std::move(lns_sol);
     }
   }
 

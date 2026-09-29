@@ -19,6 +19,8 @@ ConfigureTest(NUMOPT_INTERNAL_TEST
     ${CUOPT_TEST_DIR}/linear_programming/parser_test.cpp
     # mip
     ${CUOPT_TEST_DIR}/mip/benchmark_validation_test.cpp
+    ${CUOPT_TEST_DIR}/mip/cpufj_lns_reuse_test.cu
+    ${CUOPT_TEST_DIR}/mip/hive_lns_test.cu
     ${CUOPT_TEST_DIR}/mip/miplib_test.cu
     ${CUOPT_TEST_DIR}/mip/problem_test.cu
     ${CUOPT_TEST_DIR}/mip/elim_var_remap_test.cu

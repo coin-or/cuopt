@@ -565,6 +565,9 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
   // Run CPUFJ early to find quick initial solutions
   ls_cpufj_raii_guard_t ls_cpufj_raii_guard(ls);  // RAII to stop cpufj threads on solve stop
   ls.start_cpufj_scratch_threads(population);
+  // Dedicated ruin-and-repair improvement worker on a spare thread; deepens the population's
+  // feasible incumbent without taking any thread away from feasibility discovery above.
+  ls.start_cpufj_lns_improvement_thread(population);
 
   if (check_b_b_preemption()) { return population.best_feasible(); }
   lp_state_t<i_t, f_t>& lp_state = problem_ptr->lp_state;

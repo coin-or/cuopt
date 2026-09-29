@@ -46,6 +46,11 @@ class local_search_t {
 
   void start_cpufj_scratch_threads(population_t<i_t, f_t>& population);
   void start_cpufj_lptopt_scratch_threads(population_t<i_t, f_t>& population);
+  // Dedicated ruin-and-repair improvement worker. Runs on a spare thread (never taken from the
+  // feasibility-finding scratch CPUFJ lanes) and deepens the objective of the population's
+  // incumbent once a feasible solution exists, via population-guided LNS on a single reused
+  // (cloned) CPU FJ climber.
+  void start_cpufj_lns_improvement_thread(population_t<i_t, f_t>& population);
   void stop_cpufj_scratch_threads();
   void generate_fast_solution(solution_t<i_t, f_t>& solution, timer_t timer);
   bool generate_solution(solution_t<i_t, f_t>& solution,
@@ -119,6 +124,9 @@ class local_search_t {
   std::vector<std::unique_ptr<fj_cpu_climber_t<i_t, f_t>>> scratch_cpu_fj;
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> scratch_cpu_fj_on_lp_opt;
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> deterministic_cpu_fj;
+  // Single persistent climber reused across every ruin-and-repair iteration of the LNS
+  // improvement worker, so that only the first iteration pays the O(nnz) climber construction.
+  std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> scratch_cpu_fj_lns;
   problem_t<i_t, f_t> problem_with_objective_cut;
   bool cutting_plane_added_for_active_run{false};
 

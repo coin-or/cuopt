@@ -14,6 +14,7 @@
 #include <mip_heuristics/solver.cuh>
 #include <utilities/timer.hpp>
 
+#include <functional>
 #include <mutex>
 #include <random>
 #include <string>
@@ -74,6 +75,12 @@ class population_t {
   bool is_better_than_best_feasible(solution_t<i_t, f_t>& sol);
   void run_all_recombiners(solution_t<i_t, f_t>& sol);
 
+  // Frozen observer: owning copies of stored feasible members, never a writer.
+  std::function<void(const std::vector<f_t>&)> lns_observer;
+  void notify_lns(solution_t<i_t, f_t>& sol)
+  {
+    if (lns_observer && sol.get_feasible()) lns_observer(sol.get_host_assignment());
+  }
   void allocate_solutions();
 
   void clear()
@@ -106,6 +113,18 @@ class population_t {
   void add_external_solution(const std::vector<f_t>& solution,
                              f_t objective,
                              solution_origin_t origin);
+  // Thread-safe, CUDA-free snapshot of the current best feasible solution's host assignment.
+  // Used by background CPU workers (e.g. the LNS improvement thread) that must not touch device
+  // memory or the population's internal (recursive-mutex-guarded) containers directly. Returns
+  // false when no feasible solution has been cached yet.
+  bool get_best_feasible_snapshot(std::vector<f_t>& out_assignment, f_t& out_objective);
+  // Persistent LNS also needs incumbents waiting in the external queue. These are
+  // candidates, not validated population entries: the caller must check feasibility.
+  void enable_lns_seed_polling();
+  bool take_lns_seed_candidate(std::vector<f_t>& out_assignment,
+                               f_t& out_objective,
+                               f_t objective_cutoff);
+  static constexpr size_t max_external_solutions = 50;
   std::vector<solution_t<i_t, f_t>> get_external_solutions();
   void add_external_solutions_to_population();
   size_t get_external_solution_size();
@@ -189,14 +208,16 @@ class population_t {
         timer(std::numeric_limits<double>::infinity())
     {
     }
+    bool operator<(const external_solution_t& other) const { return objective < other.objective; }
+
     std::vector<f_t> solution;
     f_t objective;
     solution_origin_t origin;
     timer_t timer;  // debug timer to track how long a solution has lingered in the queue
   };
 
+  // Max-heap: the worst reported solver objective is at the front.
   std::vector<external_solution_t> external_solution_queue;
-  std::vector<external_solution_t> external_solution_queue_cpufj;
   std::mt19937 rng;
   i_t update_iter = 0;
   std::recursive_mutex write_mutex;
@@ -208,6 +229,17 @@ class population_t {
   f_t best_feasible_objective = std::numeric_limits<f_t>::max();
   assignment_hash_map_t<i_t, f_t> population_hash_map;
   cuopt::timer_t timer;
+
+  // Host-only cache of the best feasible solution, refreshed under write_mutex whenever
+  // add_solution() installs a new best feasible. Guarded by its own lightweight mutex so
+  // background CPU-only workers (which must never touch device memory or write_mutex) can read
+  // it without racing the main solve thread.
+  std::mutex best_feasible_host_mutex;
+  std::vector<f_t> best_feasible_host_assignment;
+  f_t best_feasible_host_objective{std::numeric_limits<f_t>::max()};
+  bool lns_seed_polling{false};  // Guarded by best_feasible_host_mutex.
+  f_t last_lns_cached_objective{std::numeric_limits<f_t>::infinity()};
+  std::vector<std::pair<f_t, std::vector<f_t>>> pending_lns_seeds;
 };
 
 }  // namespace cuopt::mathematical_optimization::mip

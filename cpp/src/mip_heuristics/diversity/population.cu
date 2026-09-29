@@ -15,6 +15,8 @@
 #include <pdlp/utils.cuh>
 #include <utilities/copy_helpers.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <mutex>
 
 namespace cuopt::mathematical_optimization::mip {
@@ -145,25 +147,37 @@ void population_t<i_t, f_t>::add_external_solution(const std::vector<f_t>& solut
                                                    f_t objective,
                                                    solution_origin_t origin)
 {
+  if (!std::isfinite(objective)) return;
   context.solution_publication.publish_if_better(problem_ptr, solution, objective);
+  {
+    std::lock_guard<std::mutex> host_lock(best_feasible_host_mutex);
+    if (lns_seed_polling && std::isfinite(objective)) {
+      // Keep this independent of solution_mutex: draining the main queue performs
+      // GPU work and must not block either LNS worker's incumbent polling.
+      pending_lns_seeds.emplace_back(objective, solution);
+      if (pending_lns_seeds.size() > 10) {
+        auto worst = std::max_element(
+          pending_lns_seeds.begin(), pending_lns_seeds.end(), [](const auto& a, const auto& b) {
+            return a.first < b.first;
+          });
+        pending_lns_seeds.erase(worst);
+      }
+    }
+  }
   std::lock_guard<std::mutex> lock(solution_mutex);
 
-  if (origin == solution_origin_t::CPUFJ) {
-    external_solution_queue_cpufj.emplace_back(solution, objective, origin);
-  } else {
-    external_solution_queue.emplace_back(solution, objective, origin);
-  }
+  const bool full = external_solution_queue.size() == max_external_solutions;
+  if (full && objective >= external_solution_queue.front().objective) return;
 
-  // Prevent CPUFJ scratch solutions from flooding the queue
-  if (external_solution_queue_cpufj.size() > 10) {
-    auto worst_obj_it =
-      std::max_element(external_solution_queue_cpufj.begin(),
-                       external_solution_queue_cpufj.end(),
-                       [](const external_solution_t& a, const external_solution_t& b) {
-                         return a.objective < b.objective;
-                       });
-    external_solution_queue_cpufj.erase(worst_obj_it);
+  // Copy before changing the heap so allocation failure preserves queued candidates.
+  external_solution_t candidate(solution, objective, origin);
+  if (full) {
+    std::pop_heap(external_solution_queue.begin(), external_solution_queue.end());
+    external_solution_queue.back() = std::move(candidate);
+  } else {
+    external_solution_queue.push_back(std::move(candidate));
   }
+  std::push_heap(external_solution_queue.begin(), external_solution_queue.end());
 
   CUOPT_LOG_DEBUG("%s added a solution to population, solution queue size %lu with objective %g",
                   solution_origin_to_string(origin),
@@ -178,11 +192,59 @@ void population_t<i_t, f_t>::add_external_solution(const std::vector<f_t>& solut
 }
 
 template <typename i_t, typename f_t>
+bool population_t<i_t, f_t>::get_best_feasible_snapshot(std::vector<f_t>& out_assignment,
+                                                        f_t& out_objective)
+{
+  std::lock_guard<std::mutex> host_lock(best_feasible_host_mutex);
+  if (best_feasible_host_assignment.empty()) return false;
+  out_assignment = best_feasible_host_assignment;
+  out_objective  = best_feasible_host_objective;
+  return true;
+}
+
+template <typename i_t, typename f_t>
+void population_t<i_t, f_t>::enable_lns_seed_polling()
+{
+  std::lock_guard<std::mutex> host_lock(best_feasible_host_mutex);
+  lns_seed_polling = true;
+}
+
+template <typename i_t, typename f_t>
+bool population_t<i_t, f_t>::take_lns_seed_candidate(std::vector<f_t>& out_assignment,
+                                                     f_t& out_objective,
+                                                     f_t objective_cutoff)
+{
+  std::lock_guard<std::mutex> host_lock(best_feasible_host_mutex);
+  pending_lns_seeds.erase(
+    std::remove_if(pending_lns_seeds.begin(),
+                   pending_lns_seeds.end(),
+                   [objective_cutoff](const auto& seed) { return seed.first >= objective_cutoff; }),
+    pending_lns_seeds.end());
+  const bool cached = !best_feasible_host_assignment.empty() &&
+                      best_feasible_host_objective < objective_cutoff &&
+                      best_feasible_host_objective < last_lns_cached_objective;
+  auto best = std::min_element(pending_lns_seeds.begin(),
+                               pending_lns_seeds.end(),
+                               [](const auto& a, const auto& b) { return a.first < b.first; });
+  if (best != pending_lns_seeds.end() && (!cached || best->first < best_feasible_host_objective)) {
+    out_objective  = best->first;
+    out_assignment = std::move(best->second);
+    pending_lns_seeds.erase(best);
+    return true;
+  }
+  if (!cached) return false;
+  out_objective  = best_feasible_host_objective;
+  out_assignment = best_feasible_host_assignment;
+  // A cached point can cease to improve after private normalization. Deliver it
+  // once so rejection cannot repeatedly hide usable pending incumbents.
+  last_lns_cached_objective = best_feasible_host_objective;
+  return true;
+}
+
+template <typename i_t, typename f_t>
 void population_t<i_t, f_t>::add_external_solutions_to_population()
 {
-  // don't do early exit checks here. mutex needs to be acquired to prevent race conditions
-  auto new_sol_vector = get_external_solutions();
-  add_solutions_from_vec(std::move(new_sol_vector));
+  add_solutions_from_vec(get_external_solutions());
 }
 
 // normally we would need a lock here but these are boolean types and race conditions are not
@@ -197,60 +259,59 @@ void population_t<i_t, f_t>::preempt_heuristic_solver()
 template <typename i_t, typename f_t>
 std::vector<solution_t<i_t, f_t>> population_t<i_t, f_t>::get_external_solutions()
 {
-  std::lock_guard<std::mutex> lock(solution_mutex);
+  std::vector<external_solution_t> pending;
+  {
+    std::lock_guard<std::mutex> lock(solution_mutex);
+    pending.swap(external_solution_queue);
+    solutions_in_external_queue_ = false;
+  }
+  // Validate the bounded snapshot best-first, without blocking producers on GPU work.
+  std::sort_heap(pending.begin(), pending.end());
   std::vector<solution_t<i_t, f_t>> return_vector;
+  return_vector.reserve(pending.size());
   [[maybe_unused]] i_t counter    = 0;
   f_t new_best_feasible_objective = best_feasible_objective;
   f_t longest_wait_time           = 0;
-  for (auto& queue : {external_solution_queue, external_solution_queue_cpufj}) {
-    for (auto& h_entry : queue) {
-      // ignore CPUFJ solutions if they're not better than the best feasible.
-      // It seems they worsen results on some instances despite the potential for improved diversity
-      if (h_entry.origin == solution_origin_t::CPUFJ &&
-          h_entry.objective > new_best_feasible_objective) {
-        continue;
-      } else if (h_entry.origin != solution_origin_t::CPUFJ &&
-                 h_entry.objective > new_best_feasible_objective) {
-        new_best_feasible_objective = h_entry.objective;
-      }
-
-      longest_wait_time = std::max(longest_wait_time, h_entry.timer.elapsed_time());
-      solution_t<i_t, f_t> sol(*problem_ptr);
-      sol.copy_new_assignment(h_entry.solution);
-      sol.compute_feasibility();
-      if (!sol.get_feasible()) {
-        CUOPT_LOG_DEBUG(
-          "External solution %d is infeasible, excess %g, obj %g, int viol %g, var viol %g, cstr "
-          "viol %g, n_feasible %d/%d, integers %d/%d",
-          counter,
-          sol.get_total_excess(),
-          sol.get_user_objective(),
-          sol.compute_max_int_violation(),
-          sol.compute_max_variable_violation(),
-          sol.compute_max_constraint_violation(),
-          sol.n_feasible_constraints.value(sol.handle_ptr->get_stream()),
-          problem_ptr->n_constraints,
-          sol.compute_number_of_integers(),
-          problem_ptr->n_integer_vars);
-      }
-      if (std::abs(sol.get_objective() - h_entry.objective) > OBJECTIVE_EPSILON) {
-        CUOPT_LOG_DEBUG(
-          "External solution objective mismatch: sol.get_objective() = %g, h_entry.objective = %g",
-          sol.get_objective(),
-          h_entry.objective);
-      }
-      sol.handle_ptr->sync_stream();
-      return_vector.emplace_back(std::move(sol));
-      counter++;
+  for (auto& h_entry : pending) {
+    // ignore CPUFJ solutions if they're not better than the best feasible.
+    // It seems they worsen results on some instances despite the potential for improved diversity
+    if (h_entry.origin == solution_origin_t::CPUFJ &&
+        h_entry.objective > new_best_feasible_objective) {
+      continue;
+    } else if (h_entry.origin != solution_origin_t::CPUFJ &&
+               h_entry.objective > new_best_feasible_objective) {
+      new_best_feasible_objective = h_entry.objective;
     }
+
+    longest_wait_time = std::max(longest_wait_time, h_entry.timer.elapsed_time());
+    solution_t<i_t, f_t> sol(*problem_ptr);
+    sol.copy_new_assignment(h_entry.solution);
+    sol.compute_feasibility();
+    if (!sol.get_feasible()) {
+      CUOPT_LOG_DEBUG(
+        "External solution %d is infeasible, excess %g, obj %g, int viol %g, var viol %g, cstr "
+        "viol %g, n_feasible %d/%d, integers %d/%d",
+        counter,
+        sol.get_total_excess(),
+        sol.get_user_objective(),
+        sol.compute_max_int_violation(),
+        sol.compute_max_variable_violation(),
+        sol.compute_max_constraint_violation(),
+        sol.n_feasible_constraints.value(sol.handle_ptr->get_stream()),
+        problem_ptr->n_constraints,
+        sol.compute_number_of_integers(),
+        problem_ptr->n_integer_vars);
+    }
+    if (std::abs(sol.get_objective() - h_entry.objective) > OBJECTIVE_EPSILON) {
+      CUOPT_LOG_DEBUG(
+        "External solution objective mismatch: sol.get_objective() = %g, h_entry.objective = %g",
+        sol.get_objective(),
+        h_entry.objective);
+    }
+    sol.handle_ptr->sync_stream();
+    return_vector.emplace_back(std::move(sol));
+    counter++;
   }
-  if (external_solution_queue.size() > 0) {
-    CUOPT_LOG_DEBUG("Consuming B&B solutions, solution queue size %lu",
-                    external_solution_queue.size());
-    external_solution_queue.clear();
-  }
-  external_solution_queue_cpufj.clear();
-  solutions_in_external_queue_ = false;
   if (return_vector.size() > 0) {
     CUOPT_LOG_DEBUG("Longest wait time in external queue: %f seconds", longest_wait_time);
   }
@@ -423,6 +484,15 @@ std::pair<i_t, bool> population_t<i_t, f_t>::add_solution(solution_t<i_t, f_t>&&
     solutions[0].second = std::move(temp_sol);
     indices[0].second   = sol_cost;
     best_updated        = true;
+    // Copy from the caller's CUDA stream once for both LNS workers. The CPUFJ
+    // reader only takes the host-cache lock; it never holds the population lock.
+    auto host_assignment = solutions[0].second.get_host_assignment();
+    if (lns_observer) lns_observer(host_assignment);
+    {
+      std::lock_guard<std::mutex> host_lock(best_feasible_host_mutex);
+      best_feasible_host_assignment = std::move(host_assignment);
+      best_feasible_host_objective  = solutions[0].second.get_objective();
+    }
   }
 
   // Fast reject
@@ -454,6 +524,7 @@ std::pair<i_t, bool> population_t<i_t, f_t>::add_solution(solution_t<i_t, f_t>&&
 
     solutions[hint].first  = true;
     solutions[hint].second = std::move(sol);
+    notify_lns(solutions[hint].second);
 
     int inserted_pos = insert_index(std::pair<size_t, double>((size_t)hint, sol_cost));
     cuopt_assert(test_invariant(), "Population invariant doesn't hold");
@@ -468,6 +539,7 @@ std::pair<i_t, bool> population_t<i_t, f_t>::add_solution(solution_t<i_t, f_t>&&
 
     solutions[free].first  = true;
     solutions[free].second = std::move(sol);
+    notify_lns(solutions[free].second);
 
     int inserted_pos = insert_index(std::pair<size_t, double>((size_t)free, sol_cost));
     cuopt_assert(test_invariant(), "Population invariant doesn't hold");

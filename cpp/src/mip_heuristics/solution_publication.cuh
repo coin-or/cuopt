@@ -28,6 +28,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace cuopt::mathematical_optimization::mip {
@@ -58,7 +59,8 @@ class solution_publication_t {
   // Returns whether the incumbent was published.
   bool publish_if_better(problem_t<i_t, f_t>* problem_ptr,
                          const std::vector<f_t>& assignment,
-                         f_t solver_objective)
+                         f_t solver_objective,
+                         std::optional<f_t> lns_population_best = std::nullopt)
   {
     if (handle_ == nullptr) { return false; }
     cuopt_assert(problem_ptr != nullptr, "Publication problem pointer must not be null");
@@ -81,6 +83,16 @@ class solution_publication_t {
                    f_t{1e-4} * std::max(f_t{1}, std::abs(solver_objective)),
                  "published objective disagrees with the assignment it accompanies");
 
+    // LNS caller holds the population lock. Compare the recomputed objective,
+    // not a candidate-reported value, to both current bests atomically.
+    const f_t previous_global_best = best_published_objective_;
+    if (lns_population_best.has_value()) {
+      const f_t margin = f_t{1e-8} * std::max(f_t{1}, std::abs(solver_objective));
+      if (!std::isfinite(*lns_population_best) || !std::isfinite(previous_global_best) ||
+          !(solver_objective < *lns_population_best - margin) ||
+          !(solver_objective < previous_global_best - margin))
+        return false;
+    }
     if (!(solver_objective < best_published_objective_)) { return false; }
     cuopt_func_call(audit_feasibility(device_id_, problem_ptr, assignment));
     best_published_objective_ = solver_objective;
@@ -105,6 +117,15 @@ class solution_publication_t {
                                      callback_objective.data(),
                                      callback_bound.data(),
                                      get_sol_callback->get_user_data());
+    }
+    if (lns_population_best.has_value()) {
+      CUOPT_LOG_INFO(
+        "HIVE_LNS_ACCEPT user_objective=%.17g solver_objective=%.17g "
+        "population_best=%.17g previous_global_best=%.17g",
+        double(user_objective),
+        double(solver_objective),
+        double(*lns_population_best),
+        double(previous_global_best));
     }
     return true;
   }
