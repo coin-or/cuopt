@@ -3769,19 +3769,15 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
 
   // Started here so the lanes run through the root LP and every cut pass. No relaxation exists
   // yet, so they seed from the anchor.
-  root_heuristics_t<i_t, f_t> root_heuristics(settings_.num_threads - 1);
-  const i_t n_root_fj_lanes =
-    std::clamp(settings_.num_threads / 4, 0, CUOPT_MIP_ROOT_CPUFJ_MAX_LANES);
+  root_heuristics_t<i_t, f_t> root_heuristics(settings_.num_threads);
   const f_t root_fj_time_limit = settings_.time_limit - toc(exploration_stats_.start_time);
-  if (!settings_.deterministic && omp_in_parallel() && n_root_fj_lanes > 0 &&
-      root_fj_time_limit > 0) {
+  if (!settings_.deterministic && omp_in_parallel() && root_fj_time_limit > 0) {
     root_heuristics.start_persistent_lanes(
       original_lp_,
       var_types_,
       original_problem_.num_cols,
       {},
       settings_,
-      n_root_fj_lanes,
       root_fj_time_limit,
       (int64_t)settings_.random_seed,
       [this](f_t obj, const std::vector<f_t>& assignment, double work_units) {
