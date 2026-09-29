@@ -823,9 +823,6 @@ pdlp_settings:
         Partitioner used to split the problem across GPUs for multi-GPU PDLP
         (method PDLP with num_gpus -1 or greater than 1): 0 Auto (default;
         RoundRobin on 1 GPU, KaMinPar otherwise), 1 KaMinPar, 2 RoundRobin.
-        With 1 GPU there is nothing to partition, so both strategies are
-        equivalent no-ops; Auto picks RoundRobin there because it skips
-        KaMinPar's graph-partitioning work for no benefit.
       default: "0"
       field_num: 36
       type: int32

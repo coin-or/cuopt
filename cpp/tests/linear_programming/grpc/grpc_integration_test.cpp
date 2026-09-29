@@ -43,6 +43,7 @@
 #include <cuopt/mathematical_optimization/optimization_problem_interface.hpp>
 #include <cuopt/mathematical_optimization/optimization_problem_utils.hpp>
 #include <cuopt/mathematical_optimization/pdlp/solver_settings.hpp>
+#include <raft/core/device_setter.hpp>
 #ifdef CUOPT_ENABLE_GRPC_ROUTING
 #include <cuopt/routing/cpu_routing_problem.hpp>
 #include <cuopt/routing/solver_settings.hpp>
@@ -779,6 +780,36 @@ TEST_F(DefaultServerTests, SolveLPPolling)
 
   EXPECT_EQ(final_status, job_status_t::COMPLETED)
     << "Status: " << job_status_to_string(final_status);
+
+  auto result = client->get_lp_result<int32_t, double>(submit_result.job_id);
+  EXPECT_TRUE(result.success) << result.error_message;
+  ASSERT_NE(result.solution, nullptr);
+  EXPECT_NEAR(result.solution->get_objective_value(), -464.753, 1.0);
+}
+
+// Exercises grpc_worker.cpp's is_multigpu_pdlp_requested routing end to end: method=PDLP with
+// num_gpus=-1 must dispatch through the mps_data_model_t solve_lp overload on the server.
+TEST_F(DefaultServerTests, SolveLPMultiGpuPDLP)
+{
+  if (raft::device_setter::get_device_count() < 2) { GTEST_SKIP() << "Requires >=2 GPUs"; }
+
+  auto client = create_client();
+  ASSERT_NE(client, nullptr);
+
+  std::string mps_path = get_test_lp_path("afiro_original.mps");
+  auto problem         = load_problem_from_file(mps_path);
+  pdlp_solver_settings_t<int32_t, double> settings;
+  settings.time_limit = 30.0;
+  settings.method     = method_t::PDLP;
+  settings.num_gpus   = -1;
+
+  auto submit_result = client->submit_lp(problem, settings);
+  ASSERT_TRUE(submit_result.success) << submit_result.error_message;
+
+  wait_for_job_done(client.get(), submit_result.job_id, 60);
+  auto status = client->check_status(submit_result.job_id);
+  EXPECT_EQ(status.status, job_status_t::COMPLETED)
+    << "Status: " << job_status_to_string(status.status);
 
   auto result = client->get_lp_result<int32_t, double>(submit_result.job_id);
   EXPECT_TRUE(result.success) << result.error_message;
