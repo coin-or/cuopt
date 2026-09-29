@@ -161,7 +161,7 @@ cuopt::mathematical_optimization::io::mps_data_model_t<i_t, f_t> op_problem_to_m
 
 // True when method=PDLP and num_gpus is -1 or greater than 1, i.e. multi-GPU PDLP is requested.
 template <typename i_t, typename f_t>
-bool is_mpdlp_requested(pdlp_solver_settings_t<i_t, f_t> const& settings);
+bool is_multigpu_pdlp_requested(pdlp_solver_settings_t<i_t, f_t> const& settings);
 
 // ============================================================================
 // CPU problem overloads (convert to GPU, solve, convert solution back)

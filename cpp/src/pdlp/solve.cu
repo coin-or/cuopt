@@ -2560,7 +2560,7 @@ cuopt::mathematical_optimization::io::mps_data_model_t<i_t, f_t> op_problem_to_m
 }
 
 template <typename i_t, typename f_t>
-bool is_mpdlp_requested(pdlp_solver_settings_t<i_t, f_t> const& settings)
+bool is_multigpu_pdlp_requested(pdlp_solver_settings_t<i_t, f_t> const& settings)
 {
   return settings.method == method_t::PDLP && (settings.num_gpus == -1 || settings.num_gpus > 1);
 }
@@ -2573,7 +2573,7 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
   bool problem_checking,
   bool use_pdlp_solver_mode)
 {
-  if (is_mpdlp_requested(settings)) {
+  if (is_multigpu_pdlp_requested(settings)) {
     return solve_lp_distributed_from_mps(
       handle_ptr, mps_data_model, settings, use_pdlp_solver_mode);
   }
@@ -2976,7 +2976,7 @@ std::unique_ptr<lp_solution_interface_t<i_t, f_t>> solve_lp(
   template CUOPT_EXPORT cuopt::mathematical_optimization::io::mps_data_model_t<int, F_TYPE>      \
   op_problem_to_mps_data_model(const optimization_problem_t<int, F_TYPE>& op_problem);           \
                                                                                                  \
-  template CUOPT_EXPORT bool is_mpdlp_requested(                                                 \
+  template CUOPT_EXPORT bool is_multigpu_pdlp_requested(                                         \
     pdlp_solver_settings_t<int, F_TYPE> const& settings);                                        \
                                                                                                  \
   template optimization_problem_solution_t<int, F_TYPE> solve_lp_distributed_from_mps(           \
