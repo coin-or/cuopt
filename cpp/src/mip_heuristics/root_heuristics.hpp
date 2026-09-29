@@ -232,12 +232,14 @@ struct root_heuristics_t {
     cut_passes_heuristics_.clear();
   }
 
-  void stop_old_workers(i_t cut_pass, i_t new_workers)
+  i_t stop_old_workers(i_t cut_pass, i_t new_workers)
   {
-    if (new_workers <= 0) return;
+    if (new_workers <= 0) return 0;
 
-    if (new_workers <= available_worker_slots(cut_pass)) { return; }
+    const i_t workers_to_stop = new_workers - available_worker_slots(cut_pass);
+    if (workers_to_stop <= 0) return 0;
 
+    i_t stopped_workers = 0;
     for (auto& heuristic : cut_passes_heuristics_) {
       // Skip the current heuristic entry
       if (&heuristic == &cut_passes_heuristics_.back()) { break; }
@@ -245,10 +247,11 @@ struct root_heuristics_t {
       i_t active = heuristic->active_workers_;
       if (active > 0 && !heuristic->halt_.load(std::memory_order_acquire)) {
         heuristic->send_stop_signal();
-        new_workers -= active;
-        if (new_workers <= 0) return;
+        stopped_workers += active;
+        if (stopped_workers >= workers_to_stop) break;
       }
     }
+    return stopped_workers;
   }
 
   i_t available_worker_slots(i_t cut_pass) const

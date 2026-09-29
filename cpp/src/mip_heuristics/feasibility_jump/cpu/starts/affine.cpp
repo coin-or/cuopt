@@ -76,12 +76,13 @@ void apply_affine_equality_start(fj_cpu_climber_t<i_t, f_t>& c, double budget)
     s = 1 / std::sqrt(s);
   }
   for (i_t v = 0; v < n; ++v) {
-    if ((v & 255) == 0 && expired()) return;
+    if ((v % 256) == 0 && expired()) return;
     f_t* a = columns.data() + (size_t)v * q;
     for (size_t r = 0; r < q; ++r)
       a[r] *= scale[r];
   }
   for (size_t r = 0; r < q; ++r) {
+    if (expired()) return;
     const auto row_r = thrust::make_transform_iterator(
       thrust::make_counting_iterator<i_t>(0), [&](i_t v) { return columns[(size_t)v * q + r]; });
     for (size_t s = 0; s <= r; ++s) {
@@ -112,6 +113,7 @@ void apply_affine_equality_start(fj_cpu_climber_t<i_t, f_t>& c, double budget)
   std::vector<f_t> norm(n, 0), gradient(n), error(q), multiplier(q, 0);
   std::vector<i_t> active;
   for (i_t v = 0; v < n; ++v) {
+    if ((v % 256) == 0 && expired()) return;
     f_t* a = columns.data() + (size_t)v * q;
     whiten(a);
     norm[v] = compensated_dot2(a, a, q);
