@@ -159,11 +159,7 @@ template <typename i_t, typename f_t>
 cuopt::mathematical_optimization::io::mps_data_model_t<i_t, f_t> op_problem_to_mps_data_model(
   const optimization_problem_t<i_t, f_t>& op_problem);
 
-// True when method=PDLP and num_gpus is -1 (all visible GPUs) or greater than 1, i.e. when
-// a solve should dispatch to multi-GPU PDLP. Callers that already have a GPU-resident
-// optimization_problem_t (rather than a host-resident mps_data_model_t) cannot dispatch to
-// multi-GPU PDLP directly; they can use this to decide whether to route through
-// op_problem_to_mps_data_model and the mps_data_model_t solve_lp overload instead.
+// True when method=PDLP and num_gpus is -1 or greater than 1, i.e. multi-GPU PDLP is requested.
 template <typename i_t, typename f_t>
 bool is_mpdlp_requested(pdlp_solver_settings_t<i_t, f_t> const& settings);
 
