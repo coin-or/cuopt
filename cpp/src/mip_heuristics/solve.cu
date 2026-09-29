@@ -12,6 +12,7 @@
 #include <linear_algebra/sort_csr.cuh>
 #include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
 #include <mip_heuristics/feasibility_jump/early_gpufj.cuh>
+#include <mip_heuristics/lns_thread_budget.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <mip_heuristics/mip_scaling_strategy.cuh>
 #include <mip_heuristics/presolve/presolve_budget_policy.hpp>
@@ -311,6 +312,12 @@ mip_solution_t<i_t, f_t> run_mip_solver(
                                     user_assignment,
                                     no_bound);
         };
+      const int structural_cpu_budget = mip::presolve_early_worker_budget(
+        omp_get_num_threads(), CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS, 0, 1);
+      if (mip::early_structural_has_capacity(omp_get_num_threads(), structural_cpu_budget, 0)) {
+        early_structural = mip::early_structural_t<i_t, f_t>::create(
+          *problem.original_problem_ptr, settings.get_tolerances(), incumbent_callback);
+      }
       early_cpufj = std::make_unique<mip::early_cpufj_t<i_t, f_t>>(
         *problem.original_problem_ptr,
         settings.get_tolerances(),
@@ -321,12 +328,13 @@ mip_solution_t<i_t, f_t> run_mip_solver(
       if (std::isfinite(initial_upper_bound)) {
         early_cpufj->set_best_objective(problem.get_solver_obj_from_user_obj(initial_upper_bound));
       }
-      early_cpufj->start(omp_get_num_threads() - CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS);
+      early_cpufj->start(mip::presolve_early_worker_budget(omp_get_num_threads(),
+                                                           CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS,
+                                                           0,
+                                                           early_structural ? 1 : 0));
       solver.context.early_cpufj_ptr = early_cpufj.get();
       CUOPT_LOG_DEBUG("Started early CPUFJ on papilo-presolved problem during cuOpt presolve");
 
-      early_structural = mip::early_structural_t<i_t, f_t>::create(
-        *problem.original_problem_ptr, settings.get_tolerances(), incumbent_callback);
       if (early_structural) {
         if (std::isfinite(initial_upper_bound)) {
           early_structural->set_best_objective(
@@ -569,6 +577,17 @@ mip_solution_t<i_t, f_t> solve_mip_helper(
       };
 
     if (run_early_fj) {
+      const int gpufj_workers =
+        omp_get_num_threads() >= CUOPT_MIP_EARLY_GPUFJ_REQUIRED_THREAD_COUNT ? 1 : 0;
+      const int structural_cpu_budget = mip::presolve_early_worker_budget(
+        omp_get_num_threads(), CUOPT_MIP_PAPILO_THREAD_LIMIT, gpufj_workers, 1);
+      if (mip::early_structural_has_capacity(
+            omp_get_num_threads(), structural_cpu_budget, gpufj_workers)) {
+        // Recognize before sizing the CPUFJ portfolio. Both private CPU states
+        // capture the original model before the global scaling step below.
+        early_structural = mip::early_structural_t<i_t, f_t>::create(
+          op_problem, settings.get_tolerances(), early_fj_callback);
+      }
       // Start early CPUFJ on original problem (will restart on presolved problem after Papilo)
       const uint64_t early_fj_base_seed = mip::get_base_seed(settings.seed);
       early_cpufj                       = std::make_unique<mip::early_cpufj_t<i_t, f_t>>(
@@ -580,8 +599,11 @@ mip_solution_t<i_t, f_t> solve_mip_helper(
       if (pre_solve_heuristics && pre_solve_heuristics->solution_found()) {
         early_cpufj->set_best_objective(pre_solve_heuristics->get_best_objective());
       }
-      // Papilo runs on its own threads, so the team is otherwise idle here.
-      early_cpufj->start(omp_get_num_threads() - CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS);
+      // Reserve Papilo's arena as well as the GPU and structural heuristic workers.
+      early_cpufj->start(mip::presolve_early_worker_budget(omp_get_num_threads(),
+                                                           CUOPT_MIP_PAPILO_THREAD_LIMIT,
+                                                           gpufj_workers,
+                                                           early_structural ? 1 : 0));
       CUOPT_LOG_DEBUG("Started early CPUFJ on original problem with %d lanes",
                       early_cpufj->lane_count());
     }
@@ -633,8 +655,6 @@ mip_solution_t<i_t, f_t> solve_mip_helper(
         std::make_unique<mip::early_gpufj_t<i_t, f_t>>(op_problem, settings, early_fj_callback);
       early_gpufj->start();
       CUOPT_LOG_DEBUG("Started early GPUFJ during presolve");
-      early_structural = mip::early_structural_t<i_t, f_t>::create(
-        op_problem, settings.get_tolerances(), early_fj_callback);
       if (early_structural) { early_structural->start(); }
     }
 
@@ -650,6 +670,20 @@ mip_solution_t<i_t, f_t> solve_mip_helper(
                                            ? std::numeric_limits<double>::infinity()
                                            : timer.remaining_time();
 
+      const int cpufj_workers = early_cpufj ? early_cpufj->lane_count() : 0;
+      const int gpufj_workers =
+        early_gpufj && omp_get_num_threads() >= CUOPT_MIP_EARLY_GPUFJ_REQUIRED_THREAD_COUNT ? 1 : 0;
+      const int structural_workers = early_structural ? 1 : 0;
+      const int papilo_threads     = mip::papilo_thread_budget(
+        omp_get_num_threads(), cpufj_workers, gpufj_workers, structural_workers);
+      CUOPT_LOG_INFO(
+        "Papilo thread budget: %d presolve + %d CPUFJ/LNS + %d GPUFJ + %d structural within %d "
+        "threads",
+        papilo_threads,
+        cpufj_workers,
+        gpufj_workers,
+        structural_workers,
+        omp_get_num_threads());
       presolver   = std::make_unique<mip::third_party_presolve_t<i_t, f_t>>();
       auto result = presolver->apply_presolve_from_op_problem(
         op_problem,
@@ -659,7 +693,7 @@ mip_solution_t<i_t, f_t> solve_mip_helper(
         settings.tolerances.absolute_tolerance,
         settings.tolerances.relative_tolerance,
         presolve_time_limit,
-        settings.num_cpu_threads,
+        papilo_threads,
         papilo_budget.papilo_max_rounds,
         papilo_budget.papilo_max_badgesize);
 

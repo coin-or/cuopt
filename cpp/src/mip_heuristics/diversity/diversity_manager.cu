@@ -9,6 +9,7 @@
 #include "diversity_manager.cuh"
 
 #include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
+#include <mip_heuristics/lns_thread_budget.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <mip_heuristics/presolve/third_party_presolve.hpp>
 
@@ -331,8 +332,8 @@ bool diversity_manager_t<i_t, f_t>::run_presolve(f_t time_limit, timer_t global_
     // as well as concurrency.
     const i_t held_by_cpufj =
       context.early_cpufj_ptr != nullptr ? (i_t)context.early_cpufj_ptr->lane_count() : 0;
-    ls.constraint_prop.bounds_update.settings.num_tasks =
-      std::max(1, omp_get_num_threads() - 1 - held_by_cpufj);
+    ls.constraint_prop.bounds_update.settings.num_tasks = probing_thread_budget(
+      omp_get_num_threads(), held_by_cpufj, context.early_structural_ptr != nullptr ? 1 : 0);
     f_t time_for_probing_cache = std::min(time_limit, (f_t)global_timer.remaining_time());
     timer_t probing_timer{time_for_probing_cache};
     [[maybe_unused]] const auto probing_t0 = std::chrono::steady_clock::now();

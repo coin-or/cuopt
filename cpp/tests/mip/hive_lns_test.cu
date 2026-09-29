@@ -827,4 +827,60 @@ TEST(HiveLns, BenchmarkApiErrorsAreDistinctFromNoSolution)
     EXPECT_STREQ(error.operation, "cuOptSolve");
   }
 }
+TEST(HiveLns, PresolveBudgetsIncludePapiloAndAuxiliaryWorkers)
+{
+  for (int team_size = 2; team_size <= 128; ++team_size) {
+    const int gpu_workers = team_size >= CUOPT_MIP_EARLY_GPUFJ_REQUIRED_THREAD_COUNT ? 1 : 0;
+    for (bool recognized_structure : {false, true}) {
+      const int structural_cpu_budget =
+        mip::presolve_early_worker_budget(team_size, CUOPT_MIP_PAPILO_THREAD_LIMIT, gpu_workers, 1);
+      const int structural_workers =
+        recognized_structure &&
+        mip::early_structural_has_capacity(team_size, structural_cpu_budget, gpu_workers);
+      const int cpu_workers = mip::presolve_early_worker_budget(
+        team_size, CUOPT_MIP_PAPILO_THREAD_LIMIT, gpu_workers, structural_workers);
+      const int lns_workers = mip::presolve_lns_worker_count(cpu_workers);
+      EXPECT_GE(cpu_workers - lns_workers, 1);
+      EXPECT_EQ(lns_workers, team_size >= 7 ? 2 : 0);
+      const int papilo_workers =
+        mip::papilo_thread_budget(team_size, cpu_workers, gpu_workers, structural_workers);
+      EXPECT_GE(papilo_workers, 1);
+      EXPECT_LE(papilo_workers, CUOPT_MIP_PAPILO_THREAD_LIMIT);
+      EXPECT_LE(cpu_workers + gpu_workers + structural_workers + papilo_workers, team_size);
+      if (team_size >= 9) {
+        EXPECT_EQ(papilo_workers, CUOPT_MIP_PAPILO_THREAD_LIMIT);
+        EXPECT_EQ(cpu_workers + gpu_workers + structural_workers + papilo_workers, team_size);
+      }
+
+      // The replacement portfolio keeps the cuOpt caller/probing reservation.
+      const int reduced_structural_budget =
+        mip::presolve_early_worker_budget(team_size, CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS, 0, 1);
+      const int reduced_structural_workers =
+        recognized_structure &&
+        mip::early_structural_has_capacity(team_size, reduced_structural_budget, 0);
+      const int reduced_workers = mip::presolve_early_worker_budget(
+        team_size, CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS, 0, reduced_structural_workers);
+      const int probing_workers =
+        mip::probing_thread_budget(team_size, reduced_workers, reduced_structural_workers);
+      EXPECT_EQ(mip::presolve_lns_worker_count(reduced_workers), team_size >= 7 ? 2 : 0);
+      EXPECT_LE(reduced_workers + reduced_structural_workers + 1, team_size);
+      // At tiny team sizes the caller can execute the single probing task itself.
+      EXPECT_LE(reduced_workers + reduced_structural_workers + probing_workers, team_size);
+      if (team_size >= 8) {
+        EXPECT_EQ(
+          reduced_workers + reduced_structural_workers + CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS,
+          team_size);
+      }
+    }
+    EXPECT_EQ(mip::papilo_thread_budget(team_size, 0, 0, 0),
+              std::min(team_size, CUOPT_MIP_PAPILO_THREAD_LIMIT));
+  }
+  EXPECT_EQ(mip::presolve_early_worker_budget(28, 4, 1, 0), 23);
+  EXPECT_EQ(mip::presolve_early_worker_budget(28, 4, 1, 1), 22);
+  EXPECT_EQ(mip::presolve_early_worker_budget(28, 4, 0, 0), 24);
+  EXPECT_EQ(mip::presolve_early_worker_budget(28, 4, 0, 1), 23);
+  EXPECT_FALSE(mip::early_structural_has_capacity(2, 1, 0));
+  EXPECT_FALSE(mip::early_structural_has_capacity(3, 1, 1));
+}
+
 }  // namespace cuopt::hive_lns::test
