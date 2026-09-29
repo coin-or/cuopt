@@ -169,8 +169,8 @@ struct root_heuristics_t {
     : worker_count_(std::make_shared<omp_atomic_t<i_t>>(0)),
 
       max_workers_(max_workers),
-      shared_incumbent_(make_fj_cpu_shared_incumbent<i_t, f_t>()),
-      next_diving_type_(0)
+      next_diving_type_(0),
+      shared_incumbent_(make_fj_cpu_shared_incumbent<i_t, f_t>())
   {
   }
 
