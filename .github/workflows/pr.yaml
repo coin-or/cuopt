@@ -21,16 +21,19 @@ jobs:
       - compute-matrix-filters
       - changed-files
       - checks
-      - conda-cpp-build
-      - conda-cpp-tests
-      - java-build
-      - java-static-build-matrix
-      - java-static-build
-      - java-static-test
-      - conda-python-build
-      - conda-python-tests
-      - docs-build
-      - multi-gpu-cpp-tests
+      # TEMPORARY: conda/java jobs disabled below with `if: false` for faster
+      # iteration on the thin-libcuopt-metapackage wheel change. Re-enable (drop the
+      # `if: false` lines and restore this needs list) before merging.
+      # - conda-cpp-build
+      # - conda-cpp-tests
+      # - java-build
+      # - java-static-build-matrix
+      # - java-static-build
+      # - java-static-test
+      # - conda-python-build
+      # - conda-python-tests
+      # - docs-build
+      # - multi-gpu-cpp-tests
       - wheel-build-libcuopt
       - wheel-build-libcuopt-client
       - wheel-build-libcuopt-mathopt
@@ -389,11 +392,8 @@ jobs:
   conda-cpp-build:
     needs: [build-details, checks, compute-matrix-filters, changed-files]
     # Consumed by C++, Java, Python, and docs jobs.
-    if: >-
-      fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp ||
-      fromJSON(needs.changed-files.outputs.changed_file_groups).test_java ||
-      fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_conda ||
-      fromJSON(needs.changed-files.outputs.changed_file_groups).build_docs
+    # TEMPORARY: disabled for faster wheel-only CI iteration. Revert before merging.
+    if: false
     permissions:
       actions: read
       contents: read
@@ -415,7 +415,8 @@ jobs:
       packages: read
       pull-requests: read
     uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-tests.yaml@release/26.10
-    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp
+    # TEMPORARY: disabled for faster wheel-only CI iteration. Revert before merging.
+    if: false
     with:
       build_type: pull-request
       script: ci/test_cpp.sh
@@ -435,15 +436,15 @@ jobs:
       packages: read
       pull-requests: read
     uses: ./.github/workflows/multi_gpu_cpp_test.yaml
-    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp
+    # TEMPORARY: disabled for faster wheel-only CI iteration. Revert before merging.
+    if: false
     with:
       build_type: pull-request
   conda-python-build:
     needs: [build-details, conda-cpp-build, changed-files]
     # Consumed by conda-python-tests and docs-build.
-    if: >-
-      fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_conda ||
-      fromJSON(needs.changed-files.outputs.changed_file_groups).build_docs
+    # TEMPORARY: disabled for faster wheel-only CI iteration. Revert before merging.
+    if: false
     permissions:
       actions: read
       contents: read
@@ -467,7 +468,8 @@ jobs:
       packages: read
       pull-requests: read
     uses: rapidsai/shared-workflows/.github/workflows/conda-python-tests.yaml@release/26.10
-    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_conda
+    # TEMPORARY: disabled for faster wheel-only CI iteration. Revert before merging.
+    if: false
     with:
       build_type: pull-request
       run_codecov: false
@@ -482,7 +484,8 @@ jobs:
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
     uses: rapidsai/shared-workflows/.github/workflows/custom-job.yaml@release/26.10
-    if: fromJSON(needs.changed-files.outputs.changed_file_groups).build_docs
+    # TEMPORARY: disabled for faster wheel-only CI iteration. Revert before merging.
+    if: false
     with:
       build_type: pull-request
       node_type: "gpu-l4-latest-1"
@@ -498,9 +501,8 @@ jobs:
     permissions:
       contents: read
     uses: rapidsai/shared-workflows/.github/workflows/compute-matrix.yaml@main
-    if: >-
-      fromJSON(needs.changed-files.outputs.changed_file_groups).test_java ||
-      fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp
+    # TEMPORARY: disabled for faster wheel-only CI iteration. Revert before merging.
+    if: false
     with:
       build_type: pull-request
       matrix_name: conda-cpp-build
@@ -519,9 +521,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.java-static-build-matrix.outputs.matrix) }}
-    if: >-
-      fromJSON(needs.changed-files.outputs.changed_file_groups).test_java ||
-      fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp
+    # TEMPORARY: disabled for faster wheel-only CI iteration. Revert before merging.
+    if: false
     with:
       build_type: pull-request
       node_type: "cpu16"
@@ -557,6 +558,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.java-static-build-matrix.outputs.matrix) }}
+    # TEMPORARY: disabled for faster wheel-only CI iteration. Revert before merging.
+    if: false
     with:
       build_type: pull-request
       node_type: "gpu-l4-latest-1"
@@ -584,9 +587,8 @@ jobs:
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
     uses: rapidsai/shared-workflows/.github/workflows/custom-job.yaml@release/26.10
-    if: >-
-      fromJSON(needs.changed-files.outputs.changed_file_groups).test_java ||
-      fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp
+    # TEMPORARY: disabled for faster wheel-only CI iteration. Revert before merging.
+    if: false
     with:
       build_type: pull-request
       node_type: "gpu-l4-latest-1"
