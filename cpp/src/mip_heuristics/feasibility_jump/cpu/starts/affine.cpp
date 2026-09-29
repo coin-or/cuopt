@@ -286,19 +286,19 @@ void apply_affine_equality_start(fj_cpu_climber_t<i_t, f_t>& c, double budget)
 // it expects must be proven from the matrix; anything unrecognised declines the whole start rather
 // than guessing, and nothing is published until it passes a full original-model audit.
 template <typename i_t, typename f_t>
-void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c)
+void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c, double budget)
 {
+  if (budget <= 0) return;
   phase_timer_t timer(c.stats.t_start);
   const auto& p    = *c.problem;
   const i_t n_vars = p.n_variables;
   const i_t n_rows = p.n_constraints;
 
-  constexpr f_t tolerance         = 1e-7;
-  constexpr f_t penalty           = 1e6;
-  constexpr double start_budget_s = 0.75;
-  constexpr size_t min_groups     = 1000;
-  constexpr size_t min_products   = 1000;
-  constexpr size_t horizon        = 168;
+  constexpr f_t tolerance       = 1e-7;
+  constexpr f_t penalty         = 1e6;
+  constexpr size_t min_groups   = 1000;
+  constexpr size_t min_products = 1000;
+  constexpr size_t horizon      = 168;
 
   if (c.n_binary_vars < (i_t)min_groups || c.n_binary_vars == n_vars) return;
 
@@ -313,11 +313,9 @@ void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c)
     return p.h_var_types[v] == var_t::INTEGER && get_lower(b) == get_upper(b);
   };
 
-  const auto started = std::chrono::steady_clock::now();
-  auto expired       = [&] {
-    if (c.preemption_flag.load(std::memory_order_relaxed)) return true;
-    const auto now = std::chrono::steady_clock::now();
-    return std::chrono::duration<double>(now - started).count() > start_budget_s;
+  const double started = tic();
+  auto expired         = [&] {
+    return c.preemption_flag.load(std::memory_order_relaxed) || toc(started) >= budget;
   };
 
   // ---------------------------------------------------------------- variable classification
@@ -328,6 +326,7 @@ void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c)
   std::vector<uint8_t> is_repair_slack(n_vars);
 
   for (i_t v = 0; v < n_vars; ++v) {
+    if ((v % 256) == 0 && expired()) return;
     const auto bounds = c.h_var_bounds[v].get();
     base[v]           = std::clamp(f_t{0}, get_lower(bounds), get_upper(bounds));
     is_commitment[v]  = is_binary(v);
@@ -363,6 +362,7 @@ void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c)
   std::vector<i_t> group_of(n_vars, -1);
 
   for (i_t r = 0; r < n_rows; ++r) {
+    if ((r % 256) == 0 && expired()) return;
     if (p.cstr_lb[r] != 0 || p.cstr_ub[r] != 0) continue;
 
     i_t aggregate = -1;
@@ -422,6 +422,7 @@ void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c)
   std::vector<f_t> mode_minimum(n_vars, 0);
 
   for (i_t r = 0; r < n_rows; ++r) {
+    if ((r % 256) == 0 && expired()) return;
     if (p.offsets[r + 1] - p.offsets[r] != 2) continue;
 
     i_t production = -1, commitment = -1;
@@ -455,6 +456,7 @@ void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c)
   }
 
   for (i_t v = 0; v < n_vars; ++v) {
+    if ((v % 256) == 0 && expired()) return;
     const auto& cap = capacity[v];
     if (!cap.has_lower || cap.upper_limit < cap.lower_limit) continue;
 
@@ -488,6 +490,7 @@ void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c)
   std::vector<period_t> periods;
 
   for (i_t r = 0; r < n_rows; ++r) {
+    if ((r % 256) == 0 && expired()) return;
     if (!std::isfinite(p.cstr_ub[r])) continue;
 
     std::vector<i_t> entries;
@@ -562,11 +565,13 @@ void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c)
   std::vector<std::pair<i_t, i_t>> aliases;
   std::vector<i_t> repair_slacks;
   for (i_t v = 0; v < n_vars; ++v) {
+    if ((v % 256) == 0 && expired()) return;
     if (is_repair_slack[v]) repair_slacks.push_back(v);
   }
   i_t duration_rows = 0;
 
   for (i_t r = 0; r < n_rows; ++r) {
+    if ((r % 256) == 0 && expired()) return;
     i_t first_commitment = -1, n_commitment = 0, n_other = 0, n_pinned = 0;
     i_t positive = -1, negative = -1;
     f_t positive_coef = 0, negative_coef = 0;
@@ -652,6 +657,7 @@ void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c)
   std::vector<std::vector<f_t>> unit_merit_values(n_units);
 
   for (auto& prod : products) {
+    if (expired()) return;
     // Direct-cost models put the marginal cost on production. Epigraph models instead expose
     // c >= k*p + b*u rows; use the cheapest certified line slope for merit ordering.
     if (!(prod.merit > 0)) {
@@ -936,13 +942,13 @@ void apply_structural_completion_start(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 
 #if MIP_INSTANTIATE_FLOAT
 template void apply_affine_equality_start<int, float>(fj_cpu_climber_t<int, float>&, double);
-template void apply_unit_commitment_start<int, float>(fj_cpu_climber_t<int, float>&);
+template void apply_unit_commitment_start<int, float>(fj_cpu_climber_t<int, float>&, double);
 template void apply_structural_completion_start<int, float>(fj_cpu_climber_t<int, float>&);
 #endif
 
 #if MIP_INSTANTIATE_DOUBLE
 template void apply_affine_equality_start<int, double>(fj_cpu_climber_t<int, double>&, double);
-template void apply_unit_commitment_start<int, double>(fj_cpu_climber_t<int, double>&);
+template void apply_unit_commitment_start<int, double>(fj_cpu_climber_t<int, double>&, double);
 template void apply_structural_completion_start<int, double>(fj_cpu_climber_t<int, double>&);
 #endif
 

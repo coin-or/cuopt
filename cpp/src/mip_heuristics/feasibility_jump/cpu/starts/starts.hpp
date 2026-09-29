@@ -84,7 +84,7 @@ template <typename i_t, typename f_t>
 void apply_affine_equality_start(fj_cpu_climber_t<i_t, f_t>& c, double budget);
 
 template <typename i_t, typename f_t>
-void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c);
+void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c, double budget);
 
 template <typename i_t, typename f_t>
 bool apply_fixed_charge_network_start(fj_cpu_climber_t<i_t, f_t>& c, double budget);

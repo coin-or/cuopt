@@ -159,7 +159,7 @@ static bool recognise_chain(fj_cpu_climber_t<i_t, f_t>& c, pmedian_model_t<i_t>&
     facility_of[facilities[j]] = j;
 
   std::vector<i_t> succ_z(n, -1), succ_b(n, -1), head_a(n, -1), head_b(n, -1);
-  std::vector<uint8_t> is_target(n, 0), is_head(n, 0);
+  std::vector<uint8_t> is_target(n, 0), is_head(n, 0), has_predecessor(n, 0);
   for (i_t row = 0; row < m; ++row) {
     if (row == card) continue;
     const i_t begin = p.offsets[row], end = p.offsets[row + 1];
@@ -189,8 +189,9 @@ static bool recognise_chain(fj_cpu_climber_t<i_t, f_t>& c, pmedian_model_t<i_t>&
       const i_t b = b0 ? pos[0] : pos[1];
       const i_t z = b0 ? pos[1] : pos[0];
       if (is_integer_var(c, z) || succ_z[z] >= 0) return false;
-      succ_z[z] = neg;
-      succ_b[z] = b;
+      succ_z[z]            = neg;
+      succ_b[z]            = b;
+      has_predecessor[neg] = 1;
     } else
       return false;
     if (is_target[neg]) return false;
@@ -201,11 +202,7 @@ static bool recognise_chain(fj_cpu_climber_t<i_t, f_t>& c, pmedian_model_t<i_t>&
   M.chain_order.clear();
   M.chain_z.clear();
   for (i_t z = 0; z < n; ++z) {
-    if (!is_head[z] || succ_z[z] == z) continue;
-    bool is_start = true;
-    for (i_t w = 0; w < n && is_start; ++w)
-      if (succ_z[w] == z) is_start = false;
-    if (!is_start) continue;
+    if (!is_head[z] || succ_z[z] == z || has_predecessor[z]) continue;
     std::vector<i_t> order{head_a[z], head_b[z]}, zs{z};
     i_t cur = z, guard = 0;
     while (succ_z[cur] >= 0) {
