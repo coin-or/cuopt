@@ -234,9 +234,8 @@ void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, f_t delta, bool
     retire_var_best_moves<i_t, f_t>(fj_cpu);
   }
 
-  i_t tabu_tenure = fj_cpu.settings.parameters.tabu_tenure_min +
-                    fj_cpu.rng.next_u32() % (fj_cpu.settings.parameters.tabu_tenure_max -
-                                             fj_cpu.settings.parameters.tabu_tenure_min);
+  const i_t tabu_tenure = fj_cpu.rng.uniform(fj_cpu.settings.parameters.tabu_tenure_min,
+                                             fj_cpu.settings.parameters.tabu_tenure_max);
   if (delta > 0) {
     fj_cpu.h_tabu_lastinc[var_idx]     = fj_cpu.iterations;
     fj_cpu.h_tabu_nodec_until[var_idx] = fj_cpu.iterations + tabu_tenure;

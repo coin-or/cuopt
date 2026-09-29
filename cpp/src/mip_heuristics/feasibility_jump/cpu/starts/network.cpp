@@ -13,7 +13,6 @@
 #include "starts.hpp"
 
 #include <queue>
-#include <random>
 
 namespace cuopt::mathematical_optimization::mip {
 
@@ -182,11 +181,11 @@ bool apply_fixed_charge_network_start(fj_cpu_climber_t<i_t, f_t>& c, double budg
   const bool costs_both_ends = std::all_of(
     arcs.begin(), arcs.end(), [](const arc_t& arc) { return arc.fix > 0 && arc.unit > 0; });
   const double jitter_radius = costs_both_ends ? 0.30 : 0.15;
-  std::mt19937 weight_rng(c.settings.seed);
-  std::uniform_real_distribution<double> jitter(1.0 - jitter_radius, 1.0 + jitter_radius);
   std::vector<double> arc_weight(arcs.size());
-  for (i_t e = 0; e < static_cast<i_t>(arcs.size()); ++e)
-    arc_weight[e] = (arcs[e].fix + arcs[e].unit) * jitter(weight_rng);
+  for (i_t e = 0; e < static_cast<i_t>(arcs.size()); ++e) {
+    const double jitter = c.rng.uniform(1.0 - jitter_radius, 1.0 + jitter_radius);
+    arc_weight[e]       = (arcs[e].fix + arcs[e].unit) * jitter;
+  }
   auto weight = [&](i_t e) { return arc_weight[e]; };
   while (!expired()) {
     bool complete = true;

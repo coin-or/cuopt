@@ -11,6 +11,7 @@
 #include <dual_simplex/user_problem.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <utilities/macros.cuh>
+#include <utilities/splitmix64.hpp>
 #include "feasibility_jump/fj_cpu_worker.cuh"
 
 #include <algorithm>
@@ -157,6 +158,7 @@ struct root_heuristics_t {
   std::shared_ptr<omp_atomic_t<i_t>> worker_count_;
   i_t max_workers_;
   i_t persistent_lane_count_;
+  cuopt::splitmix64_t seed_rng_;
 
   // Keep track of the last diving heuristic used (so we can cycle between them in low thread
   // count systems)
@@ -167,11 +169,12 @@ struct root_heuristics_t {
   // Shared by every CPU FJ lane of the root phase, persistent and per-cut-pass alike.
   std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> shared_incumbent_;
 
-  root_heuristics_t(i_t num_threads)
+  root_heuristics_t(i_t num_threads, int64_t base_seed)
     : worker_count_(std::make_shared<omp_atomic_t<i_t>>(0)),
 
       max_workers_(std::max(num_threads - 1, 0)),
       persistent_lane_count_(std::clamp<i_t>(num_threads / 4, 0, CUOPT_MIP_ROOT_CPUFJ_MAX_LANES)),
+      seed_rng_(base_seed),
       next_diving_type_(0),
       shared_incumbent_(make_fj_cpu_shared_incumbent<i_t, f_t>())
   {
@@ -187,7 +190,6 @@ struct root_heuristics_t {
                               const std::vector<f_t>& start_assignment,
                               const simplex::simplex_solver_settings_t<i_t, f_t>& settings,
                               f_t time_limit,
-                              int64_t base_seed,
                               std::function<void(f_t, const std::vector<f_t>&, double)> callback)
   {
     persistent_lanes_.reserve(persistent_lane_count_);
@@ -201,12 +203,14 @@ struct root_heuristics_t {
                           start_assignment,
                           settings,
                           "[Root FJ lane " + std::to_string(k) + "] ",
-                          base_seed + k,
+                          seed_rng_.next_i32(),
                           k);
       lane->run_async(time_limit);
       persistent_lanes_.push_back(std::move(lane));
     }
   }
+
+  int64_t next_seed() { return seed_rng_.next_i32(); }
 
   void stop_and_sync()
   {

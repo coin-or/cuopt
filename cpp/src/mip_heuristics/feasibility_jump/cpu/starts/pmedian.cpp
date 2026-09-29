@@ -274,7 +274,6 @@ bool apply_pmedian_start(fj_cpu_climber_t<i_t, f_t>& c, double budget)
   if (expired()) return false;
 
   const i_t G = M.clients, W = M.width, K = M.open_count;
-  std::mt19937 rng((uint32_t)c.settings.seed);
   std::vector<i_t> order(W), open_set(K), near(G), second(G);
   std::iota(order.begin(), order.end(), 0);
   std::vector<uint8_t> is_open(W, 0);
@@ -285,7 +284,7 @@ bool apply_pmedian_start(fj_cpu_climber_t<i_t, f_t>& c, double budget)
   std::vector<i_t> best_set;
 
   while (!expired()) {
-    std::shuffle(order.begin(), order.end(), rng);
+    c.rng.shuffle(order);
     std::copy(order.begin(), order.begin() + K, open_set.begin());
     std::fill(is_open.begin(), is_open.end(), 0);
     for (i_t f : open_set)

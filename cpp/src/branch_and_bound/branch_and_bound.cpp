@@ -3083,7 +3083,7 @@ void branch_and_bound_t<i_t, f_t>::launch_root_heuristics(
       fj_seed,
       settings_,
       "[RootCut CPUFJ " + std::to_string(cut_pass) + "] ",
-      /*seed=*/-1,
+      root_heuristics.next_seed(),
       /*lane=*/cut_pass);
     ++(*worker_count);
     ++current_heuristic->active_workers_;
@@ -3769,7 +3769,7 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
 
   // Started here so the lanes run through the root LP and every cut pass. No relaxation exists
   // yet, so they seed from the anchor.
-  root_heuristics_t<i_t, f_t> root_heuristics(settings_.num_threads);
+  root_heuristics_t<i_t, f_t> root_heuristics(settings_.num_threads, settings_.random_seed);
   const f_t root_fj_time_limit = settings_.time_limit - toc(exploration_stats_.start_time);
   if (!settings_.deterministic && omp_in_parallel() && root_fj_time_limit > 0) {
     root_heuristics.start_persistent_lanes(
@@ -3779,7 +3779,6 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
       {},
       settings_,
       root_fj_time_limit,
-      (int64_t)settings_.random_seed,
       [this](f_t obj, const std::vector<f_t>& assignment, double work_units) {
         cuopt_assert(assignment.size() == (size_t)original_problem_.num_cols,
                      "root CPU FJ lanes must report a slack-free assignment");

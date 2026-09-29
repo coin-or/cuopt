@@ -259,7 +259,6 @@ void apply_lane_diversification(fj_cpu_climber_t<i_t, f_t>& c, int lane, int64_t
     c.use_multiplicative_weights                       = true;
     c.saps_multiplier                                  = (f_t)1.3;
     c.settings.parameters.weight_smoothing_probability = 0.01;
-    c.settings.seed += 104729;
   }
   if (lane == 10) {
     c.use_affine_equality_start      = false;

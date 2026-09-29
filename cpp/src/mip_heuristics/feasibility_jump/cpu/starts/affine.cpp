@@ -172,8 +172,8 @@ void apply_affine_equality_start(fj_cpu_climber_t<i_t, f_t>& c, double budget)
   i_t best_count    = c.violated_constraints.size();
   f_t best_severity = -c.total_violations;
   f_t best_metric   = std::numeric_limits<f_t>::infinity();
-  cuopt::pcgenerator_t rng((uint64_t)c.settings.seed);
-  int stalls = 0;
+  auto& rng         = c.rng;
+  int stalls        = 0;
   refresh();
   for (int iteration = 0; !expired(); ++iteration) {
     if (iteration && iteration % 256 == 0) refresh();
@@ -228,7 +228,7 @@ void apply_affine_equality_start(fj_cpu_climber_t<i_t, f_t>& c, double budget)
     i_t donor = -1, receiver = -1;
     const size_t draws = std::min<size_t>(12, donors.size());
     for (size_t k = 0; k < draws && !expired(); ++k) {
-      const size_t j = k + rng.next_u32() % (donors.size() - k);
+      const size_t j = rng.uniform(k, donors.size());
       std::swap(donors[k], donors[j]);
       const i_t u       = donors[k];
       const f_t* gram   = gram_row(u);

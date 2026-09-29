@@ -193,12 +193,10 @@ void donate_row_weight(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
   f_t donor_weight        = 0;
 
   for (i_t sample = 0; row_width > 0 && sample < fj_cpu.hp.weight_donor_samples; ++sample) {
-    const i_t var_idx = fj_cpu.h_variables[row_begin + (i_t)(rng.next_u32() % row_width)];
+    const i_t var_idx               = fj_cpu.h_variables[rng.uniform(row_begin, row_end)];
     const auto [col_begin, col_end] = fj_cpu.range_for_variable(var_idx);
     if (col_end <= col_begin) continue;
-    const i_t candidate =
-      fj_cpu
-        .h_reverse_constraints[col_begin + (i_t)(rng.next_u32() % (uint32_t)(col_end - col_begin))];
+    const i_t candidate = fj_cpu.h_reverse_constraints[rng.uniform(col_begin, col_end)];
     if (candidate == cstr_idx || !fj_cpu.satisfied_constraints.contains(candidate)) continue;
 
     const f_t weight = fj_cpu.row_state()[candidate].weight;
