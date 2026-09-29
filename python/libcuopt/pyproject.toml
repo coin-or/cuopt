@@ -71,7 +71,16 @@ wheel.py-api = "py3"
 # umbrella export set) -- the same two components the conda libcuopt metapackage
 # installs (conda/recipes/libcuopt/recipe.yaml). "grpc-server" is added because wheels
 # have no separate cuopt-grpc-server package the way conda does.
-install.components = ["dev", "cuopt", "grpc-server"]
+#
+# "Unspecified" (CMake's default component name for install() calls with no COMPONENT)
+# must be included too: rapids-cmake writes self-contained "found package" redirects for
+# CPM-fetched CCCL (lib64/rapids/cmake/{cub,libcudacxx,cccl}/*.cmake) with no COMPONENT.
+# Without them here, cuopt-config.cmake's find_dependency(rmm) falls through to
+# libcuopt-rmm's own bundled copy of those redirects instead of a self-consistent one
+# installed alongside cuopt-config.cmake, which hits a CCCL find_package ordering bug
+# (cub-config.cmake calls a function libcudacxx-config.cmake defines, but CMake's
+# found-package caching can skip re-processing libcudacxx from that same copy). See #2013.
+install.components = ["dev", "cuopt", "grpc-server", "Unspecified"]
 
 [tool.scikit-build.metadata.version]
 provider = "scikit_build_core.metadata.regex"
