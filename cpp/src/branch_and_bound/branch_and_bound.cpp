@@ -3160,9 +3160,9 @@ void branch_and_bound_t<i_t, f_t>::launch_root_heuristics(
     std::vector<search_strategy_t> diving_heuristics;
     get_diving_heuristic_list(diving_settings, diving_heuristics);
 
-    i_t available          = cut_pass == 0 ? settings_.num_threads - 3 : settings_.num_threads - 2;
-    i_t num_diving_workers = std::min<i_t>(diving_heuristics.size(), available);
-    root_heuristics.stop_old_workers(cut_pass, num_diving_workers);
+    root_heuristics.stop_old_workers(cut_pass, diving_heuristics.size());
+    const i_t available          = root_heuristics.available_worker_slots(cut_pass);
+    const i_t num_diving_workers = std::min<i_t>(diving_heuristics.size(), available);
 
     mip_node_t<i_t, f_t> root_node(root_objective_, root_vstatus_);
 

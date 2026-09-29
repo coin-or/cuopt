@@ -12,6 +12,7 @@
 #include <utilities/macros.cuh>
 #include "feasibility_jump/fj_cpu_worker.cuh"
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -229,10 +230,7 @@ struct root_heuristics_t {
   {
     if (new_workers <= 0) return;
 
-    // On the first pass we use a thread to generate the clique table
-    i_t cut_generation = cut_pass == 0 ? 2 : 1;
-    i_t total_workers  = new_workers + worker_count_->load() + cut_generation;
-    if (total_workers <= max_workers_) { return; }
+    if (new_workers <= available_worker_slots(cut_pass)) { return; }
 
     for (auto& heuristic : cut_passes_heuristics_) {
       // Skip the current heuristic entry
@@ -245,6 +243,15 @@ struct root_heuristics_t {
         if (new_workers <= 0) return;
       }
     }
+  }
+
+  i_t available_worker_slots(i_t cut_pass) const
+  {
+    // On the first pass we use a thread to generate the clique table
+    const i_t cut_generation     = cut_pass == 0 ? 2 : 1;
+    const i_t persistent_workers = persistent_lanes_.size();
+    return std::max(i_t{0},
+                    max_workers_ - worker_count_->load() - persistent_workers - cut_generation);
   }
 
   std::shared_ptr<cut_pass_heuristics_t<i_t, f_t>> create_new_cut_pass_heuristic(
