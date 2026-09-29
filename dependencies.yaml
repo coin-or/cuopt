@@ -139,6 +139,9 @@ files:
       - depends_on_libraft_headers
       - depends_on_librmm
       - depends_on_rapids_logger
+  # libcuopt is a thin metapackage: it ships only the linker script, headers, CMake
+  # config, and cuopt_grpc_server, and depends on the three component wheels for the
+  # actual engine libraries -- mirroring the conda libcuopt metapackage (#1635).
   py_run_libcuopt:
     output: pyproject
     pyproject_dir: python/libcuopt
@@ -148,8 +151,9 @@ files:
     extras:
       table: project
     includes:
-      - cuda_wheels
-      - depends_on_libraft_headers
+      - depends_on_libcuopt_client
+      - depends_on_libcuopt_mathopt
+      - depends_on_libcuopt_routing
       - depends_on_librmm
       - depends_on_rapids_logger
   # One set of keys per component wheel. The point of the split is in py_run_*:
@@ -276,6 +280,12 @@ files:
       - build_common
       - build_python_common
       - depends_on_libcuopt
+      # libcuopt is now a thin metapackage, so find_package(cuopt) needs these
+      # installed alongside it to resolve cuopt::client/mathopt/routing from their
+      # own wheels' CMake config (see ci/build_wheel_cuopt.sh).
+      - depends_on_libcuopt_client
+      - depends_on_libcuopt_mathopt
+      - depends_on_libcuopt_routing
       - depends_on_rapids_logger
       - depends_on_cupy
       - depends_on_pylibraft

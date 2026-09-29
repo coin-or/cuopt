@@ -371,7 +371,12 @@ jobs:
       package-type: cpp
       publish-wheel-search-key: cuopt_wheel_cpp_libcuopt_routing
   wheel-build-cuopt:
-    needs: [build-details, wheel-build-libcuopt]
+    needs:
+      - build-details
+      - wheel-build-libcuopt
+      - wheel-build-libcuopt-client
+      - wheel-build-libcuopt-mathopt
+      - wheel-build-libcuopt-routing
     permissions:
       actions: read
       contents: read
