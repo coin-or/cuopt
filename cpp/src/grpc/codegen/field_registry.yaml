@@ -1299,7 +1299,7 @@ mip_settings:
         param_name: mip_hyper_heuristic_related_vars_time_limit
         description: >-
           Time in seconds allowed for building the related-variable structure.
-        default: "30.0"
+        default: "2.0"
         field_num: 51
         optional: true
     - presolve_max_rounds:

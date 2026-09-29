@@ -2086,7 +2086,7 @@ TEST(MapperRoundtrip, MIPSettingsAllFields)
   orig.heuristic_params.enabled_recombiners                = 7;      // default 15 (bitmask)
   orig.heuristic_params.cycle_detection_length             = 40;     // default 30
   orig.heuristic_params.relaxed_lp_time_limit              = 2.5;    // default 1.0
-  orig.heuristic_params.related_vars_time_limit            = 45.0;   // default 30.0
+  orig.heuristic_params.related_vars_time_limit            = 45.0;   // default 2.0
 
   // Roundtrip: C++ -> proto -> C++
   cuopt::remote::MIPSolverSettings pb;
