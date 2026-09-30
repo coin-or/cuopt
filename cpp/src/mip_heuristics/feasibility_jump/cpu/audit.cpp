@@ -44,14 +44,28 @@ void audit_assignment_bounds(fj_cpu_climber_t<i_t, f_t>& fj_cpu, const char* sit
 }
 
 template <typename i_t, typename f_t>
+f_t fresh_row_slack(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
+                    i_t row,
+                    const f_t* assignment,
+                    f_t& correction)
+{
+  f_t activity_correction;
+  const f_t activity = compensated_dot2_csr_with_correction(fj_cpu.h_offsets.data(),
+                                                            fj_cpu.h_variables.data(),
+                                                            fj_cpu.h_coefficients.data(),
+                                                            assignment,
+                                                            row,
+                                                            activity_correction,
+                                                            -(f_t)fj_cpu.h_bound[row]);
+  correction         = -activity_correction;
+  return -activity;
+}
+
+template <typename i_t, typename f_t>
 f_t fresh_row_slack(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t row, const f_t* assignment)
 {
-  return -compensated_dot2_csr(fj_cpu.h_offsets.data(),
-                               fj_cpu.h_variables.data(),
-                               fj_cpu.h_coefficients.data(),
-                               assignment,
-                               row,
-                               -(f_t)fj_cpu.h_bound[row]);
+  f_t correction;
+  return fresh_row_slack(fj_cpu, row, assignment, correction);
 }
 
 template <typename i_t, typename f_t>
@@ -357,6 +371,10 @@ void sanity_checks(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 
 #if MIP_INSTANTIATE_FLOAT
 template void audit_assignment_bounds<int, float>(fj_cpu_climber_t<int, float>&, const char*);
+template float fresh_row_slack<int, float>(fj_cpu_climber_t<int, float>&,
+                                           int,
+                                           const float*,
+                                           float&);
 template float fresh_row_slack<int, float>(fj_cpu_climber_t<int, float>&, int, const float*);
 template void audit_objective_update<int, float>(
   fj_cpu_climber_t<int, float>&, int, float, float, float, float);
@@ -369,6 +387,10 @@ template void sanity_checks<int, float>(fj_cpu_climber_t<int, float>&);
 
 #if MIP_INSTANTIATE_DOUBLE
 template void audit_assignment_bounds<int, double>(fj_cpu_climber_t<int, double>&, const char*);
+template double fresh_row_slack<int, double>(fj_cpu_climber_t<int, double>&,
+                                             int,
+                                             const double*,
+                                             double&);
 template double fresh_row_slack<int, double>(fj_cpu_climber_t<int, double>&, int, const double*);
 template void audit_objective_update<int, double>(
   fj_cpu_climber_t<int, double>&, int, double, double, double, double);

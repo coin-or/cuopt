@@ -318,9 +318,10 @@ static void finish_full_recompute(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
                                   const f_t* objective_lhs,
                                   const f_t* objective_rhs)
 {
-  fj_cpu.h_incumbent_objective =
-    compensated_dot2(objective_lhs, objective_rhs, fj_cpu.problem->n_variables);
-  fj_cpu.h_objective_sumcomp = 0;
+  f_t objective_correction;
+  fj_cpu.h_incumbent_objective = compensated_dot2_with_correction(
+    objective_lhs, objective_rhs, fj_cpu.problem->n_variables, objective_correction);
+  fj_cpu.h_objective_sumcomp = -objective_correction;
 }
 
 template <typename i_t, typename f_t>
@@ -365,13 +366,18 @@ void recompute_slack(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   const f_t* const assignment = fj_cpu.h_assignment.data();
 
   for (i_t r = 0; r < n_rows; ++r) {
-    f_t slack = fresh_row_slack<i_t, f_t>(fj_cpu, r, assignment);
-    if (fj_cpu.h_row_is_integral[r]) slack = std::round(slack);
+    f_t slack_sumcomp;
+    f_t slack = fresh_row_slack<i_t, f_t>(fj_cpu, r, assignment, slack_sumcomp);
+    if (fj_cpu.h_row_is_integral[r]) {
+      slack         = std::round(slack + slack_sumcomp);
+      slack_sumcomp = 0;
+    }
+    const f_t slack_value       = slack + slack_sumcomp;
     fj_cpu.row_state()[r].slack = slack;
-    fj_cpu.h_slack_sumcomp[r]   = 0;
-    if (slack < -fj_cpu.row_tolerance) {
+    fj_cpu.h_slack_sumcomp[r]   = slack_sumcomp;
+    if (slack_value < -fj_cpu.row_tolerance) {
       fj_cpu.violated_constraints.insert(r);
-      fj_cpu.total_violations += slack;
+      fj_cpu.total_violations += slack_value;
     } else {
       fj_cpu.satisfied_constraints.insert(r);
     }

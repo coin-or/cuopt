@@ -45,8 +45,12 @@ inline bool is_exactly_representable(f_t value)
 // a compensated summation over already-multiplied terms cannot see.
 // https://epubs.siam.org/doi/abs/10.1137/030601818
 template <typename UIt, typename VIt>
-__attribute__((optimize("no-fast-math"))) CUOPT_MIP_HOST_DEVICE auto compensated_dot2(
-  UIt u_it, VIt v_it, std::size_t n, decltype(u_it[0] * v_it[0]) init = 0)
+__attribute__((optimize("no-fast-math"))) CUOPT_MIP_HOST_DEVICE auto
+compensated_dot2_with_correction(UIt u_it,
+                                 VIt v_it,
+                                 std::size_t n,
+                                 decltype(u_it[0] * v_it[0])& correction,
+                                 decltype(u_it[0] * v_it[0]) init = 0)
 {
   using f_t = decltype(u_it[0] * v_it[0]);
   f_t p     = init;
@@ -60,7 +64,19 @@ __attribute__((optimize("no-fast-math"))) CUOPT_MIP_HOST_DEVICE auto compensated
     s += ((p - (t - z)) + (h - z)) + fma(u, v, -h);
     p = t;
   }
-  return p + s;
+  const f_t sum = p + s;
+  const f_t z   = sum - p;
+  correction    = (p - (sum - z)) + (s - z);
+  return sum;
+}
+
+template <typename UIt, typename VIt>
+__attribute__((optimize("no-fast-math"))) CUOPT_MIP_HOST_DEVICE auto compensated_dot2(
+  UIt u_it, VIt v_it, std::size_t n, decltype(u_it[0] * v_it[0]) init = 0)
+{
+  using f_t = decltype(u_it[0] * v_it[0]);
+  f_t correction;
+  return compensated_dot2_with_correction(u_it, v_it, n, correction, init);
 }
 
 template <typename UIt, typename VIt, typename IndexIt>
@@ -93,6 +109,26 @@ CUOPT_MIP_HOST_DEVICE auto compensated_dot2_csr(OffsetIt offsets,
   const auto begin = offsets[row];
   const auto end   = offsets[row + 1];
   return compensated_dot2_csr(coefficients + begin, columns + begin, values, end - begin, init);
+}
+
+template <typename OffsetIt, typename IndexIt, typename CoeffIt, typename ValueIt, typename i_t>
+CUOPT_MIP_HOST_DEVICE auto compensated_dot2_csr_with_correction(
+  OffsetIt offsets,
+  IndexIt columns,
+  CoeffIt coefficients,
+  ValueIt values,
+  i_t row,
+  decltype(coefficients[0] * values[0])& correction,
+  decltype(coefficients[0] * values[0]) init = 0)
+{
+  const auto begin = offsets[row];
+  const auto end   = offsets[row + 1];
+  return compensated_dot2_with_correction(
+    coefficients + begin,
+    thrust::make_permutation_iterator(values, columns + begin),
+    end - begin,
+    correction,
+    init);
 }
 
 template <typename CsrLike, typename Values, typename i_t>
