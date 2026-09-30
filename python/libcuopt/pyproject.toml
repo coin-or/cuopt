@@ -63,22 +63,11 @@ sdist.reproducible = true
 wheel.packages = ["libcuopt"]
 wheel.install-dir = "libcuopt"
 wheel.py-api = "py3"
-# libcuopt is a thin metapackage: the client/mathopt/routing engine libraries now come
-# from their own wheels (find_package(cuopt) resolves them via the component wheels'
-# CMake config, since #1635 gave each its own export set / _IMPORT_PREFIX). "dev" is the
-# linker script, "cuopt" is rapids_export's own component (cuopt-config.cmake + the
-# umbrella export set) -- the same two components the conda libcuopt metapackage
-# installs (conda/recipes/libcuopt/recipe.yaml). "grpc-server" is added because wheels
-# have no separate cuopt-grpc-server package the way conda does.
-#
-# "Unspecified" (CMake's default component name for install() calls with no COMPONENT)
-# must be included too: rapids-cmake writes self-contained "found package" redirects for
-# CPM-fetched CCCL (lib64/rapids/cmake/{cub,libcudacxx,cccl}/*.cmake) with no COMPONENT.
-# Without them here, cuopt-config.cmake's find_dependency(rmm) falls through to
-# libcuopt-rmm's own bundled copy of those redirects instead of a self-consistent one
-# installed alongside cuopt-config.cmake, which hits a CCCL find_package ordering bug
-# (cub-config.cmake calls a function libcudacxx-config.cmake defines, but CMake's
-# found-package caching can skip re-processing libcudacxx from that same copy). See #2013.
+# Thin metapackage: engine libraries come from their own wheels now (#1635).
+# "dev" = linker script, "cuopt" = rapids_export's config/export set, "grpc-server" =
+# cuopt_grpc_server. "Unspecified" carries rapids-cmake's CCCL redirect files, needed
+# for find_dependency(rmm) to resolve cleanly instead of hitting librmm's own
+# (order-dependent) copy -- see #2013.
 install.components = ["dev", "cuopt", "grpc-server", "Unspecified"]
 
 [tool.scikit-build.metadata.version]

@@ -139,9 +139,7 @@ files:
       - depends_on_libraft_headers
       - depends_on_librmm
       - depends_on_rapids_logger
-  # libcuopt is a thin metapackage: it ships only the linker script, headers, CMake
-  # config, and cuopt_grpc_server, and depends on the three component wheels for the
-  # actual engine libraries -- mirroring the conda libcuopt metapackage (#1635).
+  # Thin metapackage: depends on the three component wheels instead of bundling them.
   py_run_libcuopt:
     output: pyproject
     pyproject_dir: python/libcuopt
@@ -280,9 +278,7 @@ files:
       - build_common
       - build_python_common
       - depends_on_libcuopt
-      # libcuopt is now a thin metapackage, so find_package(cuopt) needs these
-      # installed alongside it to resolve cuopt::client/mathopt/routing from their
-      # own wheels' CMake config (see ci/build_wheel_cuopt.sh).
+      # needed for find_package(cuopt) to resolve cuopt::client/mathopt/routing
       - depends_on_libcuopt_client
       - depends_on_libcuopt_mathopt
       - depends_on_libcuopt_routing
