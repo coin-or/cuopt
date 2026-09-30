@@ -33,6 +33,104 @@ static constexpr size_t sat_clause_limit             = 2000000;
 static constexpr int bdd_false_terminal              = -1;
 static constexpr int bdd_true_terminal               = -2;
 
+using pb_term_t = std::pair<int, int64_t>;
+
+enum class pb_row_encoding_result_t { encoded, infeasible, declined };
+
+// Short rows are best represented by their prime clauses: each minimal overweight subset
+// forbids exactly one combination, without introducing branching-only Tseitin variables.
+static bool try_encode_pb_row_direct(const std::vector<pb_term_t>& terms,
+                                     int64_t rhs,
+                                     std::vector<int64_t>& subset_weight,
+                                     std::vector<std::vector<int>>& cnf)
+{
+  if (terms.size() > direct_encoding_term_limit) return false;
+  const size_t row_begin = cnf.size();
+  const int count        = 1 << terms.size();
+  subset_weight.assign(count, 0);
+  for (int mask = 1; mask < count; ++mask) {
+    const int bit       = std::countr_zero((unsigned)mask);
+    subset_weight[mask] = subset_weight[mask & (mask - 1)] + std::abs(terms[bit].second);
+    if (subset_weight[mask] <= rhs) continue;
+    bool minimal = true;
+    for (size_t k = 0; k < terms.size() && minimal; ++k) {
+      if ((mask & (1 << k)) && subset_weight[mask] - std::abs(terms[k].second) > rhs)
+        minimal = false;
+    }
+    if (!minimal) continue;
+    std::vector<int> clause;
+    for (size_t k = 0; k < terms.size(); ++k) {
+      if (mask & (1 << k)) clause.push_back(2 * terms[k].first + (terms[k].second < 0));
+    }
+    cnf.push_back(std::move(clause));
+    if (cnf.size() - row_begin > direct_encoding_clause_limit) {
+      cnf.resize(row_begin);
+      return false;
+    }
+  }
+  return true;
+}
+
+static int encode_pb_row_bdd_node(const std::vector<pb_term_t>& terms,
+                                  const std::vector<int64_t>& suffix,
+                                  std::map<std::pair<int, int64_t>, int>& memo,
+                                  int& variables,
+                                  std::vector<std::vector<int>>& cnf,
+                                  bool& overflow,
+                                  int i,
+                                  int64_t remaining)
+{
+  if (remaining < 0) return bdd_false_terminal;
+  if (suffix[i] <= remaining) return bdd_true_terminal;
+  const auto key = std::make_pair(i, remaining);
+  if (const auto found = memo.find(key); found != memo.end()) return found->second;
+  if (memo.size() > bdd_state_limit || variables >= sat_variable_limit ||
+      terms.size() > bdd_term_limit) {
+    overflow = true;
+    return bdd_false_terminal;
+  }
+  const int low =
+    encode_pb_row_bdd_node(terms, suffix, memo, variables, cnf, overflow, i + 1, remaining);
+  const int high = encode_pb_row_bdd_node(
+    terms, suffix, memo, variables, cnf, overflow, i + 1, remaining - std::abs(terms[i].second));
+  if (overflow) return bdd_false_terminal;
+  if (low == high) {
+    memo.emplace(key, low);
+    return low;
+  }
+  const int q = 2 * variables++ + 1;
+  const int z = 2 * terms[i].first + (terms[i].second > 0);
+  if (low != bdd_true_terminal) {
+    std::vector<int> clause{q ^ 1};
+    if (low >= 0) clause.push_back(low);
+    cnf.push_back(std::move(clause));
+  }
+  if (high != bdd_true_terminal) {
+    std::vector<int> clause{q ^ 1, z ^ 1};
+    if (high >= 0) clause.push_back(high);
+    cnf.push_back(std::move(clause));
+  }
+  memo.emplace(key, q);
+  return q;
+}
+
+static pb_row_encoding_result_t encode_pb_row_bdd(const std::vector<pb_term_t>& terms,
+                                                  int64_t rhs,
+                                                  int& variables,
+                                                  std::vector<std::vector<int>>& cnf)
+{
+  std::vector<int64_t> suffix(terms.size() + 1, 0);
+  for (int k = (int)terms.size() - 1; k >= 0; --k)
+    suffix[k] = suffix[k + 1] + std::abs(terms[k].second);
+  std::map<std::pair<int, int64_t>, int> memo;
+  bool overflow  = false;
+  const int root = encode_pb_row_bdd_node(terms, suffix, memo, variables, cnf, overflow, 0, rhs);
+  if (overflow) return pb_row_encoding_result_t::declined;
+  if (root == bdd_false_terminal) return pb_row_encoding_result_t::infeasible;
+  if (root >= 0) cnf.push_back({root});
+  return pb_row_encoding_result_t::encoded;
+}
+
 struct sat_variable_order_t {
   static constexpr int not_in_heap                   = -1;
   static constexpr double initial_activity_increment = 1.0;
@@ -603,7 +701,7 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
 {
   std::vector<std::vector<int>> cnf;
   int variables = pb.n_variables;
-  std::vector<std::pair<int, int64_t>> terms;
+  std::vector<pb_term_t> terms;
   std::vector<int64_t> subset_weight;
   for (int r = 0; r < pb.n_constraints; ++r) {
     if ((r & encoding_stop_poll_mask) == 0 && stop()) return fj_binary_sat_result_t::stopped;
@@ -630,78 +728,11 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
     if (rhs < 0) return fj_binary_sat_result_t::infeasible;
     if (total <= rhs) continue;
 
-    // Short rows are best represented by their prime clauses: each minimal overweight subset
-    // forbids exactly one combination, without introducing branching-only Tseitin variables.
-    const size_t row_begin = cnf.size();
-    bool directly_encoded  = terms.size() <= direct_encoding_term_limit;
-    if (directly_encoded) {
-      const int count = 1 << terms.size();
-      subset_weight.assign(count, 0);
-      for (int mask = 1; mask < count; ++mask) {
-        const int bit       = std::countr_zero((unsigned)mask);
-        subset_weight[mask] = subset_weight[mask & (mask - 1)] + std::abs(terms[bit].second);
-        if (subset_weight[mask] <= rhs) continue;
-        bool minimal = true;
-        for (size_t k = 0; k < terms.size() && minimal; ++k) {
-          if ((mask & (1 << k)) && subset_weight[mask] - std::abs(terms[k].second) > rhs)
-            minimal = false;
-        }
-        if (!minimal) continue;
-        std::vector<int> clause;
-        for (size_t k = 0; k < terms.size(); ++k) {
-          if (mask & (1 << k)) clause.push_back(2 * terms[k].first + (terms[k].second < 0));
-        }
-        cnf.push_back(std::move(clause));
-        if (cnf.size() - row_begin > direct_encoding_clause_limit) {
-          directly_encoded = false;
-          break;
-        }
-      }
-    }
-
-    if (!directly_encoded) {
-      cnf.resize(row_begin);
-      std::vector<int64_t> suffix(terms.size() + 1, 0);
-      for (int k = (int)terms.size() - 1; k >= 0; --k)
-        suffix[k] = suffix[k + 1] + std::abs(terms[k].second);
-      std::map<std::pair<int, int64_t>, int> memo;
-      bool overflow = false;
-      auto node     = [&](auto&& self, int i, int64_t remaining) -> int {
-        if (remaining < 0) return bdd_false_terminal;
-        if (suffix[i] <= remaining) return bdd_true_terminal;
-        const auto key = std::make_pair(i, remaining);
-        if (const auto found = memo.find(key); found != memo.end()) return found->second;
-        if (memo.size() > bdd_state_limit || variables >= sat_variable_limit ||
-            terms.size() > bdd_term_limit) {
-          overflow = true;
-          return bdd_false_terminal;
-        }
-        const int low  = self(self, i + 1, remaining);
-        const int high = self(self, i + 1, remaining - std::abs(terms[i].second));
-        if (overflow) return bdd_false_terminal;
-        if (low == high) {
-          memo.emplace(key, low);
-          return low;
-        }
-        const int q = 2 * variables++ + 1;
-        const int z = 2 * terms[i].first + (terms[i].second > 0);
-        if (low != bdd_true_terminal) {
-          std::vector<int> clause{q ^ 1};
-          if (low >= 0) clause.push_back(low);
-          cnf.push_back(std::move(clause));
-        }
-        if (high != bdd_true_terminal) {
-          std::vector<int> clause{q ^ 1, z ^ 1};
-          if (high >= 0) clause.push_back(high);
-          cnf.push_back(std::move(clause));
-        }
-        memo.emplace(key, q);
-        return q;
-      };
-      const int root = node(node, 0, rhs);
-      if (overflow) return fj_binary_sat_result_t::declined;
-      if (root == bdd_false_terminal) return fj_binary_sat_result_t::infeasible;
-      if (root >= 0) cnf.push_back({root});
+    if (!try_encode_pb_row_direct(terms, rhs, subset_weight, cnf)) {
+      const auto encoding = encode_pb_row_bdd(terms, rhs, variables, cnf);
+      if (encoding == pb_row_encoding_result_t::declined) return fj_binary_sat_result_t::declined;
+      if (encoding == pb_row_encoding_result_t::infeasible)
+        return fj_binary_sat_result_t::infeasible;
     }
     if (cnf.size() > sat_clause_limit) return fj_binary_sat_result_t::declined;
   }
