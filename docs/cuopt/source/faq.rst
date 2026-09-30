@@ -433,9 +433,16 @@ Linear Programming FAQs
 
 .. dropdown:: How do I use warm start with PDLP?
 
-    To use warm start functionality with PDLP, you must explicitly disable presolve by setting ``CUOPT_PRESOLVE=0`` in solver_config.
-    This is required because presolve transforms the problem, and the warm start solution from the original problem
+    To use PDLP warm start data (``set_pdlp_warm_start_data``), you must explicitly disable presolve by setting ``CUOPT_PRESOLVE=0`` in solver_config.
+    This is required because presolve transforms the problem, and the warm start data from the original problem
     cannot be applied to the presolved problem.
+
+    An initial primal and/or dual solution (``set_initial_primal_solution`` / ``set_initial_dual_solution``) does not
+    require disabling presolve when PSLP is used (the default for LP): cuOpt maps it into the presolved problem before
+    solving. For LP with Papilo presolve, cuOpt cannot map the initial solution and skips presolve instead
+    (MIP starts are still mapped through Papilo presolve). The initial primal
+    solution must lie within the problem's variable bounds; when re-solving after changing bounds, clip the previous
+    solution to the new bounds first.
 
 Mixed Integer Programming FAQs
 --------------------------------------

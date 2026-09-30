@@ -2220,6 +2220,26 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
     auto run_presolve = settings.presolver != presolver_t::None;
     run_presolve = run_presolve && settings.get_pdlp_warm_start_data().total_pdlp_iterations_ == -1;
 
+    // A user-provided LP initial primal/dual solution lives in the original space. PSLP can map it
+    // into the presolved space; for LP, Papilo (and batch-sized initial solutions) cannot, so
+    // presolve is skipped rather than handing PDLP a starting point of the wrong dimension. MIP
+    // presolve does not go through here and still crushes MIP starts through Papilo.
+    const bool has_initial_primal = settings.has_initial_primal_solution();
+    const bool has_initial_dual   = settings.has_initial_dual_solution();
+    if (run_presolve && (has_initial_primal || has_initial_dual)) {
+      const bool initial_solution_mappable =
+        settings.presolver == presolver_t::PSLP &&
+        (!has_initial_primal || settings.get_initial_primal_solution().size() ==
+                                  static_cast<size_t>(op_problem.get_n_variables())) &&
+        (!has_initial_dual || settings.get_initial_dual_solution().size() ==
+                                static_cast<size_t>(op_problem.get_n_constraints()));
+      if (!initial_solution_mappable) {
+        CUOPT_LOG_INFO(
+          "Skipping LP presolve: the initial solution can only be mapped through PSLP presolve");
+        run_presolve = false;
+      }
+    }
+
     // Declare result at outer scope so that result.reduced_problem (which may be
     // referenced by problem.original_problem_ptr) remains alive through the solve.
     std::optional<mip::third_party_presolve_device_result_t<i_t, f_t>> result;
@@ -2276,6 +2296,29 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
           op_problem.get_objective_name(),
           op_problem.get_variable_names(),
           op_problem.get_row_names());
+      }
+
+      if (has_initial_primal || has_initial_dual) {
+        auto stream = op_problem.get_handle_ptr()->get_stream();
+        std::vector<f_t> x_original, y_original, x_reduced, y_reduced;
+        if (has_initial_primal) {
+          x_original = cuopt::host_copy(settings.get_initial_primal_solution(), stream);
+        }
+        if (has_initial_dual) {
+          y_original = cuopt::host_copy(settings.get_initial_dual_solution(), stream);
+        }
+        presolver->crush_primal_dual_solution_pslp(
+          result->reduced_problem, x_original, y_original, x_reduced, y_reduced);
+        // A reduced side with zero size has no starting point to give (and set_initial_* rejects
+        // the null data pointer of an empty vector); PDLP then reads zero elements from it.
+        if (!x_reduced.empty()) {
+          settings.set_initial_primal_solution(x_reduced.data(), x_reduced.size(), stream);
+        }
+        if (!y_reduced.empty()) {
+          settings.set_initial_dual_solution(y_reduced.data(), y_reduced.size(), stream);
+        }
+        stream.synchronize();
+        CUOPT_LOG_INFO("Mapped the initial solution into the presolved space");
       }
 
       problem.emplace(result->reduced_problem);

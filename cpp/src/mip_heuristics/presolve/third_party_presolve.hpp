@@ -162,6 +162,16 @@ class third_party_presolve_t {
                                   const std::vector<f_t>& A_values,
                                   const std::vector<i_t>& A_indices,
                                   const std::vector<i_t>& A_offsets) const;
+
+  // PSLP only: map an original-space primal/dual point (e.g. a user-provided LP warm start) into
+  // the reduced space. Pass an empty x_original / y_original to skip that part. x_reduced is
+  // clamped to reduced_problem's variable bounds, which PSLP may have tightened.
+  void crush_primal_dual_solution_pslp(const optimization_problem_t<i_t, f_t>& reduced_problem,
+                                       const std::vector<f_t>& x_original,
+                                       const std::vector<f_t>& y_original,
+                                       std::vector<f_t>& x_reduced,
+                                       std::vector<f_t>& y_reduced) const;
+
   const std::vector<i_t>& get_reduced_to_original_map() const { return reduced_to_original_map_; }
   const std::vector<i_t>& get_original_to_reduced_map() const { return original_to_reduced_map_; }
 
