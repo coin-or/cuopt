@@ -17,6 +17,7 @@
 #include <functional>
 #include <map>
 #include <numeric>
+#include <span>
 #include <vector>
 
 #define LIT(var, value) (((var) << 1) | (value))
@@ -288,22 +289,101 @@ struct trail_t {
   }
 };
 
+using clause_ref_t = int;
+
+class clause_view_t {
+ public:
+  explicit clause_view_t(int* words) : words_(words) {}
+
+  static size_t storage_words(size_t literal_count) { return header_words + literal_count; }
+
+  void initialize(int size, int lbd, int last_conflict, bool learned)
+  {
+    cuopt_assert(size >= 0, "");
+    words_[size_word]          = size;
+    words_[lbd_word]           = lbd;
+    words_[last_conflict_word] = last_conflict;
+    words_[flags_word]         = learned ? learned_flag : 0;
+  }
+
+  int size() const { return words_[size_word]; }
+  int lbd() const { return words_[lbd_word]; }
+  int last_conflict() const { return words_[last_conflict_word]; }
+
+  bool learned() const { return has_flag(learned_flag); }
+  bool deleted() const { return has_flag(deleted_flag); }
+  bool locked() const { return has_flag(locked_flag); }
+
+  void touch(int conflict) { words_[last_conflict_word] = conflict; }
+  void mark_deleted() { set_flag(deleted_flag); }
+
+  void set_locked(bool locked)
+  {
+    if (locked)
+      set_flag(locked_flag);
+    else
+      clear_flag(locked_flag);
+  }
+
+  std::span<int> literals() { return {words_ + header_words, (size_t)size()}; }
+
+  std::span<const int> literals() const { return {words_ + header_words, (size_t)size()}; }
+
+ private:
+  enum word_t : int {
+    size_word,
+    lbd_word,
+    last_conflict_word,
+    flags_word,
+    header_words,
+  };
+
+  enum flag_t : int {
+    learned_flag = 1 << 0,
+    deleted_flag = 1 << 1,
+    locked_flag  = 1 << 2,
+  };
+
+  bool has_flag(flag_t flag) const { return words_[flags_word] & flag; }
+  void set_flag(flag_t flag) { words_[flags_word] |= flag; }
+  void clear_flag(flag_t flag) { words_[flags_word] &= ~flag; }
+
+  int* words_;
+};
+
+class clause_arena_t {
+ public:
+  static size_t storage_words(size_t clause_count, size_t literal_count)
+  {
+    return clause_count * clause_view_t::storage_words(0) + literal_count;
+  }
+
+  void reserve(size_t words) { words_.reserve(words); }
+
+  clause_ref_t add(std::span<const int> literals, bool learned, int lbd, int conflict)
+  {
+    const clause_ref_t ref = words_.size();
+    words_.resize(words_.size() + clause_view_t::storage_words(literals.size()));
+
+    auto clause = (*this)[ref];
+    clause.initialize(literals.size(), lbd, conflict, learned);
+    std::copy(literals.begin(), literals.end(), clause.literals().begin());
+    return ref;
+  }
+
+  clause_view_t operator[](clause_ref_t ref)
+  {
+    cuopt_assert(ref >= 0 && (size_t)ref < words_.size(), "");
+    return clause_view_t{words_.data() + ref};
+  }
+
+ private:
+  std::vector<int> words_;
+};
+
 // Compact CDCL solver used only for large, objective-free Boolean feasibility models. Literals are
 // encoded as 2 * variable + satisfying value.
 struct sat_t {
-  enum clause_field_t : int {
-    clause_size_field,
-    clause_lbd_field,
-    clause_last_conflict_field,
-    clause_flags_field,
-    clause_header_size,
-  };
-  enum clause_flag_t : int {
-    flag_none    = 0,
-    flag_learned = 1 << 0,
-    flag_deleted = 1 << 1,
-    flag_locked  = 1 << 2,
-  };
   static constexpr int no_reason                       = -1;
   static constexpr int no_literal                      = -1;
   static constexpr int no_variable                     = -1;
@@ -326,14 +406,15 @@ struct sat_t {
   static constexpr int database_reduction_interval     = 4000;
   static constexpr size_t learned_clause_reserve       = 10000;
   struct watch_t {
-    int id;
+    clause_ref_t id;
     int blocker;
   };
-  std::vector<int> arena;
-  std::vector<int> clause_refs;
+  clause_arena_t arena;
+  std::vector<clause_ref_t> clause_refs;
   std::vector<std::vector<watch_t>> watches;
   std::vector<int8_t> value, phase;
-  std::vector<int> level, reason;
+  std::vector<int> level;
+  std::vector<clause_ref_t> reason;
   std::vector<uint8_t> seen;
   sat_variable_order_t variable_order;
   trail_t trail;
@@ -342,15 +423,12 @@ struct sat_t {
   int restart_initial_limit{restart_interval_unit};
   int64_t steps{0};
 
-  int* lits_of(int ref) { return arena.data() + ref + clause_header_size; }
-  const int* lits_of(int ref) const { return arena.data() + ref + clause_header_size; }
-  int clause_size(int ref) const { return arena[ref + clause_size_field]; }
   int literal_value(int lit) const
   {
     const int state = value[LIT_VAR(lit)];
     return state == unassigned ? unassigned : state == LIT_VALUE(lit);
   }
-  bool enqueue(int lit, int why)
+  bool enqueue(int lit, clause_ref_t why)
   {
     const int v         = LIT_VAR(lit);
     const int requested = LIT_VALUE(lit);
@@ -361,14 +439,9 @@ struct sat_t {
     trail.enqueue(lit);
     return true;
   }
-  int add(std::vector<int> lits, bool learned = false, int lbd = 0)
+  clause_ref_t add(std::vector<int> lits, bool learned = false, int lbd = 0)
   {
-    const int ref = (int)arena.size();
-    arena.push_back((int)lits.size());
-    arena.push_back(lbd);
-    arena.push_back(conflicts);
-    arena.push_back(learned ? flag_learned : flag_none);
-    arena.insert(arena.end(), lits.begin(), lits.end());
+    const clause_ref_t ref = arena.add(std::span<const int>{lits}, learned, lbd, conflicts);
     clause_refs.push_back(ref);
     if (lits.size() >= 2) {
       watches[lits[0]].push_back({ref, lits[1]});
@@ -386,13 +459,12 @@ struct sat_t {
   // false (conflict). Backtracking only changes false literals to non-false, so it cannot require
   // watch repair.
   template <typename Stop>
-  int propagate(Stop& stop)
+  clause_ref_t propagate(Stop& stop)
   {
     while (trail.has_pending_propagation()) {
       const int false_lit  = LIT_NEG(trail.next_to_propagate());
       auto& watched        = watches[false_lit];
       const int8_t* values = value.data();
-      int* arena_base      = arena.data();
       size_t out           = 0;
       for (size_t k = 0; k < watched.size(); ++k) {
         const watch_t w         = watched[k];
@@ -401,11 +473,11 @@ struct sat_t {
           watched[out++] = w;
           continue;
         }
-        const int ref = w.id;
-        int* header   = arena_base + ref;
-        if (header[clause_flags_field] & flag_deleted) continue;
-        int* lits        = header + clause_header_size;
-        const int n_lits = header[clause_size_field];
+        const clause_ref_t ref = w.id;
+        auto clause            = arena[ref];
+        if (clause.deleted()) continue;
+        auto lits        = clause.literals();
+        const int n_lits = clause.size();
         if (lits[0] == false_lit) std::swap(lits[0], lits[1]);
         if (literal_value(lits[0]) == 1) {
           watched[out++] = {ref, lits[0]};
@@ -446,18 +518,17 @@ struct sat_t {
     }
     trail.truncate_to_level(target);
   }
-  std::vector<int> analyze(int conflict, int& back, int& lbd)
+  std::vector<int> analyze(clause_ref_t conflict, int& back, int& lbd)
   {
     std::vector<int> learned(1, no_literal);
     int paths = 0;
     int pivot = no_variable;
     int index = (int)trail.size() - 1;
     do {
-      arena[conflict + clause_last_conflict_field] = conflicts;
-      const int* clause_lits                       = lits_of(conflict);
-      for (int q = 0; q < clause_size(conflict); ++q) {
-        const int lit = clause_lits[q];
-        const int v   = LIT_VAR(lit);
+      auto clause = arena[conflict];
+      clause.touch(conflicts);
+      for (int lit : clause.literals()) {
+        const int v = LIT_VAR(lit);
         if ((pivot != no_variable && v == LIT_VAR(pivot)) || seen[v] || level[v] == 0) continue;
         seen[v] = 1;
         variable_order.bump(v);
@@ -500,20 +571,17 @@ struct sat_t {
   void reduce_database()
   {
     for (int lit : trail)
-      if (reason[LIT_VAR(lit)] != no_reason)
-        arena[reason[LIT_VAR(lit)] + clause_flags_field] |= flag_locked;
-    for (int ref : clause_refs) {
-      const int flags = arena[ref + clause_flags_field];
-      if ((flags & flag_learned) && !(flags & flag_deleted) && !(flags & flag_locked) &&
-          arena[ref + clause_lbd_field] > protected_clause_lbd &&
-          arena[ref + clause_size_field] > protected_clause_size &&
-          arena[ref + clause_last_conflict_field] < conflicts - clause_stale_conflicts) {
-        arena[ref + clause_flags_field] |= flag_deleted;
+      if (reason[LIT_VAR(lit)] != no_reason) arena[reason[LIT_VAR(lit)]].set_locked(true);
+    for (clause_ref_t ref : clause_refs) {
+      auto clause = arena[ref];
+      if (clause.learned() && !clause.deleted() && !clause.locked() &&
+          clause.lbd() > protected_clause_lbd && clause.size() > protected_clause_size &&
+          clause.last_conflict() < conflicts - clause_stale_conflicts) {
+        clause.mark_deleted();
       }
     }
     for (int lit : trail)
-      if (reason[LIT_VAR(lit)] != no_reason)
-        arena[reason[LIT_VAR(lit)] + clause_flags_field] &= ~flag_locked;
+      if (reason[LIT_VAR(lit)] != no_reason) arena[reason[LIT_VAR(lit)]].set_locked(false);
   }
 
   sat_t(int n,
@@ -541,7 +609,7 @@ struct sat_t {
     size_t total_lits = 0;
     for (const auto& clause : input)
       total_lits += clause.size();
-    arena.reserve((total_lits + clause_header_size * input.size()) * 3 / 2);
+    arena.reserve(clause_arena_t::storage_words(input.size(), total_lits) * 3 / 2);
     for (auto& clause : input) {
       for (int lit : clause)
         variable_order.add_initial_activity(LIT_VAR(lit));
@@ -556,16 +624,17 @@ struct sat_t {
   template <typename Stop>
   fj_binary_sat_result_t solve(Stop stop)
   {
-    for (int ref : clause_refs) {
-      const int n_lits = clause_size(ref);
-      if (n_lits == 0 || (n_lits == 1 && !enqueue(lits_of(ref)[0], ref)))
+    for (clause_ref_t ref : clause_refs) {
+      auto clause      = arena[ref];
+      const int n_lits = clause.size();
+      if (n_lits == 0 || (n_lits == 1 && !enqueue(clause.literals()[0], ref)))
         return fj_binary_sat_result_t::infeasible;
     }
     int restart_limit = restart_initial_limit;
     int since_restart = 0;
     while (true) {
       if (++steps % solve_stop_poll_period == 0 && stop()) return fj_binary_sat_result_t::stopped;
-      const int conflict = propagate(stop);
+      const clause_ref_t conflict = propagate(stop);
       if (conflict == propagation_stopped) return fj_binary_sat_result_t::stopped;
       if (conflict != no_conflict) {
         ++conflicts;
@@ -576,7 +645,7 @@ struct sat_t {
         auto learned        = analyze(conflict, back, lbd);
         const int asserting = learned[0];
         backtrack(back);
-        const int id                                   = add(std::move(learned), true, lbd);
+        const clause_ref_t id                          = add(std::move(learned), true, lbd);
         [[maybe_unused]] const bool asserting_enqueued = enqueue(asserting, id);
         cuopt_assert(asserting_enqueued, "learned clause is not asserting after backtrack");
         if (conflicts % database_reduction_interval == 0) reduce_database();
