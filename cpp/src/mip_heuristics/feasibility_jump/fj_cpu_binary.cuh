@@ -66,7 +66,7 @@ enum class fj_binary_reject_t : uint8_t {
 enum class fj_binary_sat_result_t : int8_t {
   declined   = -2,
   infeasible = -1,
-  unknown    = 0,
+  stopped    = 0,
   feasible   = 1,
 };
 

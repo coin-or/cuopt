@@ -7,6 +7,7 @@
 
 #include "fj_cpu_binary.cuh"
 
+#include <utilities/macros.cuh>
 #include <utilities/pcgenerator.hpp>
 #include <utilities/splitmix64.hpp>
 
@@ -270,6 +271,7 @@ struct fj_sat_t {
       seen[pivot >> 1] = 0;
       --paths;
       conflict = reason[pivot >> 1];
+      cuopt_assert(paths == 0 || conflict != no_reason, "active conflict path has no reason");
     } while (paths > 0);
     learned[0]  = pivot ^ 1;
     back        = 0;
@@ -365,9 +367,9 @@ struct fj_sat_t {
     int restart_limit = restart_initial_limit;
     int since_restart = 0;
     while (true) {
-      if ((++steps & solve_stop_poll_mask) == 0 && stop()) return fj_binary_sat_result_t::unknown;
+      if ((++steps & solve_stop_poll_mask) == 0 && stop()) return fj_binary_sat_result_t::stopped;
       const int conflict = propagate(stop);
-      if (conflict == propagation_stopped) return fj_binary_sat_result_t::unknown;
+      if (conflict == propagation_stopped) return fj_binary_sat_result_t::stopped;
       if (conflict != no_conflict) {
         ++conflicts;
         ++since_restart;
@@ -377,8 +379,9 @@ struct fj_sat_t {
         auto learned        = analyze(conflict, back, lbd);
         const int asserting = learned[0];
         backtrack(back);
-        const int id = add(std::move(learned), true, lbd);
-        if (!enqueue(asserting, id)) return fj_binary_sat_result_t::infeasible;
+        const int id                                   = add(std::move(learned), true, lbd);
+        [[maybe_unused]] const bool asserting_enqueued = enqueue(asserting, id);
+        cuopt_assert(asserting_enqueued, "learned clause is not asserting after backtrack");
         if (conflicts % database_reduction_interval == 0) reduce_database();
         if (since_restart >= restart_limit) {
           backtrack(0);
@@ -398,7 +401,9 @@ struct fj_sat_t {
         }
         if (decision == no_variable) return fj_binary_sat_result_t::feasible;
         limits.push_back((int)trail.size());
-        enqueue(2 * decision + phase[decision], no_reason);
+        [[maybe_unused]] const bool decision_enqueued =
+          enqueue(2 * decision + phase[decision], no_reason);
+        cuopt_assert(decision_enqueued, "decision variable is already assigned");
       }
     }
   }
@@ -533,7 +538,7 @@ struct fj_sat_bve_t {
     return true;
   }
 
-  bool recover(const std::vector<int8_t>& compact,
+  void recover(const std::vector<int8_t>& compact,
                std::vector<int8_t>& value,
                const std::vector<int8_t>& seed) const
   {
@@ -549,13 +554,13 @@ struct fj_sat_bve_t {
         if (satisfied) continue;
         for (int lit : clause)
           if ((lit >> 1) == it->variable) {
-            if (required != no_required_value && required != (lit & 1)) return false;
+            cuopt_assert(required == no_required_value || required == (lit & 1),
+                         "BVE recovery requires conflicting values");
             required = lit & 1;
           }
       }
       value[it->variable] = required != no_required_value ? required : seed[it->variable];
     }
-    return true;
   }
 };
 }  // namespace
@@ -572,7 +577,7 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
   std::vector<std::pair<int, int64_t>> terms;
   std::vector<int64_t> subset_weight;
   for (int r = 0; r < pb.n_constraints; ++r) {
-    if ((r & encoding_stop_poll_mask) == 0 && stop()) return fj_binary_sat_result_t::unknown;
+    if ((r & encoding_stop_poll_mask) == 0 && stop()) return fj_binary_sat_result_t::stopped;
     terms.clear();
     for (int p = pb.offsets[r]; p < pb.offsets[r + 1]; ++p)
       terms.emplace_back(pb.variables[p], pb.coefficients[p]);
@@ -672,7 +677,7 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
     if (cnf.size() > sat_clause_limit) return fj_binary_sat_result_t::declined;
   }
   fj_sat_bve_t bve;
-  if (!bve.reduce(cnf, variables, pb.n_variables, stop)) return fj_binary_sat_result_t::unknown;
+  if (!bve.reduce(cnf, variables, pb.n_variables, stop)) return fj_binary_sat_result_t::stopped;
   std::vector<int8_t> compact_seed;
   compact_seed.reserve(bve.model_variables);
   for (int k = 0; k < bve.model_variables; ++k)
@@ -684,12 +689,12 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
   if (result == fj_binary_sat_result_t::feasible) {
     std::vector<int8_t> full_seed(variables, 0), full_value;
     std::copy(assignment.begin(), assignment.end(), full_seed.begin());
-    if (!bve.recover(sat.value, full_value, full_seed)) return fj_binary_sat_result_t::unknown;
+    bve.recover(sat.value, full_value, full_seed);
     for (int r = 0; r < pb.n_constraints; ++r) {
-      int64_t lhs = 0;
+      [[maybe_unused]] int64_t lhs = 0;
       for (int p = pb.offsets[r]; p < pb.offsets[r + 1]; ++p)
         lhs += int64_t(pb.coefficients[p]) * full_value[pb.variables[p]];
-      if (lhs > pb.bound[r]) return fj_binary_sat_result_t::unknown;
+      cuopt_assert(lhs <= pb.bound[r], "SAT assignment violates original constraint");
     }
     std::copy_n(full_value.begin(), pb.n_variables, assignment.begin());
   }
