@@ -428,7 +428,9 @@ struct fj_sat_bve_t {
     std::sort(clause.begin(), clause.end());
     size_t out = 0;
     for (int lit : clause) {
+      // duplicate
       if (out && clause[out - 1] == lit) continue;
+      // tautology, drop
       if (out && (clause[out - 1] ^ 1) == lit) return false;
       clause[out++] = lit;
     }
@@ -437,7 +439,7 @@ struct fj_sat_bve_t {
   }
 
   template <typename Stop>
-  bool reduce(std::vector<std::vector<int>>& input, int n, int original_variables, Stop& stop)
+  bool presolve(std::vector<std::vector<int>>& input, int n, int original_variables, Stop& stop)
   {
     struct clause_t {
       std::vector<int> lits;
@@ -538,9 +540,9 @@ struct fj_sat_bve_t {
     return true;
   }
 
-  void recover(const std::vector<int8_t>& compact,
-               std::vector<int8_t>& value,
-               const std::vector<int8_t>& seed) const
+  void postsolve(const std::vector<int8_t>& compact,
+                 std::vector<int8_t>& value,
+                 const std::vector<int8_t>& seed) const
   {
     value = seed;
     for (size_t i = 0; i < compact_to_original.size(); ++i)
@@ -677,7 +679,7 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
     if (cnf.size() > sat_clause_limit) return fj_binary_sat_result_t::declined;
   }
   fj_sat_bve_t bve;
-  if (!bve.reduce(cnf, variables, pb.n_variables, stop)) return fj_binary_sat_result_t::stopped;
+  if (!bve.presolve(cnf, variables, pb.n_variables, stop)) return fj_binary_sat_result_t::stopped;
   std::vector<int8_t> compact_seed;
   compact_seed.reserve(bve.model_variables);
   for (int k = 0; k < bve.model_variables; ++k)
@@ -689,7 +691,7 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
   if (result == fj_binary_sat_result_t::feasible) {
     std::vector<int8_t> full_seed(variables, 0), full_value;
     std::copy(assignment.begin(), assignment.end(), full_seed.begin());
-    bve.recover(sat.value, full_value, full_seed);
+    bve.postsolve(sat.value, full_value, full_seed);
     for (int r = 0; r < pb.n_constraints; ++r) {
       [[maybe_unused]] int64_t lhs = 0;
       for (int p = pb.offsets[r]; p < pb.offsets[r + 1]; ++p)
