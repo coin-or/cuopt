@@ -1419,26 +1419,25 @@ struct fj_bin_engine_t {
     init(climber);
 
     // CDCL search?
-    if (climber.use_sat_search && !violated_list.empty() && pb.objective_vars.empty()) 
-    {
-      CUOPT_LOG_DEBUG("%sCPUFJ[bin%d] using SAT search",
-                      climber.log_prefix.c_str(),
-                      coefficient_bits());
+    if (climber.use_sat_search && !violated_list.empty() && pb.objective_vars.empty()) {
+      CUOPT_LOG_DEBUG(
+        "%sCPUFJ[bin%d] using SAT search", climber.log_prefix.c_str(), coefficient_bits());
 
-      const auto sat_start = std::chrono::steady_clock::now();
+      const auto sat_start             = std::chrono::steady_clock::now();
       const std::function<bool()> stop = [&] {
         return climber.halted || climber.preemption_flag.load() ||
-               std::chrono::duration<double>(std::chrono::steady_clock::now() - sat_start).count() >=
-                 static_cast<double>(time_limit);
+               std::chrono::duration<double>(std::chrono::steady_clock::now() - sat_start)
+                   .count() >= static_cast<double>(time_limit);
       };
       int64_t sat_steps = 0;
-      const int result =
-        fj_bin_sat_search(pb, assign, static_cast<uint64_t>(climber.settings.seed), stop, sat_steps);
-      if (result != -2) {
+      const auto result = fj_bin_sat_search(
+        pb, assign, static_cast<uint64_t>(climber.settings.seed), stop, sat_steps);
+      if (result != fj_binary_sat_result_t::declined) {
         climber.iterations =
           static_cast<i_t>(std::min<int64_t>(sat_steps, std::numeric_limits<i_t>::max()));
-        if (result == 1) {
-          for (int v = 0; v < pb.n_variables; ++v) assign_i32[v] = assign[v];
+        if (result == fj_binary_sat_result_t::feasible) {
+          for (int v = 0; v < pb.n_variables; ++v)
+            assign_i32[v] = assign[v];
           recompute_slack();
           if (violated_list.empty()) {
             best_objective = incumbent_objective;
@@ -1449,11 +1448,10 @@ struct fj_bin_engine_t {
         }
         return;
       }
-      time_limit = static_cast<f_t>(
-        std::max(0.0,
-                 static_cast<double>(time_limit) -
-                   std::chrono::duration<double>(std::chrono::steady_clock::now() - sat_start)
-                     .count()));
+      time_limit = static_cast<f_t>(std::max(
+        0.0,
+        static_cast<double>(time_limit) -
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - sat_start).count()));
     }
     if (violated_list.empty()) {
       best_objective = incumbent_objective;

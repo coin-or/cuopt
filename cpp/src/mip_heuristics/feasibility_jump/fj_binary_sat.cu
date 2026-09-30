@@ -22,19 +22,58 @@ namespace cuopt::mathematical_optimization::mip {
 
 namespace {
 
+static constexpr int encoding_stop_poll_mask         = 127;
+static constexpr size_t direct_encoding_term_limit   = 12;
+static constexpr size_t direct_encoding_clause_limit = 32;
+static constexpr size_t bdd_state_limit              = 20000;
+static constexpr int sat_variable_limit              = 1000000;
+static constexpr size_t bdd_term_limit               = 256;
+static constexpr size_t sat_clause_limit             = 2000000;
+static constexpr int bdd_false_terminal              = -1;
+static constexpr int bdd_true_terminal               = -2;
+
 // Compact CDCL solver used only for large, objective-free Boolean feasibility models. Literals are
 // encoded as 2 * variable + satisfying value.
 struct fj_sat_t {
-  static constexpr int clause_header            = 4;
-  static constexpr int flag_learned             = 1;
-  static constexpr int flag_deleted             = 2;
-  static constexpr int flag_locked              = 4;
-  static constexpr double activity_decay_min    = 0.94;
-  static constexpr double activity_decay_step   = 0.01;
-  static constexpr int activity_decay_choices   = 5;
-  static constexpr int restart_interval_unit    = 64;
-  static constexpr int restart_interval_choices = 4;
-  static constexpr int restart_growth_limit     = 4096;
+  enum clause_field_t : int {
+    clause_size_field,
+    clause_lbd_field,
+    clause_last_conflict_field,
+    clause_flags_field,
+    clause_header_size,
+  };
+  enum clause_flag_t : int {
+    flag_none    = 0,
+    flag_learned = 1 << 0,
+    flag_deleted = 1 << 1,
+    flag_locked  = 1 << 2,
+  };
+  static constexpr int no_reason                     = -1;
+  static constexpr int no_literal                    = -1;
+  static constexpr int no_variable                   = -1;
+  static constexpr int not_in_heap                   = -1;
+  static constexpr int no_conflict                   = -1;
+  static constexpr int propagation_stopped           = -2;
+  static constexpr int8_t unassigned                 = -1;
+  static constexpr double activity_decay_min         = 0.94;
+  static constexpr double activity_decay_step        = 0.01;
+  static constexpr int activity_decay_choices        = 5;
+  static constexpr double initial_activity_increment = 1.0;
+  static constexpr double activity_rescale_threshold = 1e100;
+  static constexpr double activity_rescale_factor    = 1e-100;
+  static constexpr double initial_clause_activity    = 0.001;
+  static constexpr int restart_interval_unit         = 64;
+  static constexpr int restart_interval_choices      = 4;
+  static constexpr int restart_growth_limit          = 4096;
+  static constexpr int restart_growth_numerator      = 3;
+  static constexpr int restart_growth_denominator    = 2;
+  static constexpr size_t propagation_stop_poll_mask = 255;
+  static constexpr int64_t solve_stop_poll_mask      = 127;
+  static constexpr int protected_clause_lbd          = 2;
+  static constexpr int protected_clause_size         = 2;
+  static constexpr int clause_stale_conflicts        = 2000;
+  static constexpr int database_reduction_interval   = 4000;
+  static constexpr size_t learned_clause_reserve     = 10000;
   struct watch_t {
     int id;
     int blocker;
@@ -48,19 +87,19 @@ struct fj_sat_t {
   std::vector<double> activity;
   std::vector<uint64_t> tie;
   size_t head{0};
-  double increment{1.0};
-  double decay{0.95};
+  double increment{initial_activity_increment};
+  double decay{activity_decay_min};
   int conflicts{0};
   int restart_initial_limit{restart_interval_unit};
   int64_t steps{0};
 
-  int* lits_of(int ref) { return arena.data() + ref + clause_header; }
-  const int* lits_of(int ref) const { return arena.data() + ref + clause_header; }
-  int clause_size(int ref) const { return arena[ref]; }
+  int* lits_of(int ref) { return arena.data() + ref + clause_header_size; }
+  const int* lits_of(int ref) const { return arena.data() + ref + clause_header_size; }
+  int clause_size(int ref) const { return arena[ref + clause_size_field]; }
   int literal_value(int lit) const
   {
-    const int x = value[lit >> 1];
-    return x < 0 ? -1 : x == (lit & 1);
+    const int state = value[lit >> 1];
+    return state == unassigned ? unassigned : state == (lit & 1);
   }
   bool higher(int a, int b) const
   {
@@ -81,7 +120,7 @@ struct fj_sat_t {
   }
   void insert(int v)
   {
-    if (position[v] >= 0) return;
+    if (position[v] != not_in_heap) return;
     position[v] = (int)heap.size();
     heap.push_back(v);
     heap_up(position[v]);
@@ -91,7 +130,7 @@ struct fj_sat_t {
     const int result = heap.front();
     const int last   = heap.back();
     heap.pop_back();
-    position[result] = -1;
+    position[result] = not_in_heap;
     if (!heap.empty()) {
       int p = 0;
       while (2 * p + 1 < (int)heap.size()) {
@@ -110,19 +149,19 @@ struct fj_sat_t {
   void bump(int v)
   {
     activity[v] += increment;
-    if (activity[v] > 1e100) {
+    if (activity[v] > activity_rescale_threshold) {
       for (double& score : activity)
-        score *= 1e-100;
-      increment *= 1e-100;
+        score *= activity_rescale_factor;
+      increment *= activity_rescale_factor;
     }
-    if (position[v] >= 0) heap_up(position[v]);
+    if (position[v] != not_in_heap) heap_up(position[v]);
   }
   bool enqueue(int lit, int why)
   {
     const int v         = lit >> 1;
     const int requested = lit & 1;
-    if (value[v] >= 0) return value[v] == requested;
-    value[v] = phase[v] = static_cast<int8_t>(requested);
+    if (value[v] != unassigned) return value[v] == requested;
+    value[v] = phase[v] = requested;
     level[v]            = (int)limits.size();
     reason[v]           = why;
     trail.push_back(lit);
@@ -134,7 +173,7 @@ struct fj_sat_t {
     arena.push_back((int)lits.size());
     arena.push_back(lbd);
     arena.push_back(conflicts);
-    arena.push_back(learned ? flag_learned : 0);
+    arena.push_back(learned ? flag_learned : flag_none);
     arena.insert(arena.end(), lits.begin(), lits.end());
     clause_refs.push_back(ref);
     if (lits.size() >= 2) {
@@ -155,15 +194,15 @@ struct fj_sat_t {
       for (size_t k = 0; k < watched.size(); ++k) {
         const watch_t w         = watched[k];
         const int blocker_value = values[w.blocker >> 1];
-        if (blocker_value >= 0 && blocker_value == (w.blocker & 1)) {
+        if (blocker_value != unassigned && blocker_value == (w.blocker & 1)) {
           watched[out++] = w;
           continue;
         }
         const int ref = w.id;
         int* header   = arena_base + ref;
-        if (header[3] & flag_deleted) continue;
-        int* lits        = header + clause_header;
-        const int n_lits = header[0];
+        if (header[clause_flags_field] & flag_deleted) continue;
+        int* lits        = header + clause_header_size;
+        const int n_lits = header[clause_size_field];
         if (lits[0] == false_lit) std::swap(lits[0], lits[1]);
         if (literal_value(lits[0]) == 1) {
           watched[out++] = {ref, lits[0]};
@@ -187,9 +226,9 @@ struct fj_sat_t {
         }
       }
       watched.resize(out);
-      if ((head & 255) == 0 && stop()) return -2;
+      if ((head & propagation_stop_poll_mask) == 0 && stop()) return propagation_stopped;
     }
-    return -1;
+    return no_conflict;
   }
   void backtrack(int target)
   {
@@ -197,8 +236,8 @@ struct fj_sat_t {
     const size_t keep = limits[target];
     for (size_t k = trail.size(); k > keep;) {
       const int v = trail[--k] >> 1;
-      value[v]    = -1;
-      reason[v]   = -1;
+      value[v]    = unassigned;
+      reason[v]   = no_reason;
       insert(v);
     }
     trail.resize(keep);
@@ -207,17 +246,17 @@ struct fj_sat_t {
   }
   std::vector<int> analyze(int conflict, int& back, int& lbd)
   {
-    std::vector<int> learned(1, -1);
+    std::vector<int> learned(1, no_literal);
     int paths = 0;
-    int pivot = -1;
+    int pivot = no_variable;
     int index = (int)trail.size() - 1;
     do {
-      arena[conflict + 2]    = conflicts;
-      const int* clause_lits = lits_of(conflict);
+      arena[conflict + clause_last_conflict_field] = conflicts;
+      const int* clause_lits                       = lits_of(conflict);
       for (int q = 0; q < clause_size(conflict); ++q) {
         const int lit = clause_lits[q];
         const int v   = lit >> 1;
-        if ((pivot >= 0 && v == (pivot >> 1)) || seen[v] || level[v] == 0) continue;
+        if ((pivot != no_variable && v == (pivot >> 1)) || seen[v] || level[v] == 0) continue;
         seen[v] = 1;
         bump(v);
         if (level[v] == (int)limits.size())
@@ -258,16 +297,20 @@ struct fj_sat_t {
   void reduce_database()
   {
     for (int lit : trail)
-      if (reason[lit >> 1] >= 0) arena[reason[lit >> 1] + 3] |= flag_locked;
+      if (reason[lit >> 1] != no_reason)
+        arena[reason[lit >> 1] + clause_flags_field] |= flag_locked;
     for (int ref : clause_refs) {
-      const int flags = arena[ref + 3];
+      const int flags = arena[ref + clause_flags_field];
       if ((flags & flag_learned) && !(flags & flag_deleted) && !(flags & flag_locked) &&
-          arena[ref + 1] > 2 && arena[ref] > 2 && arena[ref + 2] < conflicts - 2000) {
-        arena[ref + 3] |= flag_deleted;
+          arena[ref + clause_lbd_field] > protected_clause_lbd &&
+          arena[ref + clause_size_field] > protected_clause_size &&
+          arena[ref + clause_last_conflict_field] < conflicts - clause_stale_conflicts) {
+        arena[ref + clause_flags_field] |= flag_deleted;
       }
     }
     for (int lit : trail)
-      if (reason[lit >> 1] >= 0) arena[reason[lit >> 1] + 3] &= ~flag_locked;
+      if (reason[lit >> 1] != no_reason)
+        arena[reason[lit >> 1] + clause_flags_field] &= ~flag_locked;
   }
 
   fj_sat_t(int n,
@@ -275,11 +318,11 @@ struct fj_sat_t {
            const std::vector<int8_t>& seed,
            uint64_t rng_seed)
     : watches(2 * n),
-      value(n, -1),
+      value(n, unassigned),
       phase(n, 0),
       level(n),
-      reason(n, -1),
-      position(n, -1),
+      reason(n, no_reason),
+      position(n, not_in_heap),
       seen(n),
       activity(n),
       tie(n)
@@ -294,14 +337,14 @@ struct fj_sat_t {
       tie[v] = tie_rng.next_u64();
       if (v < (int)seed.size()) phase[v] = seed[v];
     }
-    clause_refs.reserve(input.size() + 10000);
+    clause_refs.reserve(input.size() + learned_clause_reserve);
     size_t total_lits = 0;
     for (const auto& clause : input)
       total_lits += clause.size();
-    arena.reserve((total_lits + clause_header * input.size()) * 3 / 2);
+    arena.reserve((total_lits + clause_header_size * input.size()) * 3 / 2);
     for (auto& clause : input) {
       for (int lit : clause)
-        activity[lit >> 1] += 0.001;
+        activity[lit >> 1] += initial_clause_activity;
       add(std::move(clause));
     }
     // Encoding nodes have no independent model meaning; conflicts may still promote them later.
@@ -312,54 +355,61 @@ struct fj_sat_t {
   }
 
   template <typename Stop>
-  int solve(Stop stop)
+  fj_binary_sat_result_t solve(Stop stop)
   {
     for (int ref : clause_refs) {
       const int n_lits = clause_size(ref);
-      if (n_lits == 0 || (n_lits == 1 && !enqueue(lits_of(ref)[0], ref))) return -1;
+      if (n_lits == 0 || (n_lits == 1 && !enqueue(lits_of(ref)[0], ref)))
+        return fj_binary_sat_result_t::infeasible;
     }
     int restart_limit = restart_initial_limit;
     int since_restart = 0;
     while (true) {
-      if ((++steps & 127) == 0 && stop()) return 0;
+      if ((++steps & solve_stop_poll_mask) == 0 && stop()) return fj_binary_sat_result_t::unknown;
       const int conflict = propagate(stop);
-      if (conflict == -2) return 0;
-      if (conflict >= 0) {
+      if (conflict == propagation_stopped) return fj_binary_sat_result_t::unknown;
+      if (conflict != no_conflict) {
         ++conflicts;
         ++since_restart;
-        if (limits.empty()) return -1;
+        if (limits.empty()) return fj_binary_sat_result_t::infeasible;
         int back            = 0;
         int lbd             = 0;
         auto learned        = analyze(conflict, back, lbd);
         const int asserting = learned[0];
         backtrack(back);
         const int id = add(std::move(learned), true, lbd);
-        if (!enqueue(asserting, id)) return -1;
-        if (conflicts % 4000 == 0) reduce_database();
+        if (!enqueue(asserting, id)) return fj_binary_sat_result_t::infeasible;
+        if (conflicts % database_reduction_interval == 0) reduce_database();
         if (since_restart >= restart_limit) {
           backtrack(0);
           since_restart = 0;
-          restart_limit =
-            restart_limit < restart_growth_limit ? restart_limit * 3 / 2 : restart_initial_limit;
+          restart_limit = restart_limit < restart_growth_limit
+                            ? restart_limit * restart_growth_numerator / restart_growth_denominator
+                            : restart_initial_limit;
         }
       } else {
-        int decision = -1;
+        int decision = no_variable;
         while (!heap.empty()) {
           const int candidate = pop();
-          if (value[candidate] < 0) {
+          if (value[candidate] == unassigned) {
             decision = candidate;
             break;
           }
         }
-        if (decision < 0) return 1;
+        if (decision == no_variable) return fj_binary_sat_result_t::feasible;
         limits.push_back((int)trail.size());
-        enqueue(2 * decision + phase[decision], -1);
+        enqueue(2 * decision + phase[decision], no_reason);
       }
     }
   }
 };
 
 struct fj_sat_bve_t {
+  static constexpr int stop_poll_mask      = 255;
+  static constexpr size_t occurrence_limit = 32;
+  static constexpr size_t resolvent_limit  = 64;
+  static constexpr int no_required_value   = -1;
+
   struct extension_t {
     int variable;
     std::vector<std::vector<int>> clauses;
@@ -408,14 +458,15 @@ struct fj_sat_bve_t {
     std::vector<int> positive, negative;
     std::vector<std::vector<int>> resolvents;
     for (int v : order) {
-      if ((v & 255) == 0 && stop()) return false;
+      if ((v & stop_poll_mask) == 0 && stop()) return false;
       positive.clear();
       negative.clear();
       for (int id : occurrence[2 * v + 1])
         if (!clauses[id].deleted) positive.push_back(id);
       for (int id : occurrence[2 * v])
         if (!clauses[id].deleted) negative.push_back(id);
-      if (positive.empty() || negative.empty() || positive.size() > 32 || negative.size() > 32)
+      if (positive.empty() || negative.empty() || positive.size() > occurrence_limit ||
+          negative.size() > occurrence_limit)
         continue;
 
       size_t n_res = 0;
@@ -431,7 +482,7 @@ struct fj_sat_bve_t {
             if ((lit >> 1) != v) resolvent.push_back(lit);
           if (!canonicalize(resolvent)) continue;
           ++n_res;
-          if (n_res > 64 || n_res > positive.size() + negative.size()) {
+          if (n_res > resolvent_limit || n_res > positive.size() + negative.size()) {
             reject = true;
             break;
           }
@@ -490,7 +541,7 @@ struct fj_sat_bve_t {
     for (size_t i = 0; i < compact_to_original.size(); ++i)
       value[compact_to_original[i]] = compact[i];
     for (auto it = extension.rbegin(); it != extension.rend(); ++it) {
-      int required = -1;
+      int required = no_required_value;
       for (const auto& clause : it->clauses) {
         bool satisfied = false;
         for (int lit : clause)
@@ -498,11 +549,11 @@ struct fj_sat_bve_t {
         if (satisfied) continue;
         for (int lit : clause)
           if ((lit >> 1) == it->variable) {
-            if (required >= 0 && required != (lit & 1)) return false;
+            if (required != no_required_value && required != (lit & 1)) return false;
             required = lit & 1;
           }
       }
-      value[it->variable] = static_cast<int8_t>(required >= 0 ? required : seed[it->variable]);
+      value[it->variable] = required != no_required_value ? required : seed[it->variable];
     }
     return true;
   }
@@ -510,18 +561,18 @@ struct fj_sat_bve_t {
 }  // namespace
 
 template <typename coef_t>
-int fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
-                      std::vector<int8_t>& assignment,
-                      uint64_t seed,
-                      const std::function<bool()>& stop,
-                      int64_t& steps)
+fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
+                                         std::vector<int8_t>& assignment,
+                                         uint64_t seed,
+                                         const std::function<bool()>& stop,
+                                         int64_t& steps)
 {
   std::vector<std::vector<int>> cnf;
   int variables = pb.n_variables;
   std::vector<std::pair<int, int64_t>> terms;
   std::vector<int64_t> subset_weight;
   for (int r = 0; r < pb.n_constraints; ++r) {
-    if ((r & 127) == 0 && stop()) return 0;
+    if ((r & encoding_stop_poll_mask) == 0 && stop()) return fj_binary_sat_result_t::unknown;
     terms.clear();
     for (int p = pb.offsets[r]; p < pb.offsets[r + 1]; ++p)
       terms.emplace_back(pb.variables[p], pb.coefficients[p]);
@@ -542,13 +593,13 @@ int fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
       rhs -= std::min<int64_t>(0, coefficient);
       total += std::abs(coefficient);
     }
-    if (rhs < 0) return -1;
+    if (rhs < 0) return fj_binary_sat_result_t::infeasible;
     if (total <= rhs) continue;
 
     // Short rows are best represented by their prime clauses: each minimal overweight subset
     // forbids exactly one combination, without introducing branching-only Tseitin variables.
     const size_t row_begin = cnf.size();
-    bool directly_encoded  = terms.size() <= 12;
+    bool directly_encoded  = terms.size() <= direct_encoding_term_limit;
     if (directly_encoded) {
       const int count = 1 << terms.size();
       subset_weight.assign(count, 0);
@@ -567,7 +618,7 @@ int fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
           if (mask & (1 << k)) clause.push_back(2 * terms[k].first + (terms[k].second < 0));
         }
         cnf.push_back(std::move(clause));
-        if (cnf.size() - row_begin > 32) {
+        if (cnf.size() - row_begin > direct_encoding_clause_limit) {
           directly_encoded = false;
           break;
         }
@@ -582,29 +633,30 @@ int fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
       std::map<std::pair<int, int64_t>, int> memo;
       bool overflow = false;
       auto node     = [&](auto&& self, int i, int64_t remaining) -> int {
-        if (remaining < 0) return -1;
-        if (suffix[i] <= remaining) return -2;
+        if (remaining < 0) return bdd_false_terminal;
+        if (suffix[i] <= remaining) return bdd_true_terminal;
         const auto key = std::make_pair(i, remaining);
         if (const auto found = memo.find(key); found != memo.end()) return found->second;
-        if (memo.size() > 20000 || variables >= 1000000 || terms.size() > 256) {
+        if (memo.size() > bdd_state_limit || variables >= sat_variable_limit ||
+            terms.size() > bdd_term_limit) {
           overflow = true;
-          return -1;
+          return bdd_false_terminal;
         }
         const int low  = self(self, i + 1, remaining);
         const int high = self(self, i + 1, remaining - std::abs(terms[i].second));
-        if (overflow) return -1;
+        if (overflow) return bdd_false_terminal;
         if (low == high) {
           memo.emplace(key, low);
           return low;
         }
         const int q = 2 * variables++ + 1;
         const int z = 2 * terms[i].first + (terms[i].second > 0);
-        if (low != -2) {
+        if (low != bdd_true_terminal) {
           std::vector<int> clause{q ^ 1};
           if (low >= 0) clause.push_back(low);
           cnf.push_back(std::move(clause));
         }
-        if (high != -2) {
+        if (high != bdd_true_terminal) {
           std::vector<int> clause{q ^ 1, z ^ 1};
           if (high >= 0) clause.push_back(high);
           cnf.push_back(std::move(clause));
@@ -613,47 +665,47 @@ int fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
         return q;
       };
       const int root = node(node, 0, rhs);
-      if (overflow) return -2;
-      if (root == -1) return -1;
+      if (overflow) return fj_binary_sat_result_t::declined;
+      if (root == bdd_false_terminal) return fj_binary_sat_result_t::infeasible;
       if (root >= 0) cnf.push_back({root});
     }
-    if (cnf.size() > 2000000) return -2;
+    if (cnf.size() > sat_clause_limit) return fj_binary_sat_result_t::declined;
   }
   fj_sat_bve_t bve;
-  if (!bve.reduce(cnf, variables, pb.n_variables, stop)) return 0;
+  if (!bve.reduce(cnf, variables, pb.n_variables, stop)) return fj_binary_sat_result_t::unknown;
   std::vector<int8_t> compact_seed;
   compact_seed.reserve(bve.model_variables);
   for (int k = 0; k < bve.model_variables; ++k)
     compact_seed.push_back(assignment[bve.compact_to_original[k]]);
 
   fj_sat_t sat((int)bve.compact_to_original.size(), std::move(cnf), compact_seed, seed);
-  const int result = sat.solve(stop);
-  steps            = sat.steps;
-  if (result == 1) {
+  const auto result = sat.solve(stop);
+  steps             = sat.steps;
+  if (result == fj_binary_sat_result_t::feasible) {
     std::vector<int8_t> full_seed(variables, 0), full_value;
     std::copy(assignment.begin(), assignment.end(), full_seed.begin());
-    if (!bve.recover(sat.value, full_value, full_seed)) return 0;
+    if (!bve.recover(sat.value, full_value, full_seed)) return fj_binary_sat_result_t::unknown;
     for (int r = 0; r < pb.n_constraints; ++r) {
       int64_t lhs = 0;
       for (int p = pb.offsets[r]; p < pb.offsets[r + 1]; ++p)
         lhs += int64_t(pb.coefficients[p]) * full_value[pb.variables[p]];
-      if (lhs > pb.bound[r]) return 0;
+      if (lhs > pb.bound[r]) return fj_binary_sat_result_t::unknown;
     }
     std::copy_n(full_value.begin(), pb.n_variables, assignment.begin());
   }
   return result;
 }
 
-template int fj_bin_sat_search<int8_t>(const fj_bin_problem_t<int8_t>&,
-                                       std::vector<int8_t>&,
-                                       uint64_t,
-                                       const std::function<bool()>&,
-                                       int64_t&);
+template fj_binary_sat_result_t fj_bin_sat_search<int8_t>(const fj_bin_problem_t<int8_t>&,
+                                                          std::vector<int8_t>&,
+                                                          uint64_t,
+                                                          const std::function<bool()>&,
+                                                          int64_t&);
 
-template int fj_bin_sat_search<int16_t>(const fj_bin_problem_t<int16_t>&,
-                                        std::vector<int8_t>&,
-                                        uint64_t,
-                                        const std::function<bool()>&,
-                                        int64_t&);
+template fj_binary_sat_result_t fj_bin_sat_search<int16_t>(const fj_bin_problem_t<int16_t>&,
+                                                           std::vector<int8_t>&,
+                                                           uint64_t,
+                                                           const std::function<bool()>&,
+                                                           int64_t&);
 
 }  // namespace cuopt::mathematical_optimization::mip

@@ -10,8 +10,8 @@
 #include <math_optimization/tic_toc.hpp>
 
 #include <cstdint>
-#include <vector>
 #include <functional>
+#include <vector>
 
 // The fast path applies to instances whose variables are all binary and whose rows carry integer
 // coefficients within int8 or int16 range. On those it runs a SIMD integer engine: exact
@@ -61,6 +61,13 @@ enum class fj_binary_reject_t : uint8_t {
   fractional_row_bound,
   row_bound_out_of_range,
   lhs_headroom,
+};
+
+enum class fj_binary_sat_result_t : int8_t {
+  declined   = -2,
+  infeasible = -1,
+  unknown    = 0,
+  feasible   = 1,
 };
 
 // the binary engine handles a one-sided problem with integer coefficients
@@ -140,11 +147,11 @@ bool fj_bin_encode(const fj_cpu_climber_t<i_t, f_t>& c,
                    fj_bin_setup_times_t& times);
 
 template <typename coef_t>
-int fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
-                      std::vector<int8_t>& assignment,
-                      uint64_t seed,
-                      const std::function<bool()>& stop,
-                      int64_t& steps);
+fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
+                                         std::vector<int8_t>& assignment,
+                                         uint64_t seed,
+                                         const std::function<bool()>& stop,
+                                         int64_t& steps);
 
 // Returns true if the fast path ran (eligible and narrowed); false if declined, in which case the
 // caller should take the general path.
