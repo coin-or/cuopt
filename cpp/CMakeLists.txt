@@ -1299,7 +1299,7 @@ endif ()
 
 # Headers follow their component. Shared ones go to client-dev, the leaf every
 # other component links.
-install(FILES include/cuopt/error.hpp include/cuopt/export.hpp
+install(FILES include/cuopt/error.hpp include/cuopt/export.hpp include/cuopt/status_codes.h
         DESTINATION ${_INCLUDE_DEST}
         COMPONENT client-dev
 )

@@ -235,14 +235,8 @@
 /* @brief File format constants for problem I/O */
 #define CUOPT_FILE_FORMAT_MPS 0
 
-/* @brief Status codes constants */
-#define CUOPT_SUCCESS          0
-#define CUOPT_INVALID_ARGUMENT 1
-#define CUOPT_MPS_FILE_ERROR   2
-#define CUOPT_MPS_PARSE_ERROR  3
-#define CUOPT_VALIDATION_ERROR 4
-#define CUOPT_OUT_OF_MEMORY    5
-#define CUOPT_RUNTIME_ERROR    6
+/* @brief Status codes constants -- shared with cuopt::client, defined in status_codes.h */
+#include "cuopt/status_codes.h"
 
 #define CUOPT_PRESOLVE_DEFAULT -1
 #define CUOPT_PRESOLVE_OFF     0
