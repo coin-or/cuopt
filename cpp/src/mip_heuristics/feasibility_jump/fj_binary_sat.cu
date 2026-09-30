@@ -11,6 +11,7 @@
 #include <utilities/splitmix64.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -81,7 +82,7 @@ struct fj_sat_t {
   void insert(int v)
   {
     if (position[v] >= 0) return;
-    position[v] = static_cast<int>(heap.size());
+    position[v] = (int)heap.size();
     heap.push_back(v);
     heap_up(position[v]);
   }
@@ -93,10 +94,9 @@ struct fj_sat_t {
     position[result] = -1;
     if (!heap.empty()) {
       int p = 0;
-      while (2 * p + 1 < static_cast<int>(heap.size())) {
+      while (2 * p + 1 < (int)heap.size()) {
         int child = 2 * p + 1;
-        if (child + 1 < static_cast<int>(heap.size()) && higher(heap[child + 1], heap[child]))
-          ++child;
+        if (child + 1 < (int)heap.size() && higher(heap[child + 1], heap[child])) ++child;
         if (!higher(heap[child], last)) break;
         heap[p]           = heap[child];
         position[heap[p]] = p;
@@ -123,15 +123,15 @@ struct fj_sat_t {
     const int requested = lit & 1;
     if (value[v] >= 0) return value[v] == requested;
     value[v] = phase[v] = static_cast<int8_t>(requested);
-    level[v]            = static_cast<int>(limits.size());
+    level[v]            = (int)limits.size();
     reason[v]           = why;
     trail.push_back(lit);
     return true;
   }
   int add(std::vector<int> lits, bool learned = false, int lbd = 0)
   {
-    const int ref = static_cast<int>(arena.size());
-    arena.push_back(static_cast<int>(lits.size()));
+    const int ref = (int)arena.size();
+    arena.push_back((int)lits.size());
     arena.push_back(lbd);
     arena.push_back(conflicts);
     arena.push_back(learned ? flag_learned : 0);
@@ -162,15 +162,15 @@ struct fj_sat_t {
         const int ref = w.id;
         int* header   = arena_base + ref;
         if (header[3] & flag_deleted) continue;
-        int* lits           = header + clause_header;
-        const size_t n_lits = static_cast<size_t>(header[0]);
+        int* lits        = header + clause_header;
+        const int n_lits = header[0];
         if (lits[0] == false_lit) std::swap(lits[0], lits[1]);
         if (literal_value(lits[0]) == 1) {
           watched[out++] = {ref, lits[0]};
           continue;
         }
         bool moved = false;
-        for (size_t j = 2; j < n_lits; ++j) {
+        for (int j = 2; j < n_lits; ++j) {
           if (literal_value(lits[j]) == 0) continue;
           std::swap(lits[1], lits[j]);
           watches[lits[1]].push_back({ref, lits[0]});
@@ -193,7 +193,7 @@ struct fj_sat_t {
   }
   void backtrack(int target)
   {
-    if (static_cast<int>(limits.size()) <= target) return;
+    if ((int)limits.size() <= target) return;
     const size_t keep = limits[target];
     for (size_t k = trail.size(); k > keep;) {
       const int v = trail[--k] >> 1;
@@ -210,7 +210,7 @@ struct fj_sat_t {
     std::vector<int> learned(1, -1);
     int paths = 0;
     int pivot = -1;
-    int index = static_cast<int>(trail.size()) - 1;
+    int index = (int)trail.size() - 1;
     do {
       arena[conflict + 2]    = conflicts;
       const int* clause_lits = lits_of(conflict);
@@ -220,7 +220,7 @@ struct fj_sat_t {
         if ((pivot >= 0 && v == (pivot >> 1)) || seen[v] || level[v] == 0) continue;
         seen[v] = 1;
         bump(v);
-        if (level[v] == static_cast<int>(limits.size()))
+        if (level[v] == (int)limits.size())
           ++paths;
         else
           learned.push_back(lit);
@@ -232,10 +232,10 @@ struct fj_sat_t {
       --paths;
       conflict = reason[pivot >> 1];
     } while (paths > 0);
-    learned[0] = pivot ^ 1;
-    back       = 0;
-    int best   = 1;
-    for (int k = 1; k < static_cast<int>(learned.size()); ++k) {
+    learned[0]  = pivot ^ 1;
+    back        = 0;
+    size_t best = 1;
+    for (size_t k = 1; k < learned.size(); ++k) {
       const int v = learned[k] >> 1;
       seen[v]     = 0;
       if (level[v] > back) {
@@ -246,7 +246,7 @@ struct fj_sat_t {
     if (learned.size() > 1) std::swap(learned[1], learned[best]);
     std::vector<int> levels;
     levels.reserve(learned.size());
-    levels.push_back(static_cast<int>(limits.size()));
+    levels.push_back((int)limits.size());
     for (size_t k = 1; k < learned.size(); ++k)
       levels.push_back(level[learned[k] >> 1]);
     std::sort(levels.begin(), levels.end());
@@ -292,7 +292,7 @@ struct fj_sat_t {
     cuopt::splitmix64_t tie_rng(rng_seed);
     for (int v = 0; v < n; ++v) {
       tie[v] = tie_rng.next_u64();
-      if (v < static_cast<int>(seed.size())) phase[v] = seed[v];
+      if (v < (int)seed.size()) phase[v] = seed[v];
     }
     clause_refs.reserve(input.size() + 10000);
     size_t total_lits = 0;
@@ -305,7 +305,7 @@ struct fj_sat_t {
       add(std::move(clause));
     }
     // Encoding nodes have no independent model meaning; conflicts may still promote them later.
-    for (int v = static_cast<int>(seed.size()); v < n; ++v)
+    for (int v = (int)seed.size(); v < n; ++v)
       activity[v] = 0.0;
     for (int v = 0; v < n; ++v)
       insert(v);
@@ -352,7 +352,7 @@ struct fj_sat_t {
           }
         }
         if (decision < 0) return 1;
-        limits.push_back(static_cast<int>(trail.size()));
+        limits.push_back((int)trail.size());
         enqueue(2 * decision + phase[decision], -1);
       }
     }
@@ -394,7 +394,7 @@ struct fj_sat_bve_t {
       if (canonicalize(clause)) clauses.push_back({std::move(clause), false});
     }
     std::vector<std::vector<int>> occurrence(2 * n);
-    for (int id = 0; id < static_cast<int>(clauses.size()); ++id)
+    for (size_t id = 0; id < clauses.size(); ++id)
       for (int lit : clauses[id].lits)
         occurrence[lit].push_back(id);
 
@@ -452,7 +452,7 @@ struct fj_sat_bve_t {
       }
       extension.push_back(std::move(saved));
       for (size_t r = 0; r < n_res; ++r) {
-        const int id = static_cast<int>(clauses.size());
+        const int id = (int)clauses.size();
         clauses.push_back({resolvents[r], false});
         for (int lit : clauses[id].lits)
           occurrence[lit].push_back(id);
@@ -466,11 +466,11 @@ struct fj_sat_bve_t {
           used[lit >> 1] = 1;
     for (int v = 0; v < original_variables; ++v)
       if (used[v]) compact_to_original.push_back(v);
-    model_variables = static_cast<int>(compact_to_original.size());
+    model_variables = (int)compact_to_original.size();
     for (int v = original_variables; v < n; ++v)
       if (used[v]) compact_to_original.push_back(v);
     std::vector<int> remap(n, -1);
-    for (int v = 0; v < static_cast<int>(compact_to_original.size()); ++v)
+    for (size_t v = 0; v < compact_to_original.size(); ++v)
       remap[compact_to_original[v]] = v;
     input.clear();
     for (auto& clause : clauses)
@@ -553,17 +553,17 @@ int fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
       const int count = 1 << terms.size();
       subset_weight.assign(count, 0);
       for (int mask = 1; mask < count; ++mask) {
-        const int bit       = __builtin_ctz(static_cast<unsigned>(mask));
+        const int bit       = std::countr_zero((unsigned)mask);
         subset_weight[mask] = subset_weight[mask & (mask - 1)] + std::abs(terms[bit].second);
         if (subset_weight[mask] <= rhs) continue;
         bool minimal = true;
-        for (int k = 0; k < static_cast<int>(terms.size()) && minimal; ++k) {
+        for (size_t k = 0; k < terms.size() && minimal; ++k) {
           if ((mask & (1 << k)) && subset_weight[mask] - std::abs(terms[k].second) > rhs)
             minimal = false;
         }
         if (!minimal) continue;
         std::vector<int> clause;
-        for (int k = 0; k < static_cast<int>(terms.size()); ++k) {
+        for (size_t k = 0; k < terms.size(); ++k) {
           if (mask & (1 << k)) clause.push_back(2 * terms[k].first + (terms[k].second < 0));
         }
         cnf.push_back(std::move(clause));
@@ -577,7 +577,7 @@ int fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
     if (!directly_encoded) {
       cnf.resize(row_begin);
       std::vector<int64_t> suffix(terms.size() + 1, 0);
-      for (int k = static_cast<int>(terms.size()) - 1; k >= 0; --k)
+      for (int k = (int)terms.size() - 1; k >= 0; --k)
         suffix[k] = suffix[k + 1] + std::abs(terms[k].second);
       std::map<std::pair<int, int64_t>, int> memo;
       bool overflow = false;
@@ -626,8 +626,7 @@ int fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
   for (int k = 0; k < bve.model_variables; ++k)
     compact_seed.push_back(assignment[bve.compact_to_original[k]]);
 
-  fj_sat_t sat(
-    static_cast<int>(bve.compact_to_original.size()), std::move(cnf), compact_seed, seed);
+  fj_sat_t sat((int)bve.compact_to_original.size(), std::move(cnf), compact_seed, seed);
   const int result = sat.solve(stop);
   steps            = sat.steps;
   if (result == 1) {
