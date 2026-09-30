@@ -20,12 +20,22 @@ LIBCUOPT_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_
 CUOPT_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_python cuopt cuopt --stable --cuda "$RAPIDS_CUDA_VERSION")")
 CUOPT_SH_CLIENT_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_python cuopt-sh-client cuopt --pure --arch any)")
 
+# libcuopt is a thin metapackage: pip would otherwise resolve libcuopt-client/-mathopt/-routing
+# from the published index instead of this run's build, mismatching the ABI cuopt was built
+# against.
+LIBCUOPT_CLIENT_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_cpp libcuopt_client cuopt)")
+LIBCUOPT_MATHOPT_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_cpp libcuopt_mathopt cuopt --cuda "$RAPIDS_CUDA_VERSION")")
+LIBCUOPT_ROUTING_WHEELHOUSE=$(rapids-download-from-github "$(rapids-artifact-name wheel_cpp libcuopt_routing cuopt --cuda "$RAPIDS_CUDA_VERSION")")
+
 # update pip constraints.txt to ensure all future 'pip install' (including those in ci/thirdparty-testing)
 # use these wheels for cuopt packages
 cat > "${PIP_CONSTRAINT}" <<EOF
 cuopt-${RAPIDS_PY_CUDA_SUFFIX} @ file://$(echo "${CUOPT_WHEELHOUSE}"/cuopt_"${RAPIDS_PY_CUDA_SUFFIX}"-*.whl)
 cuopt-sh-client @ file://$(echo "${CUOPT_SH_CLIENT_WHEELHOUSE}"/cuopt_sh_client-*.whl)
 libcuopt-${RAPIDS_PY_CUDA_SUFFIX} @ file://$(echo "${LIBCUOPT_WHEELHOUSE}"/libcuopt_"${RAPIDS_PY_CUDA_SUFFIX}"-*.whl)
+libcuopt-client @ file://$(echo "${LIBCUOPT_CLIENT_WHEELHOUSE}"/libcuopt_client-*.whl)
+libcuopt-mathopt-${RAPIDS_PY_CUDA_SUFFIX} @ file://$(echo "${LIBCUOPT_MATHOPT_WHEELHOUSE}"/libcuopt_mathopt_*.whl)
+libcuopt-routing-${RAPIDS_PY_CUDA_SUFFIX} @ file://$(echo "${LIBCUOPT_ROUTING_WHEELHOUSE}"/libcuopt_routing_*.whl)
 EOF
 
 # generate constraints (possibly pinning to oldest support versions of dependencies)
