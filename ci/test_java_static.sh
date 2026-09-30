@@ -43,10 +43,6 @@ rapids-logger "Testing $(basename "${CUOPT_JAVA_JAR}")"
 # copy of everything else it needs. See #1817 and the java-static-classifiers PR discussion for
 # why this moved off a fresh `conda create`: that env-solve was slow and consistently synced up
 # concurrent matrix jobs' cold Maven Central resolution, which is what triggered repeated 429s.
-# Runs before the dnf install below: the first dnf call in a fresh container triggers dnf's
-# repo metadata refresh, including the flaky 'cuda' repo.
-bash "${REPO_ROOT}/ci/utils/update_rockylinux_repo.sh"
-
 rapids-logger "Installing a JDK (dnf's own maven package is too old; see MAVEN_VERSION below)"
 MAVEN_VERSION="3.9.16"
 # Matches maven.compiler.release in java/cuopt/pom.xml (bumped to 17 in #1865); an older JDK
