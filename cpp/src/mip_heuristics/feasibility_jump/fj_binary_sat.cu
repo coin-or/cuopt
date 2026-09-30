@@ -42,14 +42,19 @@ using pb_term_t = std::pair<int, int64_t>;
 
 enum class pb_row_encoding_result_t { encoded, infeasible, declined };
 
+// Both encoders use sum_i a_i z_i <= rhs, where a_i = |c_i| and z_i is x_i for c_i > 0
+// and !x_i otherwise.
 // Short rows are best represented by their prime clauses: each minimal overweight subset
 // forbids exactly one combination, without introducing branching-only Tseitin variables.
+// Minimal-cover CNF (Warners, IPL 1998): each inclusion-minimal C with
+// sum_{i in C} a_i > rhs contributes the prime clause OR_{i in C} !z_i.
 static bool try_encode_pb_row_direct(const std::vector<pb_term_t>& terms,
                                      int64_t rhs,
                                      std::vector<int64_t>& subset_weight,
                                      std::vector<std::vector<int>>& cnf)
 {
   if (terms.size() > direct_encoding_term_limit) return false;
+
   const size_t row_begin = cnf.size();
   const int count        = 1 << terms.size();
   subset_weight.assign(count, 0);
@@ -76,6 +81,9 @@ static bool try_encode_pb_row_direct(const std::vector<pb_term_t>& terms,
   return true;
 }
 
+// Two-clause monotone ROBDD encoding (Abio et al., JAIR 2012, Sec. 6).
+// Q(i,r) := sum_{j>=i} a_j z_j <= r
+// Q(i,r) -> Q(i+1,r) && (!z_i || Q(i+1,r-a_i)).
 static int encode_pb_row_bdd_node(const std::vector<pb_term_t>& terms,
                                   const std::vector<int64_t>& suffix,
                                   std::map<std::pair<int, int64_t>, int>& memo,
@@ -103,8 +111,8 @@ static int encode_pb_row_bdd_node(const std::vector<pb_term_t>& terms,
     memo.emplace(key, low);
     return low;
   }
-  const int q = LIT(variables++, 1);
-  const int z = LIT(terms[i].first, terms[i].second > 0);
+  const int q = LIT(variables++, 1);                       // Q(i, remaining)
+  const int z = LIT(terms[i].first, terms[i].second > 0);  // z_i
   if (low != bdd_true_terminal) {
     std::vector<int> clause{LIT_NEG(q)};
     if (low >= 0) clause.push_back(low);
@@ -132,10 +140,14 @@ static pb_row_encoding_result_t encode_pb_row_bdd(const std::vector<pb_term_t>& 
   const int root = encode_pb_row_bdd_node(terms, suffix, memo, variables, cnf, overflow, 0, rhs);
   if (overflow) return pb_row_encoding_result_t::declined;
   if (root == bdd_false_terminal) return pb_row_encoding_result_t::infeasible;
+  // The root unit clause asserts Q(0,rhs), the normalized PB row.
   if (root >= 0) cnf.push_back({root});
   return pb_row_encoding_result_t::encoded;
 }
 
+// MiniSat-style EVSIDS [Een-Sorensson 2003, Sec. 4.6; Biere-Froehlich 2015].
+// Bumping by increment and then dividing increment by decay is rank-equivalent to decaying every
+// activity after each conflict. The indexed max-heap maintains the highest-activity variable.
 struct sat_variable_order_t {
   static constexpr int not_in_heap                   = -1;
   static constexpr double initial_activity_increment = 1.0;
@@ -151,9 +163,7 @@ struct sat_variable_order_t {
   }
 
   bool empty() const { return heap.empty(); }
-
   void add_initial_activity(int v) { activity[v] += initial_clause_activity; }
-
   void clear_activity(int v) { activity[v] = 0.0; }
 
   void build_heap()
@@ -231,6 +241,53 @@ struct sat_variable_order_t {
   double increment{initial_activity_increment};
 };
 
+struct trail_t {
+  // Chronological assignment stack and BCP queue. propagation_head indexes the next assignment
+  // whose consequences must be scanned. level_starts[d] is the first assignment at decision
+  // level d + 1, so truncating there backtracks to level d.
+  std::vector<int> literals;
+  std::vector<size_t> level_starts;
+  size_t propagation_head{0};
+
+  size_t size() const { return literals.size(); }
+  int operator[](size_t index) const { return literals[index]; }
+  auto begin() const { return literals.begin(); }
+  auto end() const { return literals.end(); }
+
+  int decision_level() const { return level_starts.size(); }
+  bool at_root() const { return level_starts.empty(); }
+
+  void enqueue(int lit) { literals.push_back(lit); }
+
+  bool has_pending_propagation() const { return propagation_head < literals.size(); }
+
+  int next_to_propagate()
+  {
+    cuopt_assert(has_pending_propagation(), "");
+    return literals[propagation_head++];
+  }
+
+  size_t propagated_count() const { return propagation_head; }
+
+  void start_decision_level() { level_starts.push_back(literals.size()); }
+
+  bool above_level(int target_level) const { return decision_level() > target_level; }
+
+  size_t backtrack_offset(int target_level) const
+  {
+    cuopt_assert(target_level >= 0 && target_level < decision_level(), "");
+    return level_starts[target_level];
+  }
+
+  void truncate_to_level(int target_level)
+  {
+    const size_t keep = backtrack_offset(target_level);
+    literals.resize(keep);
+    propagation_head = std::min(propagation_head, keep);
+    level_starts.resize(target_level);
+  }
+};
+
 // Compact CDCL solver used only for large, objective-free Boolean feasibility models. Literals are
 // encoded as 2 * variable + satisfying value.
 struct sat_t {
@@ -276,10 +333,10 @@ struct sat_t {
   std::vector<int> clause_refs;
   std::vector<std::vector<watch_t>> watches;
   std::vector<int8_t> value, phase;
-  std::vector<int> level, reason, trail, limits;
+  std::vector<int> level, reason;
   std::vector<uint8_t> seen;
   sat_variable_order_t variable_order;
-  size_t head{0};
+  trail_t trail;
   double decay{activity_decay_min};
   int conflicts{0};
   int restart_initial_limit{restart_interval_unit};
@@ -299,9 +356,9 @@ struct sat_t {
     const int requested = LIT_VALUE(lit);
     if (value[v] != unassigned) return value[v] == requested;
     value[v] = phase[v] = requested;
-    level[v]            = (int)limits.size();
+    level[v]            = trail.decision_level();
     reason[v]           = why;
-    trail.push_back(lit);
+    trail.enqueue(lit);
     return true;
   }
   int add(std::vector<int> lits, bool learned = false, int lbd = 0)
@@ -319,11 +376,20 @@ struct sat_t {
     }
     return ref;
   }
+  // Two-watched-literal BCP [Moskewicz et al. 2001, Sec. 2; Een-Sorensson 2003],
+  // with MiniSat 2.1 blocking literals [Een-Sorensson 2008].
+  // A clause propagates only when all but one literals are false, and conflicts when all are false.
+  // Two non-false watched literals therefore certify that neither case is possible, so assignments
+  // to unwatched literals need no work. When a watch becomes false, a true blocker proves
+  // satisfaction; otherwise move the watch to another non-false literal. If none exists, all
+  // unwatched literals are false and the other watch is true (satisfied), unassigned (unit), or
+  // false (conflict). Backtracking only changes false literals to non-false, so it cannot require
+  // watch repair.
   template <typename Stop>
   int propagate(Stop& stop)
   {
-    while (head < trail.size()) {
-      const int false_lit  = LIT_NEG(trail[head++]);
+    while (trail.has_pending_propagation()) {
+      const int false_lit  = LIT_NEG(trail.next_to_propagate());
       auto& watched        = watches[false_lit];
       const int8_t* values = value.data();
       int* arena_base      = arena.data();
@@ -363,23 +429,22 @@ struct sat_t {
         }
       }
       watched.resize(out);
-      if (head % propagation_stop_poll_period == 0 && stop()) return propagation_stopped;
+      if (trail.propagated_count() % propagation_stop_poll_period == 0 && stop())
+        return propagation_stopped;
     }
     return no_conflict;
   }
   void backtrack(int target)
   {
-    if ((int)limits.size() <= target) return;
-    const size_t keep = limits[target];
+    if (!trail.above_level(target)) return;
+    const size_t keep = trail.backtrack_offset(target);
     for (size_t k = trail.size(); k > keep;) {
       const int v = LIT_VAR(trail[--k]);
       value[v]    = unassigned;
       reason[v]   = no_reason;
       variable_order.insert(v);
     }
-    trail.resize(keep);
-    head = std::min(head, keep);
-    limits.resize(target);
+    trail.truncate_to_level(target);
   }
   std::vector<int> analyze(int conflict, int& back, int& lbd)
   {
@@ -396,7 +461,7 @@ struct sat_t {
         if ((pivot != no_variable && v == LIT_VAR(pivot)) || seen[v] || level[v] == 0) continue;
         seen[v] = 1;
         variable_order.bump(v);
-        if (level[v] == (int)limits.size())
+        if (level[v] == trail.decision_level())
           ++paths;
         else
           learned.push_back(lit);
@@ -423,11 +488,11 @@ struct sat_t {
     if (learned.size() > 1) std::swap(learned[1], learned[best]);
     std::vector<int> levels;
     levels.reserve(learned.size());
-    levels.push_back((int)limits.size());
+    levels.push_back(trail.decision_level());
     for (size_t k = 1; k < learned.size(); ++k)
       levels.push_back(level[LIT_VAR(learned[k])]);
     std::sort(levels.begin(), levels.end());
-    lbd = static_cast<int>(std::unique(levels.begin(), levels.end()) - levels.begin());
+    lbd = std::unique(levels.begin(), levels.end()) - levels.begin();
     variable_order.decay_activity(decay);
     return learned;
   }
@@ -505,7 +570,7 @@ struct sat_t {
       if (conflict != no_conflict) {
         ++conflicts;
         ++since_restart;
-        if (limits.empty()) return fj_binary_sat_result_t::infeasible;
+        if (trail.at_root()) return fj_binary_sat_result_t::infeasible;
         int back            = 0;
         int lbd             = 0;
         auto learned        = analyze(conflict, back, lbd);
@@ -532,7 +597,7 @@ struct sat_t {
           }
         }
         if (decision == no_variable) return fj_binary_sat_result_t::feasible;
-        limits.push_back((int)trail.size());
+        trail.start_decision_level();
         [[maybe_unused]] const bool decision_enqueued =
           enqueue(LIT(decision, phase[decision]), no_reason);
         cuopt_assert(decision_enqueued, "decision variable is already assigned");
