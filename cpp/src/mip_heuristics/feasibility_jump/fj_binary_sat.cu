@@ -23,7 +23,7 @@ namespace cuopt::mathematical_optimization::mip {
 
 namespace {
 
-static constexpr int encoding_stop_poll_mask         = 127;
+static constexpr int encoding_stop_poll_period       = 128;
 static constexpr size_t direct_encoding_term_limit   = 12;
 static constexpr size_t direct_encoding_clause_limit = 32;
 static constexpr size_t bdd_state_limit              = 20000;
@@ -242,27 +242,27 @@ struct sat_t {
     flag_deleted = 1 << 1,
     flag_locked  = 1 << 2,
   };
-  static constexpr int no_reason                     = -1;
-  static constexpr int no_literal                    = -1;
-  static constexpr int no_variable                   = -1;
-  static constexpr int no_conflict                   = -1;
-  static constexpr int propagation_stopped           = -2;
-  static constexpr int8_t unassigned                 = -1;
-  static constexpr double activity_decay_min         = 0.94;
-  static constexpr double activity_decay_step        = 0.01;
-  static constexpr int activity_decay_choices        = 5;
-  static constexpr int restart_interval_unit         = 64;
-  static constexpr int restart_interval_choices      = 4;
-  static constexpr int restart_growth_limit          = 4096;
-  static constexpr int restart_growth_numerator      = 3;
-  static constexpr int restart_growth_denominator    = 2;
-  static constexpr size_t propagation_stop_poll_mask = 255;
-  static constexpr int64_t solve_stop_poll_mask      = 127;
-  static constexpr int protected_clause_lbd          = 2;
-  static constexpr int protected_clause_size         = 2;
-  static constexpr int clause_stale_conflicts        = 2000;
-  static constexpr int database_reduction_interval   = 4000;
-  static constexpr size_t learned_clause_reserve     = 10000;
+  static constexpr int no_reason                       = -1;
+  static constexpr int no_literal                      = -1;
+  static constexpr int no_variable                     = -1;
+  static constexpr int no_conflict                     = -1;
+  static constexpr int propagation_stopped             = -2;
+  static constexpr int8_t unassigned                   = -1;
+  static constexpr double activity_decay_min           = 0.94;
+  static constexpr double activity_decay_step          = 0.01;
+  static constexpr int activity_decay_choices          = 5;
+  static constexpr int restart_interval_unit           = 64;
+  static constexpr int restart_interval_choices        = 4;
+  static constexpr int restart_growth_limit            = 4096;
+  static constexpr int restart_growth_numerator        = 3;
+  static constexpr int restart_growth_denominator      = 2;
+  static constexpr size_t propagation_stop_poll_period = 256;
+  static constexpr int64_t solve_stop_poll_period      = 128;
+  static constexpr int protected_clause_lbd            = 2;
+  static constexpr int protected_clause_size           = 2;
+  static constexpr int clause_stale_conflicts          = 2000;
+  static constexpr int database_reduction_interval     = 4000;
+  static constexpr size_t learned_clause_reserve       = 10000;
   struct watch_t {
     int id;
     int blocker;
@@ -358,7 +358,7 @@ struct sat_t {
         }
       }
       watched.resize(out);
-      if ((head & propagation_stop_poll_mask) == 0 && stop()) return propagation_stopped;
+      if (head % propagation_stop_poll_period == 0 && stop()) return propagation_stopped;
     }
     return no_conflict;
   }
@@ -463,8 +463,10 @@ struct sat_t {
       activity_decay_min + activity_decay_step * policy_rng.uniform(0, activity_decay_choices);
     restart_initial_limit =
       restart_interval_unit * policy_rng.uniform(1, restart_interval_choices + 1);
+
     for (int v = 0; v < n; ++v)
       if (v < (int)seed.size()) phase[v] = seed[v];
+
     clause_refs.reserve(input.size() + learned_clause_reserve);
     size_t total_lits = 0;
     for (const auto& clause : input)
@@ -492,7 +494,7 @@ struct sat_t {
     int restart_limit = restart_initial_limit;
     int since_restart = 0;
     while (true) {
-      if ((++steps & solve_stop_poll_mask) == 0 && stop()) return fj_binary_sat_result_t::stopped;
+      if (++steps % solve_stop_poll_period == 0 && stop()) return fj_binary_sat_result_t::stopped;
       const int conflict = propagate(stop);
       if (conflict == propagation_stopped) return fj_binary_sat_result_t::stopped;
       if (conflict != no_conflict) {
@@ -535,7 +537,7 @@ struct sat_t {
 };
 
 struct sat_bve_t {
-  static constexpr int stop_poll_mask      = 255;
+  static constexpr int stop_poll_period    = 256;
   static constexpr size_t occurrence_limit = 32;
   static constexpr size_t resolvent_limit  = 64;
   static constexpr int no_required_value   = -1;
@@ -590,7 +592,7 @@ struct sat_bve_t {
     std::vector<int> positive, negative;
     std::vector<std::vector<int>> resolvents;
     for (int v : order) {
-      if ((v & stop_poll_mask) == 0 && stop()) return false;
+      if (v % stop_poll_period == 0 && stop()) return false;
       positive.clear();
       negative.clear();
       for (int id : occurrence[2 * v + 1])
@@ -704,7 +706,7 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
   std::vector<pb_term_t> terms;
   std::vector<int64_t> subset_weight;
   for (int r = 0; r < pb.n_constraints; ++r) {
-    if ((r & encoding_stop_poll_mask) == 0 && stop()) return fj_binary_sat_result_t::stopped;
+    if (r % encoding_stop_poll_period == 0 && stop()) return fj_binary_sat_result_t::stopped;
     terms.clear();
     for (int p = pb.offsets[r]; p < pb.offsets[r + 1]; ++p)
       terms.emplace_back(pb.variables[p], pb.coefficients[p]);
