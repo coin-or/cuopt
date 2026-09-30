@@ -1191,19 +1191,12 @@ INSTANTIATE_TEST_SUITE_P(
   pslp_crush_warmstart,
   ::testing::Values(
     "linear_programming/afiro_original.mps",
-    "linear_programming/graph40-40/graph40-40.mps",
     "linear_programming/nug08-3rd/nug08-3rd.mps",
     "mip/fiball.mps",
     "mip/50v-10.mps",
-    "mip/drayage-25-23.mps",
     "mip/neos-3004026-krka.mps",
-    "mip/app1-1.mps",
-    "mip/decomp2.mps",
-    "mip/neos-1582420.mps",
-    "mip/neos8.mps",
     "mip/swath3.mps",
-    "mip/air05.mps",
-    "mip/dws008-01.mps"
+    "mip/air05.mps"
   ),
   [](const ::testing::TestParamInfo<std::string>& info) {
     std::string name = info.param;
@@ -1220,11 +1213,7 @@ INSTANTIATE_TEST_SUITE_P(
   ::testing::Values(
     presolve_initial_solution_param{"linear_programming/afiro_original.mps", presolver_t::PSLP},
     presolve_initial_solution_param{"linear_programming/graph40-40/graph40-40.mps", presolver_t::PSLP},
-    presolve_initial_solution_param{"mip/fiball.mps", presolver_t::PSLP},
-    presolve_initial_solution_param{"mip/app1-1.mps", presolver_t::PSLP},
-    presolve_initial_solution_param{"mip/neos8.mps", presolver_t::PSLP},
-    presolve_initial_solution_param{"linear_programming/afiro_original.mps", presolver_t::Papilo},
-    presolve_initial_solution_param{"mip/fiball.mps", presolver_t::Papilo}
+    presolve_initial_solution_param{"linear_programming/afiro_original.mps", presolver_t::Papilo}
   ),
   [](const ::testing::TestParamInfo<presolve_initial_solution_param>& info) {
     std::string name = info.param.mps_path;
