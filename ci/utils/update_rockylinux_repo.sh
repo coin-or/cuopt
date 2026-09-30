@@ -56,10 +56,12 @@ skip_if_unavailable=False
 metadata_expire=1h
 EOF
 
-# Clean DNF cache and refresh repository metadata with retry logic
+# Clean DNF cache and refresh repository metadata with retry logic. This also covers the
+# 'cuda' repo (NVIDIA's developer.download.nvidia.com), which is prone to transient CDN
+# edge-propagation 404s; 6 attempts gives it a real chance to ride those out.
 dnf clean all
 
-max_attempts=3
+max_attempts=6
 attempt=1
 while [ $attempt -le $max_attempts ]; do
     if dnf makecache --refresh; then

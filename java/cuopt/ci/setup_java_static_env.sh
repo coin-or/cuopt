@@ -31,6 +31,10 @@ fi
 # shellcheck disable=SC1091
 source rapids-init-pip
 
+# Runs before any dnf install (not just Boost/TBB/cuDSS below): the very first dnf call in a
+# fresh container is what triggers dnf's repo metadata refresh, including the flaky 'cuda' repo.
+bash ci/utils/update_rockylinux_repo.sh
+
 rapids-logger "Installing JDK, Maven, ninja and cmake"
 # dnf's own maven and cmake packages are too old for this project's needs; get ninja/cmake from
 # PyPI, matching how the build side already gets modern tooling in this family of images, and
@@ -66,8 +70,7 @@ export CC="/opt/rh/gcc-toolset-${TOOLSET_VERSION}/root/usr/bin/gcc"
 export CXX="/opt/rh/gcc-toolset-${TOOLSET_VERSION}/root/usr/bin/g++"
 export CUDAHOSTCXX="${CXX}"
 
-rapids-logger "Installing rockylinux repo, Boost, TBB and cuDSS"
-bash ci/utils/update_rockylinux_repo.sh
+rapids-logger "Installing Boost, TBB and cuDSS"
 bash ci/utils/install_boost_tbb.sh
 # cpp/CMakeLists.txt never links Papilo's own CMake target (only its source/build directories,
 # to avoid confusing clang's include resolution -- see its "Adding Papilo as a system include"
