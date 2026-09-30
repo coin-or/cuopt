@@ -19,6 +19,11 @@
 #include <numeric>
 #include <vector>
 
+#define LIT(var, value) (((var) << 1) | (value))
+#define LIT_VAR(lit)    ((lit) >> 1)
+#define LIT_VALUE(lit)  ((lit) & 1)
+#define LIT_NEG(lit)    ((lit) ^ 1)
+
 namespace cuopt::mathematical_optimization::mip {
 
 namespace {
@@ -60,7 +65,7 @@ static bool try_encode_pb_row_direct(const std::vector<pb_term_t>& terms,
     if (!minimal) continue;
     std::vector<int> clause;
     for (size_t k = 0; k < terms.size(); ++k) {
-      if (mask & (1 << k)) clause.push_back(2 * terms[k].first + (terms[k].second < 0));
+      if (mask & (1 << k)) clause.push_back(LIT(terms[k].first, terms[k].second < 0));
     }
     cnf.push_back(std::move(clause));
     if (cnf.size() - row_begin > direct_encoding_clause_limit) {
@@ -98,15 +103,15 @@ static int encode_pb_row_bdd_node(const std::vector<pb_term_t>& terms,
     memo.emplace(key, low);
     return low;
   }
-  const int q = 2 * variables++ + 1;
-  const int z = 2 * terms[i].first + (terms[i].second > 0);
+  const int q = LIT(variables++, 1);
+  const int z = LIT(terms[i].first, terms[i].second > 0);
   if (low != bdd_true_terminal) {
-    std::vector<int> clause{q ^ 1};
+    std::vector<int> clause{LIT_NEG(q)};
     if (low >= 0) clause.push_back(low);
     cnf.push_back(std::move(clause));
   }
   if (high != bdd_true_terminal) {
-    std::vector<int> clause{q ^ 1, z ^ 1};
+    std::vector<int> clause{LIT_NEG(q), LIT_NEG(z)};
     if (high >= 0) clause.push_back(high);
     cnf.push_back(std::move(clause));
   }
@@ -285,13 +290,13 @@ struct sat_t {
   int clause_size(int ref) const { return arena[ref + clause_size_field]; }
   int literal_value(int lit) const
   {
-    const int state = value[lit >> 1];
-    return state == unassigned ? unassigned : state == (lit & 1);
+    const int state = value[LIT_VAR(lit)];
+    return state == unassigned ? unassigned : state == LIT_VALUE(lit);
   }
   bool enqueue(int lit, int why)
   {
-    const int v         = lit >> 1;
-    const int requested = lit & 1;
+    const int v         = LIT_VAR(lit);
+    const int requested = LIT_VALUE(lit);
     if (value[v] != unassigned) return value[v] == requested;
     value[v] = phase[v] = requested;
     level[v]            = (int)limits.size();
@@ -318,15 +323,15 @@ struct sat_t {
   int propagate(Stop& stop)
   {
     while (head < trail.size()) {
-      const int false_lit  = trail[head++] ^ 1;
+      const int false_lit  = LIT_NEG(trail[head++]);
       auto& watched        = watches[false_lit];
       const int8_t* values = value.data();
       int* arena_base      = arena.data();
       size_t out           = 0;
       for (size_t k = 0; k < watched.size(); ++k) {
         const watch_t w         = watched[k];
-        const int blocker_value = values[w.blocker >> 1];
-        if (blocker_value != unassigned && blocker_value == (w.blocker & 1)) {
+        const int blocker_value = values[LIT_VAR(w.blocker)];
+        if (blocker_value != unassigned && blocker_value == LIT_VALUE(w.blocker)) {
           watched[out++] = w;
           continue;
         }
@@ -367,7 +372,7 @@ struct sat_t {
     if ((int)limits.size() <= target) return;
     const size_t keep = limits[target];
     for (size_t k = trail.size(); k > keep;) {
-      const int v = trail[--k] >> 1;
+      const int v = LIT_VAR(trail[--k]);
       value[v]    = unassigned;
       reason[v]   = no_reason;
       variable_order.insert(v);
@@ -387,8 +392,8 @@ struct sat_t {
       const int* clause_lits                       = lits_of(conflict);
       for (int q = 0; q < clause_size(conflict); ++q) {
         const int lit = clause_lits[q];
-        const int v   = lit >> 1;
-        if ((pivot != no_variable && v == (pivot >> 1)) || seen[v] || level[v] == 0) continue;
+        const int v   = LIT_VAR(lit);
+        if ((pivot != no_variable && v == LIT_VAR(pivot)) || seen[v] || level[v] == 0) continue;
         seen[v] = 1;
         variable_order.bump(v);
         if (level[v] == (int)limits.size())
@@ -396,19 +401,19 @@ struct sat_t {
         else
           learned.push_back(lit);
       }
-      while (!seen[trail[index] >> 1])
+      while (!seen[LIT_VAR(trail[index])])
         --index;
-      pivot            = trail[index--];
-      seen[pivot >> 1] = 0;
+      pivot                = trail[index--];
+      seen[LIT_VAR(pivot)] = 0;
       --paths;
-      conflict = reason[pivot >> 1];
+      conflict = reason[LIT_VAR(pivot)];
       cuopt_assert(paths == 0 || conflict != no_reason, "active conflict path has no reason");
     } while (paths > 0);
-    learned[0]  = pivot ^ 1;
+    learned[0]  = LIT_NEG(pivot);
     back        = 0;
     size_t best = 1;
     for (size_t k = 1; k < learned.size(); ++k) {
-      const int v = learned[k] >> 1;
+      const int v = LIT_VAR(learned[k]);
       seen[v]     = 0;
       if (level[v] > back) {
         back = level[v];
@@ -420,7 +425,7 @@ struct sat_t {
     levels.reserve(learned.size());
     levels.push_back((int)limits.size());
     for (size_t k = 1; k < learned.size(); ++k)
-      levels.push_back(level[learned[k] >> 1]);
+      levels.push_back(level[LIT_VAR(learned[k])]);
     std::sort(levels.begin(), levels.end());
     lbd = static_cast<int>(std::unique(levels.begin(), levels.end()) - levels.begin());
     variable_order.decay_activity(decay);
@@ -430,8 +435,8 @@ struct sat_t {
   void reduce_database()
   {
     for (int lit : trail)
-      if (reason[lit >> 1] != no_reason)
-        arena[reason[lit >> 1] + clause_flags_field] |= flag_locked;
+      if (reason[LIT_VAR(lit)] != no_reason)
+        arena[reason[LIT_VAR(lit)] + clause_flags_field] |= flag_locked;
     for (int ref : clause_refs) {
       const int flags = arena[ref + clause_flags_field];
       if ((flags & flag_learned) && !(flags & flag_deleted) && !(flags & flag_locked) &&
@@ -442,8 +447,8 @@ struct sat_t {
       }
     }
     for (int lit : trail)
-      if (reason[lit >> 1] != no_reason)
-        arena[reason[lit >> 1] + clause_flags_field] &= ~flag_locked;
+      if (reason[LIT_VAR(lit)] != no_reason)
+        arena[reason[LIT_VAR(lit)] + clause_flags_field] &= ~flag_locked;
   }
 
   sat_t(int n,
@@ -474,7 +479,7 @@ struct sat_t {
     arena.reserve((total_lits + clause_header_size * input.size()) * 3 / 2);
     for (auto& clause : input) {
       for (int lit : clause)
-        variable_order.add_initial_activity(lit >> 1);
+        variable_order.add_initial_activity(LIT_VAR(lit));
       add(std::move(clause));
     }
     // Encoding nodes have no independent model meaning; conflicts may still promote them later.
@@ -529,7 +534,7 @@ struct sat_t {
         if (decision == no_variable) return fj_binary_sat_result_t::feasible;
         limits.push_back((int)trail.size());
         [[maybe_unused]] const bool decision_enqueued =
-          enqueue(2 * decision + phase[decision], no_reason);
+          enqueue(LIT(decision, phase[decision]), no_reason);
         cuopt_assert(decision_enqueued, "decision variable is already assigned");
       }
     }
@@ -558,7 +563,7 @@ struct sat_bve_t {
       // duplicate
       if (out && clause[out - 1] == lit) continue;
       // tautology, drop
-      if (out && (clause[out - 1] ^ 1) == lit) return false;
+      if (out && LIT_NEG(clause[out - 1]) == lit) return false;
       clause[out++] = lit;
     }
     clause.resize(out);
@@ -585,8 +590,8 @@ struct sat_bve_t {
     std::vector<int> order(n);
     std::iota(order.begin(), order.end(), 0);
     std::sort(order.begin(), order.end(), [&](int a, int b) {
-      const size_t degree_a = occurrence[2 * a].size() + occurrence[2 * a + 1].size();
-      const size_t degree_b = occurrence[2 * b].size() + occurrence[2 * b + 1].size();
+      const size_t degree_a = occurrence[LIT(a, 0)].size() + occurrence[LIT(a, 1)].size();
+      const size_t degree_b = occurrence[LIT(b, 0)].size() + occurrence[LIT(b, 1)].size();
       return degree_a != degree_b ? degree_a < degree_b : a < b;
     });
     std::vector<int> positive, negative;
@@ -595,9 +600,9 @@ struct sat_bve_t {
       if (v % stop_poll_period == 0 && stop()) return false;
       positive.clear();
       negative.clear();
-      for (int id : occurrence[2 * v + 1])
+      for (int id : occurrence[LIT(v, 1)])
         if (!clauses[id].deleted) positive.push_back(id);
-      for (int id : occurrence[2 * v])
+      for (int id : occurrence[LIT(v, 0)])
         if (!clauses[id].deleted) negative.push_back(id);
       if (positive.empty() || negative.empty() || positive.size() > occurrence_limit ||
           negative.size() > occurrence_limit)
@@ -611,9 +616,9 @@ struct sat_bve_t {
           std::vector<int>& resolvent = resolvents[n_res];
           resolvent.clear();
           for (int lit : clauses[p].lits)
-            if ((lit >> 1) != v) resolvent.push_back(lit);
+            if (LIT_VAR(lit) != v) resolvent.push_back(lit);
           for (int lit : clauses[q].lits)
-            if ((lit >> 1) != v) resolvent.push_back(lit);
+            if (LIT_VAR(lit) != v) resolvent.push_back(lit);
           if (!canonicalize(resolvent)) continue;
           ++n_res;
           if (n_res > resolvent_limit || n_res > positive.size() + negative.size()) {
@@ -648,20 +653,23 @@ struct sat_bve_t {
     for (const auto& clause : clauses)
       if (!clause.deleted)
         for (int lit : clause.lits)
-          used[lit >> 1] = 1;
+          used[LIT_VAR(lit)] = 1;
     for (int v = 0; v < original_variables; ++v)
       if (used[v]) compact_to_original.push_back(v);
+
     model_variables = (int)compact_to_original.size();
     for (int v = original_variables; v < n; ++v)
       if (used[v]) compact_to_original.push_back(v);
+
     std::vector<int> remap(n, -1);
     for (size_t v = 0; v < compact_to_original.size(); ++v)
       remap[compact_to_original[v]] = v;
     input.clear();
+
     for (auto& clause : clauses)
       if (!clause.deleted) {
         for (int& lit : clause.lits)
-          lit = 2 * remap[lit >> 1] + (lit & 1);
+          lit = LIT(remap[LIT_VAR(lit)], LIT_VALUE(lit));
         input.push_back(std::move(clause.lits));
       }
     return true;
@@ -679,13 +687,14 @@ struct sat_bve_t {
       for (const auto& clause : it->clauses) {
         bool satisfied = false;
         for (int lit : clause)
-          if ((lit >> 1) != it->variable && value[lit >> 1] == (lit & 1)) satisfied = true;
+          if (LIT_VAR(lit) != it->variable && value[LIT_VAR(lit)] == LIT_VALUE(lit))
+            satisfied = true;
         if (satisfied) continue;
         for (int lit : clause)
-          if ((lit >> 1) == it->variable) {
-            cuopt_assert(required == no_required_value || required == (lit & 1),
+          if (LIT_VAR(lit) == it->variable) {
+            cuopt_assert(required == no_required_value || required == LIT_VALUE(lit),
                          "BVE recovery requires conflicting values");
-            required = lit & 1;
+            required = LIT_VALUE(lit);
           }
       }
       value[it->variable] = required != no_required_value ? required : seed[it->variable];
