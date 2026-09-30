@@ -1304,6 +1304,14 @@ install(FILES include/cuopt/error.hpp include/cuopt/export.hpp
         COMPONENT client-dev
 )
 
+# constants.h sits under mathematical_optimization/ but error.hpp includes it, so it is
+# shared and follows error.hpp into client-dev. The mathopt directory install below
+# excludes it to keep exactly one component shipping the file.
+install(FILES include/cuopt/mathematical_optimization/constants.h
+        DESTINATION ${_INCLUDE_DEST}/mathematical_optimization
+        COMPONENT client-dev
+)
+
 install(DIRECTORY include/cuopt/utilities/
         DESTINATION ${_INCLUDE_DEST}/utilities
         COMPONENT client-dev
@@ -1318,6 +1326,7 @@ install(DIRECTORY include/cuopt/grpc/
 install(DIRECTORY include/cuopt/mathematical_optimization/
         DESTINATION ${_INCLUDE_DEST}/mathematical_optimization
         COMPONENT mathopt-dev
+        PATTERN "constants.h" EXCLUDE
 )
 
 install(DIRECTORY include/cuopt/linear_programming/
