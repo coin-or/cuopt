@@ -45,7 +45,6 @@ Source = "https://github.com/nvidia/cuopt"
 libcuopt = "libcuopt"
 
 [project.scripts]
-cuopt_cli = "libcuopt._cli_wrapper:main"
 cuopt_grpc_server = "libcuopt._grpc_server_wrapper:main"
 
 [tool.pydistcheck]
