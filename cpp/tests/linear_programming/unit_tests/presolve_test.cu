@@ -1161,6 +1161,16 @@ TEST_P(presolve_initial_solution, warm_start_from_optimum)
   ASSERT_EQ((int)x_orig.size(), mps.get_n_variables());
   ASSERT_EQ((int)y_orig.size(), mps.get_n_constraints());
 
+  // A postsolved PDLP solution can sit slightly outside the variable bounds (on graph40-40, by up
+  // to ~1e-2 at default tolerances), which the initial-solution check rejects, so clip it the way
+  // a user re-feeding a previous solution is expected to.
+  const auto& var_lb = mps.get_variable_lower_bounds();
+  const auto& var_ub = mps.get_variable_upper_bounds();
+  for (size_t j = 0; j < x_orig.size(); ++j) {
+    if (!var_lb.empty()) { x_orig[j] = std::max(x_orig[j], var_lb[j]); }
+    if (!var_ub.empty()) { x_orig[j] = std::min(x_orig[j], var_ub[j]); }
+  }
+
   auto warm_settings = settings;
   warm_settings.set_initial_primal_solution(x_orig.data(), x_orig.size(), stream);
   warm_settings.set_initial_dual_solution(y_orig.data(), y_orig.size(), stream);
@@ -1209,6 +1219,7 @@ INSTANTIATE_TEST_SUITE_P(
   presolve_initial_solution,
   ::testing::Values(
     presolve_initial_solution_param{"linear_programming/afiro_original.mps", presolver_t::PSLP},
+    presolve_initial_solution_param{"linear_programming/graph40-40/graph40-40.mps", presolver_t::PSLP},
     presolve_initial_solution_param{"mip/fiball.mps", presolver_t::PSLP},
     presolve_initial_solution_param{"mip/app1-1.mps", presolver_t::PSLP},
     presolve_initial_solution_param{"mip/neos8.mps", presolver_t::PSLP},
