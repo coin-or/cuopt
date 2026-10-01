@@ -7,11 +7,6 @@
 
 #include "../fj_cpu_binary.cuh"
 
-#define LIT(var, value) (((var) << 1) | (value))
-#define LIT_VAR(lit)    ((lit) >> 1)
-#define LIT_VALUE(lit)  ((lit) & 1)
-#define LIT_NEG(lit)    ((lit) ^ 1)
-
 #include "fj_binary_sat_utils.hpp"
 
 #include <utilities/macros.cuh>
@@ -19,7 +14,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdlib>
 #include <functional>
 #include <numeric>
 #include <span>
@@ -31,7 +25,7 @@ namespace cuopt::mathematical_optimization::mip {
 namespace {
 
 // Compact CDCL solver used only for large, objective-free Boolean feasibility models. Literals are
-// encoded as 2 * variable + satisfying value.
+// encoded as (variable << 1) | satisfying_value.
 struct sat_t {
   static constexpr int no_reason                       = -1;
   static constexpr int no_literal                      = -1;
@@ -89,6 +83,7 @@ struct sat_t {
     trail.enqueue(lit);
     return true;
   }
+  // insert a new clause into the arena
   clause_ref_t add(std::vector<int> lits, bool learned = false, int lbd = 0)
   {
     const clause_ref_t ref = arena.add(std::span<const int>{lits}, learned, lbd, conflicts);
@@ -189,6 +184,8 @@ struct sat_t {
     }
     return no_conflict;
   }
+
+  // backtrack to a given decision depth
   void backtrack(int target_depth)
   {
     if (!trail.above_depth(target_depth)) return;
@@ -201,38 +198,56 @@ struct sat_t {
     }
     trail.truncate_to_depth(target_depth);
   }
+
+  // first-UIP style conflict analyzis to generate a learned nogood clause
+  // let's figure out why the variables involved in the conflict clause got their values
+  // based on the clauses which forced their values
   std::vector<int> analyze(clause_ref_t conflict, int& backtrack_depth, int& lbd)
   {
+    // literal[0] will be the first UIP
     std::vector<int> learned(1, no_literal);
     int paths = 0;
     int pivot = no_variable;
     int index = (int)trail.size() - 1;
     do {
+      // start with the conflicting clause then thourhg the "reason" clauses of the variables
+      // involved
       auto& clause = arena[conflict];
-      clause.touch(conflicts);
+      clause.touch(conflicts);  // update conflict activity for this clause
       for (int i = 0; i < clause.size; ++i) {
         const int lit = clause.literals[i];
         const int v   = LIT_VAR(lit);
+        // skip uninteresting literals for this clause (the variable being resolved, variables being
+        // encountered, and root assignments)
         if ((pivot != no_variable && v == LIT_VAR(pivot)) || seen[v] || assignment_depth[v] == 0)
           continue;
         seen[v] = 1;
         variable_order.bump(v);
+        // if the variable is from the current decision depth
         if (assignment_depth[v] == trail.decision_depth())
           ++paths;
         else
           learned.push_back(lit);
       }
+      // find the most recentlyt assignment variable that participates in the current conflict
+      // frontier
       while (!seen[LIT_VAR(trail[index])])
         --index;
+      // pick the next variable to resolve
       pivot                = trail[index--];
       seen[LIT_VAR(pivot)] = 0;
       --paths;
+      // replace the pivot by its reason clause
       conflict = reason[LIT_VAR(pivot)];
       cuopt_assert(paths == 0 || conflict != no_reason, "active conflict path has no reason");
-    } while (paths > 0);
+    } while (paths > 0);  // until no unresolved current-level paths remain
+
+    // first UIP (unique implication point) is found
+    // create the asserting literal
     learned[0]      = LIT_NEG(pivot);
     backtrack_depth = 0;
     size_t best     = 1;
+    // find the largest decision depth from all the learned literals
     for (size_t k = 1; k < learned.size(); ++k) {
       const int v = LIT_VAR(learned[k]);
       seen[v]     = 0;
@@ -241,7 +256,11 @@ struct sat_t {
         best            = k;
       }
     }
+    // put the highest level non-UIP in position 1 so that it is one of the watched literals of the
+    // clause
     if (learned.size() > 1) std::swap(learned[1], learned[best]);
+
+    // Compute the LBD value of this clause (distinct decision levels in the clause)
     std::vector<int> depths;
     depths.reserve(learned.size());
     depths.push_back(trail.decision_depth());
@@ -255,6 +274,9 @@ struct sat_t {
 
   void reduce_database()
   {
+    // pin the current assigments so their conflict analysis clauses don't get dropped
+    // we mark as deleted but we don't really have proper garbage collection / compaction (yet?
+    // likely unecessary given the limits)
     for (int lit : trail)
       if (reason[LIT_VAR(lit)] != no_reason) arena[reason[LIT_VAR(lit)]].set_locked(true);
     for (clause_ref_t ref : clause_refs) {
@@ -530,42 +552,13 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
                                          int64_t& steps)
 {
   std::vector<std::vector<int>> cnf;
-  int variables = pb.n_variables;
-  std::vector<pb_term_t> terms;
-  std::vector<int64_t> subset_weight;
-  for (int r = 0; r < pb.n_constraints; ++r) {
-    if (r % encoding_stop_poll_period == 0 && stop()) return fj_binary_sat_result_t::stopped;
-    terms.clear();
-    for (int p = pb.offsets[r]; p < pb.offsets[r + 1]; ++p)
-      terms.emplace_back(pb.variables[p], pb.coefficients[p]);
-    std::sort(terms.begin(), terms.end());
-    size_t out = 0;
-    for (size_t k = 0; k < terms.size();) {
-      const int v         = terms[k].first;
-      int64_t coefficient = 0;
-      do
-        coefficient += terms[k++].second;
-      while (k < terms.size() && terms[k].first == v);
-      if (coefficient) terms[out++] = {v, coefficient};
-    }
-    terms.resize(out);
-    int64_t rhs   = pb.bound[r];
-    int64_t total = 0;
-    for (auto [v, coefficient] : terms) {
-      rhs -= std::min<int64_t>(0, coefficient);
-      total += std::abs(coefficient);
-    }
-    if (rhs < 0) return fj_binary_sat_result_t::infeasible;
-    if (total <= rhs) continue;
+  int variables       = 0;
+  const auto encoding = encode_pb_model(pb, variables, cnf, stop);
+  if (encoding == pb_model_encoding_result_t::stopped) return fj_binary_sat_result_t::stopped;
+  if (encoding == pb_model_encoding_result_t::declined) return fj_binary_sat_result_t::declined;
+  if (encoding == pb_model_encoding_result_t::infeasible) return fj_binary_sat_result_t::infeasible;
+  cuopt_assert(encoding == pb_model_encoding_result_t::encoded, "");
 
-    if (!try_encode_pb_row_direct(terms, rhs, subset_weight, cnf)) {
-      const auto encoding = encode_pb_row_bdd(terms, rhs, variables, cnf);
-      if (encoding == pb_row_encoding_result_t::declined) return fj_binary_sat_result_t::declined;
-      if (encoding == pb_row_encoding_result_t::infeasible)
-        return fj_binary_sat_result_t::infeasible;
-    }
-    if (cnf.size() > sat_clause_limit) return fj_binary_sat_result_t::declined;
-  }
   sat_bve_t bve;
   if (!bve.presolve(cnf, variables, pb.n_variables, stop)) return fj_binary_sat_result_t::stopped;
   std::vector<int8_t> compact_seed;
