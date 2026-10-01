@@ -15,17 +15,14 @@ project(
   LANGUAGES CXX CUDA
 )
 
-# Debug: Print CUDA compiler version early
-message(STATUS "=============================================================")
-message(STATUS "libcuopt: CMAKE_CUDA_COMPILER_VERSION = ${CMAKE_CUDA_COMPILER_VERSION}")
-message(STATUS "libcuopt: CUDAToolkit_VERSION = ${CUDAToolkit_VERSION}")
-message(STATUS "=============================================================")
-
-# Check if cuopt is already available. If so, it is the user's responsibility to ensure that the
-# CMake package is also available at build time of the Python cuopt package.
+# Already installed: nothing to build, the wheel just stages the component. Checking for
+# the cuopt_grpc_server binary itself, not cuopt_FOUND, matters now that this build installs
+# the client/mathopt/routing sibling wheels as dependencies -- those alone resolve cuopt_FOUND
+# but not a prebuilt cuopt_grpc_server.
 find_package(cuopt "${RAPIDS_VERSION}")
+find_program(CUOPT_GRPC_SERVER_PREBUILT cuopt_grpc_server)
 
-if(cuopt_FOUND)
+if(cuopt_FOUND AND CUOPT_GRPC_SERVER_PREBUILT)
   return()
 endif()
 
