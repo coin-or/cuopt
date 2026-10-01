@@ -736,6 +736,13 @@ set(CUOPT_PRIVATE_CUDA_LIBS
 
 get_filename_component(CUDSS_MT_LIB_FILE_NAME "${CUDSS_MT_LIB_FILE}" NAME)
 
+option(CUOPT_FIND_CLIENT_EXTERNALLY "Resolve cuopt::client via find_package(cuopt) instead of building it" OFF)
+option(CUOPT_FIND_MATHOPT_EXTERNALLY "Resolve cuopt::mathopt via find_package(cuopt) instead of building it" OFF)
+option(CUOPT_FIND_ROUTING_EXTERNALLY "Resolve cuopt::routing via find_package(cuopt) instead of building it" OFF)
+if(CUOPT_FIND_CLIENT_EXTERNALLY OR CUOPT_FIND_MATHOPT_EXTERNALLY OR CUOPT_FIND_ROUTING_EXTERNALLY)
+    find_package(cuopt "${RAPIDS_VERSION}" QUIET)
+endif()
+
 # - cuopt_client - CPU-only support library ----------------------------------------------------------
 #
 # Host-side problem representation (parsers, data_model_view, mps_data_model, writers), the
@@ -745,6 +752,7 @@ get_filename_component(CUDSS_MT_LIB_FILE_NAME "${CUDSS_MT_LIB_FILE}" NAME)
 # LANGUAGES is deliberately not CUDA: adding a .cu file here should fail loudly rather than
 # quietly reintroduce a CUDA dependency. Built as an OBJECT library first (mirrored below by
 # cuopt_routing_objs / cuopt_mathopt_objs) so cuopt_static can link the objects directly.
+if(NOT (CUOPT_FIND_CLIENT_EXTERNALLY AND TARGET cuopt::client))
 add_library(cuopt_client_objs OBJECT ${CUOPT_CLIENT_SRC_FILES})
 # Default visibility, deliberately unlike the other *_objs: carved out of the internals rather
 # than designed as an export surface, so libcuopt resolves ~239 symbols from it.
@@ -762,6 +770,7 @@ set_target_properties(cuopt_client_objs
 
 add_library(cuopt_client SHARED $<TARGET_OBJECTS:cuopt_client_objs>)
 add_library(cuopt::cuopt_client ALIAS cuopt_client)
+add_library(cuopt::client ALIAS cuopt_client)
 
 target_include_directories(cuopt_client
         PUBLIC
@@ -852,6 +861,7 @@ target_link_libraries(cuopt_client
         $<$<BOOL:${CUOPT_ENABLE_GRPC}>:protobuf::libprotobuf>
         $<$<BOOL:${CUOPT_ENABLE_GRPC}>:gRPC::grpc++>
 )
+endif()
 
 
 # ##################################################################################################
@@ -882,7 +892,7 @@ endif ()
 #
 # OBJECT library first, mirroring cuopt_client_objs, so cuopt_static links the same compiled
 # objects instead of recompiling routing a second time.
-if(NOT SKIP_ROUTING_BUILD)
+if(NOT SKIP_ROUTING_BUILD AND NOT (CUOPT_FIND_ROUTING_EXTERNALLY AND TARGET cuopt::routing))
     add_library(cuopt_routing_objs OBJECT ${CUOPT_ROUTING_SRC_FILES})
     set_target_properties(cuopt_routing_objs
             PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -912,7 +922,7 @@ if(NOT SKIP_ROUTING_BUILD)
     # library's PUBLIC link interface.
     target_link_libraries(cuopt_routing_objs
             PUBLIC
-            cuopt_client
+            cuopt::client
             rmm::rmm
             rapids_logger::rapids_logger
             CCCL::CCCL
@@ -930,7 +940,7 @@ if(NOT SKIP_ROUTING_BUILD)
             # and those are host-only so they build into cuopt_client. Without this the
             # symbols resolve only because something else pulled cuopt_client in, which a
             # routing-only install would not do.
-            cuopt_client
+            cuopt::client
             rmm::rmm
             rapids_logger::rapids_logger
             CCCL::CCCL
@@ -945,6 +955,7 @@ endif()
 # cuopt_mathopt: LP / MIP / numerical optimization engine
 #
 # OBJECT library first, same reason as cuopt_routing_objs above.
+if(NOT (CUOPT_FIND_MATHOPT_EXTERNALLY AND TARGET cuopt::mathopt))
 add_library(cuopt_mathopt_objs OBJECT ${CUOPT_MATHOPT_SRC_FILES})
 set_target_properties(cuopt_mathopt_objs
         PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -999,7 +1010,7 @@ target_compile_definitions(cuopt_mathopt_objs
 # Repeated on cuopt_mathopt below -- see the note on cuopt_routing_objs above.
 target_link_libraries(cuopt_mathopt_objs
         PUBLIC
-        cuopt_client
+        cuopt::client
         rmm::rmm
         rapids_logger::rapids_logger
         CCCL::CCCL
@@ -1042,7 +1053,7 @@ target_compile_definitions(cuopt_mathopt
 target_link_libraries(cuopt_mathopt
         PUBLIC
         # The parsers and the host-side problem representation live in cuopt_client.
-        cuopt_client
+        cuopt::client
         rmm::rmm
         rapids_logger::rapids_logger
         CCCL::CCCL
@@ -1068,6 +1079,7 @@ if (TARGET KaMinPar)
     add_dependencies(cuopt_mathopt KaMinPar)
 endif ()
 add_library(cuopt::mathopt ALIAS cuopt_mathopt)
+endif()
 
 
 # ##################################################################################################
@@ -1162,6 +1174,7 @@ configure_file(
         @ONLY
 )
 
+if(NOT TARGET cuopt::cuopt)
 add_library(cuopt INTERFACE)
 add_library(cuopt::cuopt ALIAS cuopt)
 
@@ -1171,6 +1184,7 @@ target_include_directories(cuopt
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
         "$<INSTALL_INTERFACE:include>"
 )
+endif()
 
 # Deliberately no component links. CMake will not export a target that references
 # targets outside its own export set, and each component exports separately now so its
@@ -1189,8 +1203,11 @@ if (WRITE_FATBIN)
   ]=])
     # Applies to the components that actually carry CUDA fatbins. Before the split this
     # was set on libcuopt.so, which held all the device code; it now holds none.
-    set(_CUOPT_FATBIN_TARGETS cuopt_mathopt)
-    if(NOT SKIP_ROUTING_BUILD)
+    set(_CUOPT_FATBIN_TARGETS "")
+    if(TARGET cuopt_mathopt)
+        list(APPEND _CUOPT_FATBIN_TARGETS cuopt_mathopt)
+    endif()
+    if(NOT SKIP_ROUTING_BUILD AND TARGET cuopt_routing)
         list(APPEND _CUOPT_FATBIN_TARGETS cuopt_routing)
     endif()
     foreach(_target ${_CUOPT_FATBIN_TARGETS})
@@ -1230,8 +1247,13 @@ else ()
     set(_INCLUDE_DEST include/cuopt/)
 endif ()
 
-set(CUOPT_COMPONENT_TARGETS cuopt_mathopt cuopt_client)
-if(NOT SKIP_ROUTING_BUILD)
+set(CUOPT_COMPONENT_TARGETS "")
+foreach(_c cuopt_mathopt cuopt_client)
+    if(TARGET ${_c})
+        list(APPEND CUOPT_COMPONENT_TARGETS ${_c})
+    endif()
+endforeach()
+if(NOT SKIP_ROUTING_BUILD AND TARGET cuopt_routing)
     list(APPEND CUOPT_COMPONENT_TARGETS cuopt_routing)
 endif()
 
@@ -1277,9 +1299,11 @@ endforeach()
 # only -- CMake requires everything an exported target references to share its export set,
 # which would defeat the split -- so the installed config synthesises them instead, from
 # whichever components that installation actually has. See the FINAL_CODE_BLOCK below.
+if(TARGET cuopt)
 install(TARGETS cuopt
         EXPORT cuopt-exports
 )
+endif()
 
 # libcuopt.so is the ld script that keeps -lcuopt working. It is a link-time artifact,
 # so it belongs to the dev component; nothing loads it at runtime.
@@ -1409,6 +1433,7 @@ set_property(TARGET cuopt::cuopt APPEND PROPERTY
   INTERFACE_LINK_LIBRARIES "${_cuopt_umbrella_links}")
 ]=])
 
+if(TARGET cuopt)
 rapids_export(INSTALL cuopt
         EXPORT_SET cuopt-exports
         GLOBAL_TARGETS ${CUOPT_COMPONENT_EXPORT_NAMES}
@@ -1426,6 +1451,7 @@ rapids_export(BUILD cuopt
         DOCUMENTATION doc_string
         FINAL_CODE_BLOCK cuopt_code_string
 )
+endif()
 
 # ##################################################################################################
 # - make documentation ----------------------------------------------------------------------------
@@ -1487,8 +1513,8 @@ if (NOT BUILD_LP_ONLY)
     # because --no-copy-dt-needed-entries will not let it reach client through mathopt.
     target_link_libraries(cuopt_cli
             PUBLIC
-            cuopt_mathopt
-            cuopt_client
+            cuopt::mathopt
+            cuopt::client
             OpenMP::OpenMP_CXX
             ${CUDSS_LIBRARIES}
             TBB::tbb
@@ -1647,8 +1673,8 @@ if (NOT SKIP_GRPC_BUILD)
     # both VRP and LP/MIP, so the dependency is now explicit.
     target_link_libraries(cuopt_grpc_server
             PUBLIC
-            cuopt_mathopt
-            $<$<NOT:$<BOOL:${SKIP_ROUTING_BUILD}>>:cuopt_routing>
+            cuopt::mathopt
+            $<$<NOT:$<BOOL:${SKIP_ROUTING_BUILD}>>:cuopt::routing>
             OpenMP::OpenMP_CXX
             PRIVATE
             protobuf::libprotobuf

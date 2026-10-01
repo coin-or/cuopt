@@ -81,6 +81,9 @@ dependencies-file = "../../dependencies.yaml"
 matrix-entry = "cuda_suffixed=true;use_cuda_wheels=true"
 requires = [
     "cmake>=4.0",
+    "libcuopt-client==26.10.*,>=0.0.0a0",
+    "libcuopt-mathopt==26.10.*,>=0.0.0a0",
+    "libcuopt-routing==26.10.*,>=0.0.0a0",
     "librmm==26.10.*,>=0.0.0a0",
     "ninja",
     "rapids-logger==0.3.*",

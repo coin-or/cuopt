@@ -136,6 +136,9 @@ files:
       key: requires
     includes:
       - build_common
+      - depends_on_libcuopt_client
+      - depends_on_libcuopt_mathopt
+      - depends_on_libcuopt_routing
       - depends_on_libraft_headers
       - depends_on_librmm
       - depends_on_rapids_logger
@@ -206,6 +209,7 @@ files:
       key: requires
     includes:
       - build_common
+      - depends_on_libcuopt_client
       - depends_on_libraft_headers
       - depends_on_librmm
       - depends_on_rapids_logger
@@ -241,6 +245,7 @@ files:
       key: requires
     includes:
       - build_common
+      - depends_on_libcuopt_client
       - depends_on_libraft_headers
       - depends_on_librmm
       - depends_on_rapids_logger
