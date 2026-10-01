@@ -6,6 +6,7 @@
 
 #include <mip_heuristics/feasibility_jump/cpu/search/api.hpp>
 #include <mip_heuristics/feasibility_jump/fj_cpu.cuh>
+#include "cpufj_lns_geometry.cuh"
 #include "cpufj_lns_validation.cuh"
 
 #include <algorithm>
@@ -22,7 +23,9 @@ namespace cuopt::mathematical_optimization::mip {
 // CPUFJ solves a fresh neighborhood on every call. Keep its setup contract and
 // the LNS worker's validated incumbent separate from that solve-local state.
 template <typename i_t, typename f_t>
-bool repair_cpufj_lns_neighborhood(fj_cpu_climber_t<i_t, f_t>* ptr, f_t time_limit)
+bool repair_cpufj_lns_neighborhood(fj_cpu_climber_t<i_t, f_t>* ptr,
+                                   f_t time_limit,
+                                   bool reset_local_incumbent = false)
 {
   auto archived_assignment = ptr->h_best_assignment.underlying();
   const bool have_archive =
@@ -46,6 +49,13 @@ bool repair_cpufj_lns_neighborhood(fj_cpu_climber_t<i_t, f_t>* ptr, f_t time_lim
   ptr->h_initial_right_weights.resize(ptr->problem->n_constraints, f_t{1});
   recompute_lhs(*ptr);
   invalidate_mtm_cache(*ptr);
+  // The geometric repair must first repair the ruined assignment. Keep the
+  // validated incumbent in the archive above while starting this local search
+  // without an incumbent; the merge below retains the better validated point.
+  if (reset_local_incumbent) {
+    ptr->feasible_found   = false;
+    ptr->h_best_objective = std::numeric_limits<f_t>::max();
+  }
   cpufj_solve(ptr, time_limit, std::numeric_limits<double>::infinity());
 
   // A feasible ruined start can replace CPUFJ's best even when it is worse than
@@ -81,6 +91,8 @@ template <typename i_t, typename f_t>
 void run_cpufj_lns_ruin_repair(fj_cpu_climber_t<i_t, f_t>* ptr,
                                const std::function<bool(std::vector<f_t>&, f_t&)>& snapshot)
 {
+  const bool geometric_repair = configure_cpufj_lns_geometry(*ptr);
+  if (geometric_repair) { CUOPT_LOG_DEBUG("CPUFJ LNS: enabling bound-aware geometric repair"); }
   const i_t n_vars = ptr->problem->n_variables;
 
   std::vector<i_t> integer_vars;
@@ -194,7 +206,7 @@ void run_cpufj_lns_ruin_repair(fj_cpu_climber_t<i_t, f_t>* ptr,
 
     const f_t repair_time_limit =
       std::min<f_t>(2., 0.15 + 0.02 * static_cast<f_t>(ruin_set.size()));
-    if (repair_cpufj_lns_neighborhood(ptr, repair_time_limit)) {
+    if (repair_cpufj_lns_neighborhood(ptr, repair_time_limit, geometric_repair)) {
       consecutive_no_improve = 0;
     } else {
       ++consecutive_no_improve;
