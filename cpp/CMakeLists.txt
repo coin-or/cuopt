@@ -52,6 +52,7 @@ option(BUILD_LP_ONLY "Build only linear programming components, exclude routing 
 option(BUILD_MIP_BENCHMARKS "Build MIP benchmarks" OFF)
 option(SKIP_C_PYTHON_ADAPTERS "Skip building C and Python adapter files (cython_solve.cu and cuopt_c.cpp)" OFF)
 option(SKIP_ROUTING_BUILD "Skip building routing components" OFF)
+option(SKIP_MATHOPT_BUILD "Skip building mathopt (LP/MIP) components" OFF)
 option(SKIP_GRPC_BUILD "Skip building gRPC and protobuf components" OFF)
 option(CUOPT_BUILD_STATIC_LIB "Build libcuopt_static.a for embedding into a self-contained consumer" OFF)
 option(WRITE_FATBIN "Enable fatbin writing" ON)
@@ -64,6 +65,7 @@ message(VERBOSE "cuOpt: Disable OpenMP: ${DISABLE_OPENMP}")
 message(VERBOSE "cuOpt: Build LP-only mode: ${BUILD_LP_ONLY}")
 message(VERBOSE "cuOpt: Skip C/Python adapters: ${SKIP_C_PYTHON_ADAPTERS}")
 message(VERBOSE "cuOpt: Skip routing build: ${SKIP_ROUTING_BUILD}")
+message(VERBOSE "cuOpt: Skip mathopt build: ${SKIP_MATHOPT_BUILD}")
 message(VERBOSE "cuOpt: Build with debug line information for host code: ${HOST_LINEINFO}")
 message(VERBOSE "cuOpt: fatbin: ${WRITE_FATBIN}")
 
@@ -959,10 +961,10 @@ if(NOT SKIP_ROUTING_BUILD AND NOT (CUOPT_FIND_ROUTING_EXTERNALLY AND TARGET cuop
     add_library(cuopt::routing ALIAS cuopt_routing)
 endif()
 
-# cuopt_mathopt: LP / MIP / numerical optimization engine
+# cuopt_mathopt: LP / MIP / numerical optimization engine (omitted when SKIP_MATHOPT_BUILD=ON)
 #
 # OBJECT library first, same reason as cuopt_routing_objs above.
-if(NOT (CUOPT_FIND_MATHOPT_EXTERNALLY AND TARGET cuopt::mathopt))
+if(NOT SKIP_MATHOPT_BUILD AND NOT (CUOPT_FIND_MATHOPT_EXTERNALLY AND TARGET cuopt::mathopt))
 add_library(cuopt_mathopt_objs OBJECT ${CUOPT_MATHOPT_SRC_FILES})
 set_target_properties(cuopt_mathopt_objs
         PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -1106,9 +1108,12 @@ if (BUILD_TESTS OR (BUILD_MIP_BENCHMARKS AND NOT BUILD_LP_ONLY) OR CUOPT_BUILD_S
     if(NOT SKIP_ROUTING_BUILD)
         set(_cuopt_static_routing_objs $<TARGET_OBJECTS:cuopt_routing_objs>)
     endif()
+    if(NOT SKIP_MATHOPT_BUILD)
+        set(_cuopt_static_mathopt_objs $<TARGET_OBJECTS:cuopt_mathopt_objs>)
+    endif()
     add_library(cuopt_static STATIC
             $<TARGET_OBJECTS:cuopt_client_objs>
-            $<TARGET_OBJECTS:cuopt_mathopt_objs>
+            ${_cuopt_static_mathopt_objs}
             ${_cuopt_static_routing_objs}
     )
     target_link_libraries(cuopt_static
@@ -1169,7 +1174,10 @@ endif (BUILD_TESTS)
 # forbids, so without it a -lcuopt consumer calling anything the client owns -- the
 # parsers, the host problem representation, the gRPC client -- fails to link with
 # "DSO missing from command line".
-set(CUOPT_LINKER_SCRIPT_INPUTS "libcuopt_mathopt.so libcuopt_client.so")
+set(CUOPT_LINKER_SCRIPT_INPUTS "libcuopt_client.so")
+if(NOT SKIP_MATHOPT_BUILD)
+    string(APPEND CUOPT_LINKER_SCRIPT_INPUTS " libcuopt_mathopt.so")
+endif()
 if(NOT SKIP_ROUTING_BUILD)
     string(APPEND CUOPT_LINKER_SCRIPT_INPUTS " libcuopt_routing.so")
 endif()
@@ -1232,7 +1240,10 @@ set(CPACK_DEB_COMPONENT_INSTALL ON)
 # runtime .deb empty now that nothing installs under `runtime`.
 # `cuopt` is rapids_export's own component, holding cuopt-config.cmake and the export
 # set. It is easy to miss because it is named after the project rather than a library.
-set(CPACK_COMPONENTS_ALL runtime dev cuopt client mathopt client-dev mathopt-dev)
+set(CPACK_COMPONENTS_ALL runtime dev cuopt client client-dev)
+if(NOT SKIP_MATHOPT_BUILD)
+    list(APPEND CPACK_COMPONENTS_ALL mathopt mathopt-dev)
+endif()
 if(NOT SKIP_ROUTING_BUILD)
     list(APPEND CPACK_COMPONENTS_ALL routing routing-dev)
 endif()
@@ -1487,7 +1498,7 @@ rapids_cpm_find(
         GIT_SHALLOW TRUE
 )
 
-if (NOT BUILD_LP_ONLY)
+if (NOT BUILD_LP_ONLY AND NOT SKIP_MATHOPT_BUILD)
     add_executable(cuopt_cli cuopt_cli.cpp)
 
     # PIE executable: auditwheel/patchelf expands .dynstr/RPATH when repairing wheels; non-PIE
@@ -1675,6 +1686,12 @@ if (NOT SKIP_GRPC_BUILD)
     )
 
     find_library(UUID_LIBRARY uuid REQUIRED)
+
+    # grpc_worker.cpp calls into the mathopt engine unconditionally, unlike routing which has
+    # a SKIP_ROUTING_BUILD opt-out. A routing-only wheel should set SKIP_GRPC_BUILD=ON instead.
+    if (SKIP_MATHOPT_BUILD)
+        message(FATAL_ERROR "cuopt_grpc_server requires mathopt; set SKIP_GRPC_BUILD=ON too")
+    endif ()
 
     # Links both engines directly. It used to reach cuopt_routing transitively through
     # cuopt_grpc; that component is gone, and the server is the one artifact that solves
