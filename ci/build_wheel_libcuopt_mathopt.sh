@@ -32,8 +32,6 @@ elif command -v apt-get &> /dev/null; then
     apt-get install -y uuid-dev
 fi
 
-# Unlike routing, cuopt_mathopt needs real gRPC (its solve() dispatches remote execution).
-# ci/build_wheel.sh sources this too, but only after install_protobuf_grpc.sh already ran.
 source rapids-configure-sccache
 
 # Install Protobuf + gRPC (protoc + grpc_cpp_plugin)

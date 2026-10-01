@@ -25,9 +25,6 @@ fi
 # install_boost_tbb.sh only installs them together)
 bash ci/utils/install_boost_tbb.sh
 
-# libcuopt_client.so (externally resolved) always links OpenSSL, even though this wheel
-# doesn't build gRPC itself; --deps-only installs just the system packages (incl. openssl3
-# on Rocky 8) without the slow gRPC/Protobuf/Abseil source build.
 bash ci/utils/install_protobuf_grpc.sh --deps-only
 
 # Compile against a modern GNU libgomp from conda-forge instead of bundled LLVM libomp, to
