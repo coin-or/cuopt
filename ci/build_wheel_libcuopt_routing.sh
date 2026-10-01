@@ -21,19 +21,9 @@ if command -v dnf &> /dev/null; then
     bash ci/utils/update_rockylinux_repo.sh
 fi
 
-# Install Boost and TBB
+# Install Boost and TBB (TBB for the routing engine; Boost is unused here, but
+# install_boost_tbb.sh only installs them together)
 bash ci/utils/install_boost_tbb.sh
-
-# Install libuuid (needed by cuopt_grpc_server)
-if command -v dnf &> /dev/null; then
-    dnf install -y libuuid-devel
-elif command -v apt-get &> /dev/null; then
-    apt-get update
-    apt-get install -y uuid-dev
-fi
-
-# Install Protobuf + gRPC (protoc + grpc_cpp_plugin)
-bash ci/utils/install_protobuf_grpc.sh
 
 # Compile against a modern GNU libgomp from conda-forge instead of bundled LLVM libomp, to
 # unify cuOpt's OpenMP runtime with the one cuDSS's threading layer needs (#1219).
@@ -49,22 +39,6 @@ export SKBUILD_CMAKE_ARGS="-DOpenMP_gomp_LIBRARY:FILEPATH=${MODERN_LIBGOMP_DIR}/
 # auditwheel repair does its own dependency resolution separately from the compiler; without
 # this it can't see our fetched copy and silently vendors the old Rocky 8 system one instead.
 export LD_LIBRARY_PATH="${MODERN_LIBGOMP_DIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-
-# OpenSSL 3 hints for libcuopt's own find_package(OpenSSL).
-#
-# install_protobuf_grpc.sh links gRPC against OpenSSL 3 (see that script for
-# rationale). libcuopt then re-resolves OpenSSL via find_package because
-# gRPC's imported targets propagate it transitively. On Rocky/RHEL 8 the
-# EPEL openssl3-devel package installs in non-default paths, so we have to
-# point CMake at them; on Rocky/RHEL 9+ and Ubuntu 22.04+ the default
-# OpenSSL is already 3.x and no hints are needed.
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    if [[ "$ID" == "rocky" || "$ID" == "centos" || "$ID" == "rhel" || "$ID" == "fedora" ]] && \
-       [[ "${VERSION_ID%%.*}" == "8" ]]; then
-        SKBUILD_CMAKE_ARGS="${SKBUILD_CMAKE_ARGS};-DOPENSSL_INCLUDE_DIR=/usr/include/openssl3;-DOPENSSL_SSL_LIBRARY=/usr/lib64/openssl3/libssl.so;-DOPENSSL_CRYPTO_LIBRARY=/usr/lib64/openssl3/libcrypto.so"
-    fi
-fi
 
 # For pull requests we are enabling assert mode.
 if [ "$RAPIDS_BUILD_TYPE" = "pull-request" ]; then
