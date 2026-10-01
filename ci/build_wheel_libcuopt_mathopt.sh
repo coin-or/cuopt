@@ -24,6 +24,11 @@ fi
 # Install Boost and TBB
 bash ci/utils/install_boost_tbb.sh
 
+# libcuopt_client.so (externally resolved) always links OpenSSL, even though this wheel
+# doesn't build gRPC itself; --deps-only installs just the system packages (incl. openssl3
+# on Rocky 8) without the slow gRPC/Protobuf/Abseil source build.
+bash ci/utils/install_protobuf_grpc.sh --deps-only
+
 # Compile against a modern GNU libgomp from conda-forge instead of bundled LLVM libomp, to
 # unify cuOpt's OpenMP runtime with the one cuDSS's threading layer needs (#1219).
 MODERN_LIBGOMP_DIR="$(pwd)/modern_libgomp"
@@ -38,6 +43,17 @@ export SKBUILD_CMAKE_ARGS="-DOpenMP_gomp_LIBRARY:FILEPATH=${MODERN_LIBGOMP_DIR}/
 # auditwheel repair does its own dependency resolution separately from the compiler; without
 # this it can't see our fetched copy and silently vendors the old Rocky 8 system one instead.
 export LD_LIBRARY_PATH="${MODERN_LIBGOMP_DIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+
+# OpenSSL 3 hints for find_package(OpenSSL), needed to link the externally-resolved
+# cuopt_client.so's transitive OpenSSL dependency. See install_protobuf_grpc.sh for why
+# Rocky/RHEL 8 needs these; Rocky/RHEL 9+ and Ubuntu 22.04+ need no hints.
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [[ "$ID" == "rocky" || "$ID" == "centos" || "$ID" == "rhel" || "$ID" == "fedora" ]] && \
+       [[ "${VERSION_ID%%.*}" == "8" ]]; then
+        SKBUILD_CMAKE_ARGS="${SKBUILD_CMAKE_ARGS};-DOPENSSL_INCLUDE_DIR=/usr/include/openssl3;-DOPENSSL_SSL_LIBRARY=/usr/lib64/openssl3/libssl.so;-DOPENSSL_CRYPTO_LIBRARY=/usr/lib64/openssl3/libcrypto.so"
+    fi
+fi
 
 # For pull requests we are enabling assert mode.
 if [ "$RAPIDS_BUILD_TYPE" = "pull-request" ]; then
