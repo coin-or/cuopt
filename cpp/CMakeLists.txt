@@ -672,6 +672,12 @@ if (NOT SKIP_GRPC_BUILD)
     set_property(SOURCE ${GRPC_PROTO_GENERATED_FILES} DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             APPEND PROPERTY COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-fvisibility=default>")
 
+    # cuopt_grpc_server only needs the generated headers (it links the generated symbols from
+    # cuopt_client.so rather than compiling the protos itself), but those headers are otherwise
+    # only generated as a side effect of compiling cuopt_client_objs, which is skipped when
+    # CUOPT_FIND_CLIENT_EXTERNALLY resolves cuopt::client externally.
+    add_custom_target(cuopt_grpc_proto_headers DEPENDS ${GRPC_PROTO_GENERATED_FILES})
+
 endif (NOT SKIP_GRPC_BUILD)
 
 # ##################################################################################################
@@ -1635,6 +1641,7 @@ if (NOT SKIP_GRPC_BUILD)
             src/grpc/server/grpc_job_management.cpp
             src/grpc/server/grpc_service_impl.cpp
     )
+    add_dependencies(cuopt_grpc_server cuopt_grpc_proto_headers)
 
     set_target_properties(cuopt_grpc_server
             PROPERTIES
