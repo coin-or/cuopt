@@ -47,10 +47,12 @@ struct sat_t {
   static constexpr int clause_stale_conflicts          = 2000;
   static constexpr int database_reduction_interval     = 4000;
   static constexpr size_t learned_clause_reserve       = 10000;
+
   struct watch_t {
     clause_ref_t id;
     int blocker;
   };
+
   clause_arena_t arena;
   std::vector<clause_ref_t> clause_refs;
   std::vector<std::vector<watch_t>> watches;
@@ -65,16 +67,16 @@ struct sat_t {
   int restart_initial_limit{restart_interval_unit};
   int64_t steps{0};
 
-  int literal_value(int lit) const
+  int eval_literal(int lit) const
   {
     const int state = value[LIT_VAR(lit)];
-    return state == unassigned ? unassigned : state == LIT_VALUE(lit);
+    return state == unassigned ? unassigned : state == LIT_POLARITY(lit);
   }
   // enqueue an assignment to the queue. returns false if this causes a contradiction
   bool enqueue(int lit, clause_ref_t why)
   {
     const int v         = LIT_VAR(lit);
-    const int requested = LIT_VALUE(lit);
+    const int requested = LIT_POLARITY(lit);
     if (value[v] != unassigned) return value[v] == requested;
     value[v] = phase[v] = requested;
     assignment_depth[v] = trail.decision_depth();
@@ -133,7 +135,7 @@ struct sat_t {
         const watch_t w         = watched[k];
         const int blocker_value = values[LIT_VAR(w.blocker)];
         // blocker is true, so the clause is already satisfied, skip it
-        if (blocker_value != unassigned && blocker_value == LIT_VALUE(w.blocker)) {
+        if (blocker_value != unassigned && blocker_value == LIT_POLARITY(w.blocker)) {
           watched[out++] = w;
           continue;
         }
@@ -148,7 +150,7 @@ struct sat_t {
         // false list[0] = surviving watch, list[1] = broken watch
         if (clause.literals[0] == false_lit) std::swap(clause.literals[0], clause.literals[1]);
         // if the surviving watch is true, then the clause is satisfied, nothing to do
-        if (literal_value(clause.literals[0]) == 1) {
+        if (eval_literal(clause.literals[0]) == 1) {
           watched[out++] = {ref, clause.literals[0]};
           continue;
         }
@@ -156,7 +158,7 @@ struct sat_t {
         // non-false to replace the watch with.
         bool moved = false;
         for (int j = 2; j < n_lits; ++j) {
-          if (literal_value(clause.literals[j]) == 0) continue;
+          if (eval_literal(clause.literals[j]) == 0) continue;
           // swap the literals to move that non-false in the watcher slot
           std::swap(clause.literals[1], clause.literals[j]);
           // update the watch list for that literal
@@ -509,7 +511,7 @@ struct sat_bve_t {
     for (auto& clause : clauses)
       if (!clause.deleted) {
         for (int& lit : clause.lits)
-          lit = LIT(remap[LIT_VAR(lit)], LIT_VALUE(lit));
+          lit = LIT(remap[LIT_VAR(lit)], LIT_POLARITY(lit));
         input.push_back(std::move(clause.lits));
       }
     return true;
@@ -527,14 +529,14 @@ struct sat_bve_t {
       for (const auto& clause : it->clauses) {
         bool satisfied = false;
         for (int lit : clause)
-          if (LIT_VAR(lit) != it->variable && value[LIT_VAR(lit)] == LIT_VALUE(lit))
+          if (LIT_VAR(lit) != it->variable && value[LIT_VAR(lit)] == LIT_POLARITY(lit))
             satisfied = true;
         if (satisfied) continue;
         for (int lit : clause)
           if (LIT_VAR(lit) == it->variable) {
-            cuopt_assert(required == no_required_value || required == LIT_VALUE(lit),
+            cuopt_assert(required == no_required_value || required == LIT_POLARITY(lit),
                          "BVE recovery requires conflicting values");
-            required = LIT_VALUE(lit);
+            required = LIT_POLARITY(lit);
           }
       }
       value[it->variable] = required != no_required_value ? required : seed[it->variable];

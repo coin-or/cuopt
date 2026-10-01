@@ -21,10 +21,11 @@
 #include <utility>
 #include <vector>
 
-#define LIT(var, value) (((var) << 1) | (value))
-#define LIT_VAR(lit)    ((lit) >> 1)
-#define LIT_VALUE(lit)  ((lit) & 1)
-#define LIT_NEG(lit)    ((lit) ^ 1)
+// Polarity is the variable value satisfying the literal: 1 for x, 0 for !x.
+#define LIT(var, polarity) (((var) << 1) | (polarity))
+#define LIT_VAR(lit)       ((lit) >> 1)
+#define LIT_POLARITY(lit)  ((lit) & 1)
+#define LIT_NEG(lit)       ((lit) ^ 1)
 
 namespace cuopt::mathematical_optimization::mip {
 
