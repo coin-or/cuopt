@@ -485,9 +485,10 @@ find_cuopt_libraries() {
             found_header=$(find "${search_dir}" -name "cuopt_c.h" -path "*/mathematical_optimization/*" 2>/dev/null | head -1)
 
             if [ -n "${found_header}" ]; then
-                # Check if this is a Python package installation (contains libcuopt/include)
-                if echo "${found_header}" | grep -q "/libcuopt/include/"; then
-                    # Python package structure: /path/to/libcuopt/include/cuopt/mathematical_optimization/cuopt_c.h
+                # Check if this is a Python package installation (contains libcuopt*/include, e.g.
+                # libcuopt/ or the per-component libcuopt_client/, libcuopt_mathopt/, libcuopt_routing/)
+                if echo "${found_header}" | grep -qE "/libcuopt[a-z_]*/include/"; then
+                    # Python package structure: /path/to/libcuopt*/include/cuopt/mathematical_optimization/cuopt_c.h
                     # Extract the include directory by going up 3 directories from the header file
                     include_path=$(dirname "$(dirname "$(dirname "${found_header}")")")
                 else
