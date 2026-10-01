@@ -39,8 +39,7 @@ struct sat_t {
   static constexpr int restart_interval_unit           = 64;
   static constexpr int restart_interval_choices        = 4;
   static constexpr int restart_growth_limit            = 4096;
-  static constexpr int restart_growth_numerator        = 3;
-  static constexpr int restart_growth_denominator      = 2;
+  static constexpr double restart_growth_ratio         = 1.5;
   static constexpr size_t propagation_stop_poll_period = 256;
   static constexpr int64_t solve_stop_poll_period      = 128;
   static constexpr int protected_clause_lbd            = 2;
@@ -360,7 +359,7 @@ struct sat_t {
           backtrack(0);
           since_restart = 0;
           restart_limit = restart_limit < restart_growth_limit
-                            ? restart_limit * restart_growth_numerator / restart_growth_denominator
+                            ? restart_limit * restart_growth_ratio
                             : restart_initial_limit;
         }
       } else {
