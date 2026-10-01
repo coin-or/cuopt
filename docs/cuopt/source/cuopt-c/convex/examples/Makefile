@@ -45,7 +45,7 @@ CC = gcc
 # Note: The test script automatically finds and passes these paths
 
 # Compiler flags
-CFLAGS = -I$(INCLUDE_PATH) -Wall -Wextra
+CFLAGS = -I$(INCLUDE_PATH) $(EXTRA_CFLAGS) -Wall -Wextra
 LDFLAGS = -L$(LIBCUOPT_LIBRARY_PATH) -lcuopt_mathopt -Wl,-rpath,$(LIBCUOPT_LIBRARY_PATH)
 
 # Automatically discover all C source files in current directory
