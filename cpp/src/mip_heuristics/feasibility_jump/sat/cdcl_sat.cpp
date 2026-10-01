@@ -7,7 +7,7 @@
 
 #include "../fj_cpu_binary.cuh"
 
-#include "fj_binary_sat_utils.hpp"
+#include "cdcl_sat_utils.hpp"
 
 #include <utilities/macros.cuh>
 #include <utilities/pcgenerator.hpp>
