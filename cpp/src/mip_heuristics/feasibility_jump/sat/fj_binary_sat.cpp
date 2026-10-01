@@ -107,9 +107,19 @@ struct sat_t {
   // unwatched literals are false and the other watch is true (satisfied), unassigned (unit), or
   // false (conflict). Backtracking only changes false literals to non-false, so it cannot require
   // watch repair.
+
+  // Basically, the idea is:
+  // A clause only becomes relevant for propagation when it is close to failure.
+  // IF at least two literals are non-false, nothing needs to happen.
+  // If exactly one is non-false, the literal needs to be true for the clause to be satisfied.
+  // if all literals are false, there is a conflict!
+  // So, to know if we need to propagate, we only need to track two literals.
+  // As long as two watched literals are non-false, the clause cannot be unit (necessarily
+  // satisfied) or conflicting. returns the clause that conflicted, if any
   template <typename Stop>
   clause_ref_t propagate(Stop& stop)
   {
+    // anything remaining in the propagation queue?
     while (trail.has_pending_propagation()) {
       const int false_lit  = LIT_NEG(trail.next_to_propagate());
       auto& watched        = watches[false_lit];
@@ -125,24 +135,28 @@ struct sat_t {
         const clause_ref_t ref = w.id;
         auto& clause           = arena[ref];
         if (clause.deleted()) continue;
-        auto lits        = clause.literal_span();
         const int n_lits = clause.size;
-        if (lits[0] == false_lit) std::swap(lits[0], lits[1]);
-        if (literal_value(lits[0]) == 1) {
-          watched[out++] = {ref, lits[0]};
+        if (clause.literals[0] == false_lit) std::swap(clause.literals[0], clause.literals[1]);
+        if (literal_value(clause.literals[0]) == 1) {
+          watched[out++] = {ref, clause.literals[0]};
           continue;
         }
+        // let's look through the unwatched literals looking for a non-false
+        // to replace the watch with.
         bool moved = false;
         for (int j = 2; j < n_lits; ++j) {
-          if (literal_value(lits[j]) == 0) continue;
-          std::swap(lits[1], lits[j]);
-          watches[lits[1]].push_back({ref, lits[0]});
+          if (literal_value(clause.literals[j]) == 0) continue;
+          std::swap(clause.literals[1], clause.literals[j]);
+          watches[clause.literals[1]].push_back({ref, clause.literals[0]});
           moved = true;
           break;
         }
         if (moved) continue;
-        watched[out++] = {ref, lits[0]};
-        if (!enqueue(lits[0], ref)) {
+        watched[out++] = {ref, clause.literals[0]};
+        // no replacement for one watch found. thus, the other watched has to be true.
+        // let's try pushing it to the assignment queue. if this fails, we've got ourselves a
+        // conflict!
+        if (!enqueue(clause.literals[0], ref)) {
           while (++k < watched.size())
             watched[out++] = watched[k];
           watched.resize(out);
@@ -150,6 +164,7 @@ struct sat_t {
         }
       }
       watched.resize(out);
+
       if (trail.propagated_count() % propagation_stop_poll_period == 0 && stop())
         return propagation_stopped;
     }
@@ -176,8 +191,9 @@ struct sat_t {
     do {
       auto& clause = arena[conflict];
       clause.touch(conflicts);
-      for (int lit : clause.literal_span()) {
-        const int v = LIT_VAR(lit);
+      for (int i = 0; i < clause.size; ++i) {
+        const int lit = clause.literals[i];
+        const int v   = LIT_VAR(lit);
         if ((pivot != no_variable && v == LIT_VAR(pivot)) || seen[v] || level[v] == 0) continue;
         seen[v] = 1;
         variable_order.bump(v);

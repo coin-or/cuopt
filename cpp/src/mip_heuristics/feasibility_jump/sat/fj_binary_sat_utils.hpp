@@ -324,10 +324,6 @@ struct clause_t {
       clear_flag(locked_flag);
   }
 
-  std::span<int> literal_span() { return {literals, (size_t)size}; }
-
-  std::span<const int> literal_span() const { return {literals, (size_t)size}; }
-
  private:
   enum flag_t : int {
     learned_flag = 1 << 0,
