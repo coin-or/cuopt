@@ -554,10 +554,10 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
   std::vector<std::vector<int>> cnf;
   int variables       = 0;
   const auto encoding = encode_pb_model(pb, variables, cnf, stop);
-  if (encoding == pb_model_encoding_result_t::stopped) return fj_binary_sat_result_t::stopped;
-  if (encoding == pb_model_encoding_result_t::declined) return fj_binary_sat_result_t::declined;
-  if (encoding == pb_model_encoding_result_t::infeasible) return fj_binary_sat_result_t::infeasible;
-  cuopt_assert(encoding == pb_model_encoding_result_t::encoded, "");
+  if (encoding == pb_encoding_result_t::stopped) return fj_binary_sat_result_t::stopped;
+  if (encoding == pb_encoding_result_t::declined) return fj_binary_sat_result_t::declined;
+  if (encoding == pb_encoding_result_t::infeasible) return fj_binary_sat_result_t::infeasible;
+  cuopt_assert(encoding == pb_encoding_result_t::encoded, "");
 
   sat_bve_t bve;
   if (!bve.presolve(cnf, variables, pb.n_variables, stop)) return fj_binary_sat_result_t::stopped;

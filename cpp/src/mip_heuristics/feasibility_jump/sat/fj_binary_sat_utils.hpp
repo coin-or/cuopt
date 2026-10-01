@@ -42,7 +42,7 @@ static constexpr int bdd_true_terminal               = -2;
 
 using pb_term_t = std::pair<int, int64_t>;
 
-enum class pb_row_encoding_result_t { encoded, infeasible, declined };
+enum class pb_encoding_result_t { encoded, infeasible, declined, stopped };
 
 // Both encoders use sum_i a_i z_i <= rhs, where a_i = |c_i| and z_i is x_i for c_i > 0
 // and !x_i otherwise.
@@ -136,10 +136,10 @@ static int encode_pb_row_bdd_node(const std::vector<pb_term_t>& terms,
   return q;
 }
 
-static pb_row_encoding_result_t encode_pb_row_bdd(const std::vector<pb_term_t>& terms,
-                                                  int64_t rhs,
-                                                  int& variables,
-                                                  std::vector<std::vector<int>>& cnf)
+static pb_encoding_result_t encode_pb_row_bdd(const std::vector<pb_term_t>& terms,
+                                              int64_t rhs,
+                                              int& variables,
+                                              std::vector<std::vector<int>>& cnf)
 {
   std::vector<int64_t> suffix(terms.size() + 1, 0);
   for (int k = (int)terms.size() - 1; k >= 0; --k)
@@ -147,60 +147,50 @@ static pb_row_encoding_result_t encode_pb_row_bdd(const std::vector<pb_term_t>& 
   std::map<std::pair<int, int64_t>, int> memo;
   bool overflow  = false;
   const int root = encode_pb_row_bdd_node(terms, suffix, memo, variables, cnf, overflow, 0, rhs);
-  if (overflow) return pb_row_encoding_result_t::declined;
-  if (root == bdd_false_terminal) return pb_row_encoding_result_t::infeasible;
+  if (overflow) return pb_encoding_result_t::declined;
+  if (root == bdd_false_terminal) return pb_encoding_result_t::infeasible;
   // The root unit clause asserts Q(0,rhs), the normalized PB row.
   if (root >= 0) cnf.push_back({root});
-  return pb_row_encoding_result_t::encoded;
+  return pb_encoding_result_t::encoded;
 }
 
-enum class pb_model_encoding_result_t { encoded, infeasible, declined, stopped };
-
 template <typename coef_t, typename Stop>
-static pb_model_encoding_result_t encode_pb_model(const fj_bin_problem_t<coef_t>& pb,
-                                                  int& variables,
-                                                  std::vector<std::vector<int>>& cnf,
-                                                  const Stop& stop)
+static pb_encoding_result_t encode_pb_model(const fj_bin_problem_t<coef_t>& pb,
+                                            int& variables,
+                                            std::vector<std::vector<int>>& cnf,
+                                            const Stop& stop)
 {
   variables = pb.n_variables;
   cnf.clear();
   std::vector<pb_term_t> terms;
   std::vector<int64_t> subset_weight;
   for (int r = 0; r < pb.n_constraints; ++r) {
-    if (r % encoding_stop_poll_period == 0 && stop()) return pb_model_encoding_result_t::stopped;
+    if (r % encoding_stop_poll_period == 0 && stop()) return pb_encoding_result_t::stopped;
     terms.clear();
     for (int p = pb.offsets[r]; p < pb.offsets[r + 1]; ++p)
       terms.emplace_back(pb.variables[p], pb.coefficients[p]);
-    std::sort(terms.begin(), terms.end());
-    size_t out = 0;
-    for (size_t k = 0; k < terms.size();) {
-      const int v         = terms[k].first;
-      int64_t coefficient = 0;
-      do
-        coefficient += terms[k++].second;
-      while (k < terms.size() && terms[k].first == v);
-      if (coefficient) terms[out++] = {v, coefficient};
-    }
-    terms.resize(out);
-    int64_t rhs   = pb.bound[r];
-    int64_t total = 0;
+
+    for (size_t k = 1; k < terms.size(); ++k)
+      cuopt_assert(terms[k - 1].first < terms[k].first,
+                   "CSR column indices must be strictly increasing");
+
+    int64_t rhs          = pb.bound[r];
+    int64_t max_activity = 0;
+    // normalize coefficients to be signed
     for (auto [v, coefficient] : terms) {
       rhs -= std::min<int64_t>(0, coefficient);
-      total += std::abs(coefficient);
+      max_activity += std::abs(coefficient);
     }
-    if (rhs < 0) return pb_model_encoding_result_t::infeasible;
-    if (total <= rhs) continue;
+    if (rhs < 0) return pb_encoding_result_t::infeasible;
+    if (max_activity <= rhs) continue;  // constraint is always satisfied
 
     if (!try_encode_pb_row_direct(terms, rhs, subset_weight, cnf)) {
       const auto encoding = encode_pb_row_bdd(terms, rhs, variables, cnf);
-      if (encoding == pb_row_encoding_result_t::declined)
-        return pb_model_encoding_result_t::declined;
-      if (encoding == pb_row_encoding_result_t::infeasible)
-        return pb_model_encoding_result_t::infeasible;
+      if (encoding != pb_encoding_result_t::encoded) return encoding;
     }
-    if (cnf.size() > sat_clause_limit) return pb_model_encoding_result_t::declined;
+    if (cnf.size() > sat_clause_limit) return pb_encoding_result_t::declined;
   }
-  return pb_model_encoding_result_t::encoded;
+  return pb_encoding_result_t::encoded;
 }
 
 // MiniSat-style EVSIDS [Een-Sorensson 2003, Sec. 4.6; Biere-Froehlich 2015].
