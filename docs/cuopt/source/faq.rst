@@ -440,9 +440,8 @@ Linear Programming FAQs
     An initial primal and/or dual solution (``set_initial_primal_solution`` / ``set_initial_dual_solution``) does not
     require disabling presolve when PSLP is used (the default for LP): cuOpt maps it into the presolved problem before
     solving. For LP with Papilo presolve, cuOpt cannot map the initial solution and skips presolve instead
-    (MIP starts are still mapped through Papilo presolve). The initial primal
-    solution must lie within the problem's variable bounds; when re-solving after changing bounds, clip the previous
-    solution to the new bounds first.
+    (MIP starts are still mapped through Papilo presolve). For LP, cuOpt clips the initial primal solution to the
+    problem's variable bounds, so a previous solution can be passed as is, even after changing bounds.
 
 Mixed Integer Programming FAQs
 --------------------------------------

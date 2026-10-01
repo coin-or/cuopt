@@ -1127,9 +1127,10 @@ TEST_P(pslp_crush_warmstart, round_trip)
   EXPECT_LT(warm_iters, cold_iters) << " (cold=" << cold_iters << ", warm=" << warm_iters << ")";
 }
 
-// End-to-end through solve_lp: an original-space initial solution is mapped through PSLP presolve
-// (instead of being handed to PDLP with the wrong dimensions), and with Papilo -- which cannot map
-// it -- presolve is skipped. Either way a warm start from the optimum converges faster.
+// End-to-end through solve_lp: an initial solution in the original space is mapped into the
+// presolved space with PSLP (instead of being handed to PDLP with the wrong dimensions), and with
+// Papilo -- which cannot map it for LP -- presolve is skipped. Either way a warm start from the
+// optimum converges faster.
 struct presolve_initial_solution_param {
   std::string mps_path;
   presolver_t presolver;
@@ -1161,16 +1162,9 @@ TEST_P(presolve_initial_solution, warm_start_from_optimum)
   ASSERT_EQ((int)x_orig.size(), mps.get_n_variables());
   ASSERT_EQ((int)y_orig.size(), mps.get_n_constraints());
 
-  // A postsolved PDLP solution can sit slightly outside the variable bounds (on graph40-40, by up
-  // to ~1e-2 at default tolerances), which the initial-solution check rejects, so clip it the way
-  // a user re-feeding a previous solution is expected to.
-  const auto& var_lb = mps.get_variable_lower_bounds();
-  const auto& var_ub = mps.get_variable_upper_bounds();
-  for (size_t j = 0; j < x_orig.size(); ++j) {
-    if (!var_lb.empty()) { x_orig[j] = std::max(x_orig[j], var_lb[j]); }
-    if (!var_ub.empty()) { x_orig[j] = std::min(x_orig[j], var_ub[j]); }
-  }
-
+  // The solution is fed back as is. A postsolved PDLP solution can sit slightly outside the
+  // variable bounds (on graph40-40, by up to ~1e-2 at default tolerances); solve_lp clips it to
+  // the bounds instead of rejecting it.
   auto warm_settings = settings;
   warm_settings.set_initial_primal_solution(x_orig.data(), x_orig.size(), stream);
   warm_settings.set_initial_dual_solution(y_orig.data(), y_orig.size(), stream);
@@ -1183,6 +1177,31 @@ TEST_P(presolve_initial_solution, warm_start_from_optimum)
   EXPECT_EQ(host_copy(warm_solution.get_primal_solution(), stream).size(), x_orig.size());
   EXPECT_EQ(host_copy(warm_solution.get_dual_solution(), stream).size(), y_orig.size());
   EXPECT_LT(warm_iters, cold_iters) << " (cold=" << cold_iters << ", warm=" << warm_iters << ")";
+}
+
+// An LP initial primal outside the variable bounds is clipped to them instead of being rejected.
+TEST(presolve_initial_solution, out_of_bounds_primal_is_clipped)
+{
+  const raft::handle_t handle_{};
+  auto stream = handle_.get_stream();
+
+  auto path = make_path_absolute("linear_programming/afiro_original.mps");
+  auto mps  = cuopt::mathematical_optimization::io::read_mps<int, double>(path, false);
+  for (double lb : mps.get_variable_lower_bounds()) {
+    ASSERT_EQ(lb, 0.0);
+  }
+
+  for (auto presolver : {presolver_t::None, presolver_t::PSLP}) {
+    auto settings      = pdlp_solver_settings_t<int, double>{};
+    settings.presolver = presolver;
+    settings.method    = cuopt::mathematical_optimization::method_t::PDLP;
+    std::vector<double> x(mps.get_n_variables(), -1.0);
+    settings.set_initial_primal_solution(x.data(), x.size(), stream);
+
+    auto solution = solve_lp(&handle_, mps, settings);
+    EXPECT_EQ(solution.get_error_status().get_error_type(), cuopt::error_type_t::Success);
+    EXPECT_EQ(solution.get_termination_status(), pdlp_termination_status_t::Optimal);
+  }
 }
 
 // clang-format off
