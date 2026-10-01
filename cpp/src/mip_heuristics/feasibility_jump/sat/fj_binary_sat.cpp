@@ -62,7 +62,7 @@ struct sat_t {
   std::vector<clause_ref_t> clause_refs;
   std::vector<std::vector<watch_t>> watches;
   std::vector<int8_t> value, phase;
-  std::vector<int> level;
+  std::vector<int> assignment_depth;
   std::vector<clause_ref_t> reason;
   std::vector<uint8_t> seen;
   sat_variable_order_t variable_order;
@@ -77,13 +77,14 @@ struct sat_t {
     const int state = value[LIT_VAR(lit)];
     return state == unassigned ? unassigned : state == LIT_VALUE(lit);
   }
+  // enqueue an assignment to the queue. returns false if this causes a contradiction
   bool enqueue(int lit, clause_ref_t why)
   {
     const int v         = LIT_VAR(lit);
     const int requested = LIT_VALUE(lit);
     if (value[v] != unassigned) return value[v] == requested;
     value[v] = phase[v] = requested;
-    level[v]            = trail.decision_level();
+    assignment_depth[v] = trail.decision_depth();
     reason[v]           = why;
     trail.enqueue(lit);
     return true;
@@ -116,46 +117,64 @@ struct sat_t {
   // So, to know if we need to propagate, we only need to track two literals.
   // As long as two watched literals are non-false, the clause cannot be unit (necessarily
   // satisfied) or conflicting. returns the clause that conflicted, if any
+  // conveniently, backtracking requires zero watchlist updates
+  // since undoing assignents cannot turn a non-false into a false (only false/true -> unassigned)
   template <typename Stop>
   clause_ref_t propagate(Stop& stop)
   {
     // anything remaining in the propagation queue?
     while (trail.has_pending_propagation()) {
-      const int false_lit  = LIT_NEG(trail.next_to_propagate());
+      // false_lit is the literal this propagated assignment just falsified
+      const int false_lit = LIT_NEG(trail.next_to_propagate());
+      // list all clauses whose watch may have been broken by this new assignment
       auto& watched        = watches[false_lit];
       const int8_t* values = value.data();
-      size_t out           = 0;
+
+      // out is used to compact the watch list survivors at the front, in-place, as the watch list
+      // is walked
+      size_t out = 0;
+      // the watch list sotres (clause reference, blocker) where blocker is the other watched
+      // literal
       for (size_t k = 0; k < watched.size(); ++k) {
         const watch_t w         = watched[k];
         const int blocker_value = values[LIT_VAR(w.blocker)];
+        // blocker is true, so the clause is already satisfied, skip it
         if (blocker_value != unassigned && blocker_value == LIT_VALUE(w.blocker)) {
           watched[out++] = w;
           continue;
         }
+
+        // actually load the clause
         const clause_ref_t ref = w.id;
         auto& clause           = arena[ref];
         if (clause.deleted()) continue;
         const int n_lits = clause.size;
+        // watched literals are physically the first two literals of the clause
+        // normalize them so that lits[0] = the OTHER watch and lits[1] = the watch that just became
+        // false list[0] = surviving watch, list[1] = broken watch
         if (clause.literals[0] == false_lit) std::swap(clause.literals[0], clause.literals[1]);
+        // if the surviving watch is true, then the clause is satisfied, nothing to do
         if (literal_value(clause.literals[0]) == 1) {
           watched[out++] = {ref, clause.literals[0]};
           continue;
         }
-        // let's look through the unwatched literals looking for a non-false
-        // to replace the watch with.
+        // let's look through the unwatched literals (hence starting index 2) looking for a
+        // non-false to replace the watch with.
         bool moved = false;
         for (int j = 2; j < n_lits; ++j) {
           if (literal_value(clause.literals[j]) == 0) continue;
+          // swap the literals to move that non-false in the watcher slot
           std::swap(clause.literals[1], clause.literals[j]);
+          // update the watch list for that literal
           watches[clause.literals[1]].push_back({ref, clause.literals[0]});
           moved = true;
           break;
         }
         if (moved) continue;
         watched[out++] = {ref, clause.literals[0]};
-        // no replacement for one watch found. thus, the other watched has to be true.
-        // let's try pushing it to the assignment queue. if this fails, we've got ourselves a
-        // conflict!
+        // no replacement for one watch found. thus, the other watched has to be true for the
+        // constraint to be satisfied. let's try pushing it to the assignment queue. if this fails,
+        // we've got ourselves a conflict!
         if (!enqueue(clause.literals[0], ref)) {
           while (++k < watched.size())
             watched[out++] = watched[k];
@@ -170,19 +189,19 @@ struct sat_t {
     }
     return no_conflict;
   }
-  void backtrack(int target)
+  void backtrack(int target_depth)
   {
-    if (!trail.above_level(target)) return;
-    const size_t keep = trail.backtrack_offset(target);
-    for (size_t k = trail.size(); k > keep;) {
+    if (!trail.above_depth(target_depth)) return;
+    const size_t retained_size = trail.backtrack_offset(target_depth);
+    for (size_t k = trail.size(); k > retained_size;) {
       const int v = LIT_VAR(trail[--k]);
       value[v]    = unassigned;
       reason[v]   = no_reason;
       variable_order.insert(v);
     }
-    trail.truncate_to_level(target);
+    trail.truncate_to_depth(target_depth);
   }
-  std::vector<int> analyze(clause_ref_t conflict, int& back, int& lbd)
+  std::vector<int> analyze(clause_ref_t conflict, int& backtrack_depth, int& lbd)
   {
     std::vector<int> learned(1, no_literal);
     int paths = 0;
@@ -194,10 +213,11 @@ struct sat_t {
       for (int i = 0; i < clause.size; ++i) {
         const int lit = clause.literals[i];
         const int v   = LIT_VAR(lit);
-        if ((pivot != no_variable && v == LIT_VAR(pivot)) || seen[v] || level[v] == 0) continue;
+        if ((pivot != no_variable && v == LIT_VAR(pivot)) || seen[v] || assignment_depth[v] == 0)
+          continue;
         seen[v] = 1;
         variable_order.bump(v);
-        if (level[v] == trail.decision_level())
+        if (assignment_depth[v] == trail.decision_depth())
           ++paths;
         else
           learned.push_back(lit);
@@ -210,25 +230,25 @@ struct sat_t {
       conflict = reason[LIT_VAR(pivot)];
       cuopt_assert(paths == 0 || conflict != no_reason, "active conflict path has no reason");
     } while (paths > 0);
-    learned[0]  = LIT_NEG(pivot);
-    back        = 0;
-    size_t best = 1;
+    learned[0]      = LIT_NEG(pivot);
+    backtrack_depth = 0;
+    size_t best     = 1;
     for (size_t k = 1; k < learned.size(); ++k) {
       const int v = LIT_VAR(learned[k]);
       seen[v]     = 0;
-      if (level[v] > back) {
-        back = level[v];
-        best = k;
+      if (assignment_depth[v] > backtrack_depth) {
+        backtrack_depth = assignment_depth[v];
+        best            = k;
       }
     }
     if (learned.size() > 1) std::swap(learned[1], learned[best]);
-    std::vector<int> levels;
-    levels.reserve(learned.size());
-    levels.push_back(trail.decision_level());
+    std::vector<int> depths;
+    depths.reserve(learned.size());
+    depths.push_back(trail.decision_depth());
     for (size_t k = 1; k < learned.size(); ++k)
-      levels.push_back(level[LIT_VAR(learned[k])]);
-    std::sort(levels.begin(), levels.end());
-    lbd = std::unique(levels.begin(), levels.end()) - levels.begin();
+      depths.push_back(assignment_depth[LIT_VAR(learned[k])]);
+    std::sort(depths.begin(), depths.end());
+    lbd = std::unique(depths.begin(), depths.end()) - depths.begin();
     variable_order.decay_activity(decay);
     return learned;
   }
@@ -256,7 +276,7 @@ struct sat_t {
     : watches(2 * n),
       value(n, unassigned),
       phase(n, 0),
-      level(n),
+      assignment_depth(n),
       reason(n, no_reason),
       seen(n),
       variable_order(n, rng_seed)
@@ -305,11 +325,11 @@ struct sat_t {
         ++conflicts;
         ++since_restart;
         if (trail.at_root()) return fj_binary_sat_result_t::infeasible;
-        int back            = 0;
+        int backtrack_depth = 0;
         int lbd             = 0;
-        auto learned        = analyze(conflict, back, lbd);
+        auto learned        = analyze(conflict, backtrack_depth, lbd);
         const int asserting = learned[0];
-        backtrack(back);
+        backtrack(backtrack_depth);
         const clause_ref_t id                          = add(std::move(learned), true, lbd);
         [[maybe_unused]] const bool asserting_enqueued = enqueue(asserting, id);
         cuopt_assert(asserting_enqueued, "learned clause is not asserting after backtrack");
@@ -331,7 +351,7 @@ struct sat_t {
           }
         }
         if (decision == no_variable) return fj_binary_sat_result_t::feasible;
-        trail.start_decision_level();
+        trail.start_decision_depth();
         [[maybe_unused]] const bool decision_enqueued =
           enqueue(LIT(decision, phase[decision]), no_reason);
         cuopt_assert(decision_enqueued, "decision variable is already assigned");

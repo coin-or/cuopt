@@ -246,10 +246,11 @@ struct sat_variable_order_t {
 
 struct trail_t {
   // This is the variable assignment stack + the propagation queue. propagation_head indexes the
-  // next assignment whose consequences must be scanned. level_starts[d] is the first assignment at
-  // decision level d + 1, so truncating there backtracks to level d. Inspired by MiniSat.
+  // next assignment whose consequences must be scanned. depth_starts[d] is the first assignment at
+  // decision depth d + 1, so truncating there backtracks to depth d. Inspired by MiniSat.
+  // EVSIDS ordering
   std::vector<int> literals;
-  std::vector<size_t> level_starts;
+  std::vector<size_t> depth_starts;
   size_t propagation_head{0};
 
   size_t size() const { return literals.size(); }
@@ -257,8 +258,8 @@ struct trail_t {
   auto begin() const { return literals.begin(); }
   auto end() const { return literals.end(); }
 
-  int decision_level() const { return level_starts.size(); }
-  bool at_root() const { return level_starts.empty(); }
+  int decision_depth() const { return depth_starts.size(); }
+  bool at_root() const { return depth_starts.empty(); }
 
   void enqueue(int lit) { literals.push_back(lit); }
 
@@ -272,22 +273,22 @@ struct trail_t {
 
   size_t propagated_count() const { return propagation_head; }
 
-  void start_decision_level() { level_starts.push_back(literals.size()); }
+  void start_decision_depth() { depth_starts.push_back(literals.size()); }
 
-  bool above_level(int target_level) const { return decision_level() > target_level; }
+  bool above_depth(int target_depth) const { return decision_depth() > target_depth; }
 
-  size_t backtrack_offset(int target_level) const
+  size_t backtrack_offset(int target_depth) const
   {
-    cuopt_assert(target_level >= 0 && target_level < decision_level(), "");
-    return level_starts[target_level];
+    cuopt_assert(target_depth >= 0 && target_depth < decision_depth(), "");
+    return depth_starts[target_depth];
   }
 
-  void truncate_to_level(int target_level)
+  void truncate_to_depth(int target_depth)
   {
-    const size_t keep = backtrack_offset(target_level);
-    literals.resize(keep);
-    propagation_head = std::min(propagation_head, keep);
-    level_starts.resize(target_level);
+    const size_t retained_size = backtrack_offset(target_depth);
+    literals.resize(retained_size);
+    propagation_head = std::min(propagation_head, retained_size);
+    depth_starts.resize(target_depth);
   }
 };
 
