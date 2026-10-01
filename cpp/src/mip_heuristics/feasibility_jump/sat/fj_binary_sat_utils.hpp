@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <map>
+#include <new>
 #include <span>
 #include <utility>
 #include <vector>
@@ -298,13 +299,14 @@ struct clause_t {
 
   static size_t storage_words(size_t literal_count) { return header_words + literal_count; }
 
-  void initialize(int literal_count, int clause_lbd, int conflict, bool is_learned)
+  clause_t(std::span<const int> clause_literals, int clause_lbd, int conflict, bool is_learned)
+    : size(clause_literals.size()),
+      lbd(clause_lbd),
+      last_conflict(conflict),
+      flags(is_learned ? learned_flag : 0)
   {
-    cuopt_assert(literal_count >= 0, "");
-    size          = literal_count;
-    lbd           = clause_lbd;
-    last_conflict = conflict;
-    flags         = is_learned ? learned_flag : 0;
+    cuopt_assert(size >= 0, "");
+    std::copy(clause_literals.begin(), clause_literals.end(), literals);
   }
 
   bool learned() const { return has_flag(learned_flag); }
@@ -363,9 +365,8 @@ class clause_arena_t {
     const clause_ref_t ref = words_.size();
     words_.resize(words_.size() + clause_t::storage_words(literals.size()));
 
-    auto& clause = (*this)[ref];
-    clause.initialize(literals.size(), lbd, conflict, learned);
-    std::copy(literals.begin(), literals.end(), clause.literals);
+    // placement new inside the arena
+    new (words_.data() + ref) clause_t(literals, lbd, conflict, learned);
     return ref;
   }
 
