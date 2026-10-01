@@ -41,10 +41,12 @@ add_subdirectory(../../cpp cuopt-cpp)
 
 # cuopt is an INTERFACE target (libcuopt.so is a linker script) and compiles nothing,
 # so it has no use for argparse. cuopt_cli and cuopt_grpc_server, which do, already link
-# argparse::argparse in cpp/CMakeLists.txt.
-target_link_libraries(cuopt_cli PRIVATE
-    argparse
-)
+# argparse::argparse in cpp/CMakeLists.txt. cuopt_cli doesn't exist when SKIP_MATHOPT_BUILD=ON.
+if (TARGET cuopt_cli)
+    target_link_libraries(cuopt_cli PRIVATE
+        argparse
+    )
+endif ()
 
 set(rpaths
   "$ORIGIN/../lib64"
