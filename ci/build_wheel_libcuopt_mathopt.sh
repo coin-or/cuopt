@@ -24,10 +24,20 @@ fi
 # Install Boost and TBB
 bash ci/utils/install_boost_tbb.sh
 
-# libcuopt_client.so (externally resolved) always links OpenSSL, even though this wheel
-# doesn't build gRPC itself; --deps-only installs just the system packages (incl. openssl3
-# on Rocky 8) without the slow gRPC/Protobuf/Abseil source build.
-bash ci/utils/install_protobuf_grpc.sh --deps-only
+# Install libuuid (needed by cuopt_grpc_server)
+if command -v dnf &> /dev/null; then
+    dnf install -y libuuid-devel
+elif command -v apt-get &> /dev/null; then
+    apt-get update
+    apt-get install -y uuid-dev
+fi
+
+# Unlike routing, cuopt_mathopt needs real gRPC (its solve() dispatches remote execution).
+# ci/build_wheel.sh sources this too, but only after install_protobuf_grpc.sh already ran.
+source rapids-configure-sccache
+
+# Install Protobuf + gRPC (protoc + grpc_cpp_plugin)
+bash ci/utils/install_protobuf_grpc.sh
 
 # Compile against a modern GNU libgomp from conda-forge instead of bundled LLVM libomp, to
 # unify cuOpt's OpenMP runtime with the one cuDSS's threading layer needs (#1219).

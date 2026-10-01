@@ -36,9 +36,7 @@ elif command -v apt-get &> /dev/null; then
     apt-get install -y uuid-dev
 fi
 
-# ci/build_wheel.sh also sources this, but only after this step; without it here,
-# install_protobuf_grpc.sh's own cmake invocations build gRPC/Abseil/Protobuf from
-# source uncached on every single run.
+# ci/build_wheel.sh sources this too, but only after install_protobuf_grpc.sh already ran.
 source rapids-configure-sccache
 
 # Install Protobuf + gRPC (protoc + grpc_cpp_plugin)
