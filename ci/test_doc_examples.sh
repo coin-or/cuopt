@@ -364,6 +364,7 @@ test_c_examples() {
             local make_vars=""
             [ -n "${include_path}" ] && make_vars="${make_vars} INCLUDE_PATH=${include_path}"
             [ -n "${lib_path}" ] && make_vars="${make_vars} LIBCUOPT_LIBRARY_PATH=${lib_path}"
+            [ -n "${client_include_path}" ] && make_vars="${make_vars} EXTRA_CFLAGS=-I${client_include_path}"
 
             if make clean > "${RESULTS_DIR}/c-clean-${relative_path//\//_}.log" 2>&1 && \
                make ${make_vars} all > "${RESULTS_DIR}/c-build-${relative_path//\//_}.log" 2>&1; then
@@ -461,6 +462,7 @@ find_cuopt_libraries() {
     # Reset global variables
     include_path=""
     lib_path=""
+    client_include_path=""
 
     # Get Python site-packages directory
     local site_packages=""
@@ -508,8 +510,22 @@ find_cuopt_libraries() {
             fi
         fi
 
-        # Break early if both found
-        if [ -n "${include_path}" ] && [ -n "${lib_path}" ]; then
+        # status_codes.h lives in libcuopt-client's own wheel, a different package than
+        # cuopt_c.h (libcuopt-mathopt), but mathematical_optimization/constants.h includes it.
+        if [ -z "${client_include_path}" ] && [ -n "${include_path}" ] && \
+           [ ! -f "${include_path}/cuopt/status_codes.h" ]; then
+            local found_status_codes
+            found_status_codes=$(find "${search_dir}" -path "*/cuopt/status_codes.h" 2>/dev/null | head -1)
+            if [ -n "${found_status_codes}" ]; then
+                # status_codes.h sits directly under cuopt/ (unlike cuopt_c.h, nested one more
+                # level under mathematical_optimization/), so both layouts need only 2 dirnames.
+                client_include_path=$(dirname "$(dirname "${found_status_codes}")")
+            fi
+        fi
+
+        # Break early if everything needed is found
+        if [ -n "${include_path}" ] && [ -n "${lib_path}" ] && \
+           { [ -n "${client_include_path}" ] || [ -f "${include_path}/cuopt/status_codes.h" ]; }; then
             break
         fi
     done
@@ -526,6 +542,7 @@ find_cuopt_libraries() {
     else
         log_info "Found: INCLUDE_PATH=${include_path}"
         log_info "Found: LIBCUOPT_LIBRARY_PATH=${lib_path}"
+        [ -n "${client_include_path}" ] && log_info "Found: client_include_path=${client_include_path}"
         return 0
     fi
 }
