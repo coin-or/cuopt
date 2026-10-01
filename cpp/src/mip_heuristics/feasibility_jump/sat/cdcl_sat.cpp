@@ -420,6 +420,7 @@ struct sat_bve_t {
 
   // perform standard BVE elimination to remove a variable and its clause and replace them by
   // projections
+  // see Eén–Biere 2005 for details
   template <typename Stop>
   bool presolve(std::vector<std::vector<int>>& input, int n, int original_variables, Stop& stop)
   {
