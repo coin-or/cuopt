@@ -202,7 +202,7 @@ struct sat_t {
   // first-UIP style conflict analyzis to generate a learned nogood clause
   // let's figure out why the variables involved in the conflict clause got their values
   // based on the clauses which forced their values
-  std::vector<int> analyze(clause_ref_t conflict, int& backtrack_depth, int& lbd)
+  std::vector<int> analyze_first_uip(clause_ref_t conflict, int& backtrack_depth, int& lbd)
   {
     // literal[0] will be the first UIP
     std::vector<int> learned(1, no_literal);
@@ -329,27 +329,27 @@ struct sat_t {
   }
 
   template <typename Stop>
-  fj_binary_sat_result_t solve(Stop stop)
+  sat_result_t solve(Stop stop)
   {
     for (clause_ref_t ref : clause_refs) {
       auto& clause     = arena[ref];
       const int n_lits = clause.size;
       if (n_lits == 0 || (n_lits == 1 && !enqueue(clause.literals[0], ref)))
-        return fj_binary_sat_result_t::infeasible;
+        return sat_result_t::infeasible;
     }
     int restart_limit = restart_initial_limit;
     int since_restart = 0;
     while (true) {
-      if (++steps % solve_stop_poll_period == 0 && stop()) return fj_binary_sat_result_t::stopped;
+      if (++steps % solve_stop_poll_period == 0 && stop()) return sat_result_t::stopped;
       const clause_ref_t conflict = propagate(stop);
-      if (conflict == propagation_stopped) return fj_binary_sat_result_t::stopped;
+      if (conflict == propagation_stopped) return sat_result_t::stopped;
       if (conflict != no_conflict) {
         ++conflicts;
         ++since_restart;
-        if (trail.at_root()) return fj_binary_sat_result_t::infeasible;
+        if (trail.at_root()) return sat_result_t::infeasible;
         int backtrack_depth = 0;
         int lbd             = 0;
-        auto learned        = analyze(conflict, backtrack_depth, lbd);
+        auto learned        = analyze_first_uip(conflict, backtrack_depth, lbd);
         const int asserting = learned[0];
         backtrack(backtrack_depth);
         const clause_ref_t id                          = add(std::move(learned), true, lbd);
@@ -372,7 +372,7 @@ struct sat_t {
             break;
           }
         }
-        if (decision == no_variable) return fj_binary_sat_result_t::feasible;
+        if (decision == no_variable) return sat_result_t::successful;
         trail.start_decision_depth();
         [[maybe_unused]] const bool decision_enqueued =
           enqueue(LIT(decision, phase[decision]), no_reason);
@@ -545,22 +545,19 @@ struct sat_bve_t {
 }  // namespace
 
 template <typename coef_t>
-fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
-                                         std::vector<int8_t>& assignment,
-                                         uint64_t seed,
-                                         const std::function<bool()>& stop,
-                                         int64_t& steps)
+sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
+                               std::vector<int8_t>& assignment,
+                               uint64_t seed,
+                               const std::function<bool()>& stop,
+                               int64_t& steps)
 {
   std::vector<std::vector<int>> cnf;
-  int variables       = 0;
-  const auto encoding = encode_pb_model(pb, variables, cnf, stop);
-  if (encoding == pb_encoding_result_t::stopped) return fj_binary_sat_result_t::stopped;
-  if (encoding == pb_encoding_result_t::declined) return fj_binary_sat_result_t::declined;
-  if (encoding == pb_encoding_result_t::infeasible) return fj_binary_sat_result_t::infeasible;
-  cuopt_assert(encoding == pb_encoding_result_t::encoded, "");
+  int variables              = 0;
+  const auto encoding_result = encode_pb_model(pb, variables, cnf, stop);
+  if (encoding_result != sat_result_t::successful) return encoding_result;
 
   sat_bve_t bve;
-  if (!bve.presolve(cnf, variables, pb.n_variables, stop)) return fj_binary_sat_result_t::stopped;
+  if (!bve.presolve(cnf, variables, pb.n_variables, stop)) return sat_result_t::stopped;
   std::vector<int8_t> compact_seed;
   compact_seed.reserve(bve.model_variables);
   for (int k = 0; k < bve.model_variables; ++k)
@@ -569,7 +566,7 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
   sat_t sat((int)bve.compact_to_original.size(), std::move(cnf), compact_seed, seed);
   const auto result = sat.solve(stop);
   steps             = sat.steps;
-  if (result == fj_binary_sat_result_t::feasible) {
+  if (result == sat_result_t::successful) {
     std::vector<int8_t> full_seed(variables, 0), full_value;
     std::copy(assignment.begin(), assignment.end(), full_seed.begin());
     bve.postsolve(sat.value, full_value, full_seed);
@@ -584,16 +581,16 @@ fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
   return result;
 }
 
-template fj_binary_sat_result_t fj_bin_sat_search<int8_t>(const fj_bin_problem_t<int8_t>&,
-                                                          std::vector<int8_t>&,
-                                                          uint64_t,
-                                                          const std::function<bool()>&,
-                                                          int64_t&);
+template sat_result_t fj_bin_sat_search<int8_t>(const fj_bin_problem_t<int8_t>&,
+                                                std::vector<int8_t>&,
+                                                uint64_t,
+                                                const std::function<bool()>&,
+                                                int64_t&);
 
-template fj_binary_sat_result_t fj_bin_sat_search<int16_t>(const fj_bin_problem_t<int16_t>&,
-                                                           std::vector<int8_t>&,
-                                                           uint64_t,
-                                                           const std::function<bool()>&,
-                                                           int64_t&);
+template sat_result_t fj_bin_sat_search<int16_t>(const fj_bin_problem_t<int16_t>&,
+                                                 std::vector<int8_t>&,
+                                                 uint64_t,
+                                                 const std::function<bool()>&,
+                                                 int64_t&);
 
 }  // namespace cuopt::mathematical_optimization::mip

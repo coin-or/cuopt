@@ -1432,10 +1432,10 @@ struct fj_bin_engine_t {
       int64_t sat_steps = 0;
       const auto result = fj_bin_sat_search(
         pb, assign, static_cast<uint64_t>(climber.settings.seed), stop, sat_steps);
-      if (result != fj_binary_sat_result_t::declined) {
+      if (result != sat_result_t::declined) {
         climber.iterations =
           static_cast<i_t>(std::min<int64_t>(sat_steps, std::numeric_limits<i_t>::max()));
-        if (result == fj_binary_sat_result_t::feasible) {
+        if (result == sat_result_t::successful) {
           for (int v = 0; v < pb.n_variables; ++v)
             assign_i32[v] = assign[v];
           recompute_slack();

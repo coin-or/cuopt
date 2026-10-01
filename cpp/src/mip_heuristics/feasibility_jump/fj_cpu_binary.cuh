@@ -63,11 +63,11 @@ enum class fj_binary_reject_t : uint8_t {
   lhs_headroom,
 };
 
-enum class fj_binary_sat_result_t : int8_t {
+enum class sat_result_t : int8_t {
   declined   = -2,
   infeasible = -1,
   stopped    = 0,
-  feasible   = 1,
+  successful = 1,
 };
 
 // the binary engine handles a one-sided problem with integer coefficients
@@ -147,11 +147,11 @@ bool fj_bin_encode(const fj_cpu_climber_t<i_t, f_t>& c,
                    fj_bin_setup_times_t& times);
 
 template <typename coef_t>
-fj_binary_sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
-                                         std::vector<int8_t>& assignment,
-                                         uint64_t seed,
-                                         const std::function<bool()>& stop,
-                                         int64_t& steps);
+sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
+                               std::vector<int8_t>& assignment,
+                               uint64_t seed,
+                               const std::function<bool()>& stop,
+                               int64_t& steps);
 
 // Returns true if the fast path ran (eligible and narrowed); false if declined, in which case the
 // caller should take the general path.

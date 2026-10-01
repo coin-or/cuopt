@@ -42,8 +42,6 @@ static constexpr int bdd_true_terminal               = -2;
 
 using pb_term_t = std::pair<int, int64_t>;
 
-enum class pb_encoding_result_t { encoded, infeasible, declined, stopped };
-
 // Both encoders use sum_i a_i z_i <= rhs, where a_i = |c_i| and z_i is x_i for c_i > 0
 // and !x_i otherwise.
 // For direct encoding, the idea is, for example, given the pseudo-boolean constraint
@@ -136,10 +134,10 @@ static int encode_pb_row_bdd_node(const std::vector<pb_term_t>& terms,
   return q;
 }
 
-static pb_encoding_result_t encode_pb_row_bdd(const std::vector<pb_term_t>& terms,
-                                              int64_t rhs,
-                                              int& variables,
-                                              std::vector<std::vector<int>>& cnf)
+static sat_result_t encode_pb_row_bdd(const std::vector<pb_term_t>& terms,
+                                      int64_t rhs,
+                                      int& variables,
+                                      std::vector<std::vector<int>>& cnf)
 {
   std::vector<int64_t> suffix(terms.size() + 1, 0);
   for (int k = (int)terms.size() - 1; k >= 0; --k)
@@ -147,25 +145,25 @@ static pb_encoding_result_t encode_pb_row_bdd(const std::vector<pb_term_t>& term
   std::map<std::pair<int, int64_t>, int> memo;
   bool overflow  = false;
   const int root = encode_pb_row_bdd_node(terms, suffix, memo, variables, cnf, overflow, 0, rhs);
-  if (overflow) return pb_encoding_result_t::declined;
-  if (root == bdd_false_terminal) return pb_encoding_result_t::infeasible;
+  if (overflow) return sat_result_t::declined;
+  if (root == bdd_false_terminal) return sat_result_t::infeasible;
   // The root unit clause asserts Q(0,rhs), the normalized PB row.
   if (root >= 0) cnf.push_back({root});
-  return pb_encoding_result_t::encoded;
+  return sat_result_t::successful;
 }
 
 template <typename coef_t, typename Stop>
-static pb_encoding_result_t encode_pb_model(const fj_bin_problem_t<coef_t>& pb,
-                                            int& variables,
-                                            std::vector<std::vector<int>>& cnf,
-                                            const Stop& stop)
+static sat_result_t encode_pb_model(const fj_bin_problem_t<coef_t>& pb,
+                                    int& variables,
+                                    std::vector<std::vector<int>>& cnf,
+                                    const Stop& stop)
 {
   variables = pb.n_variables;
   cnf.clear();
   std::vector<pb_term_t> terms;
   std::vector<int64_t> subset_weight;
   for (int r = 0; r < pb.n_constraints; ++r) {
-    if (r % encoding_stop_poll_period == 0 && stop()) return pb_encoding_result_t::stopped;
+    if (r % encoding_stop_poll_period == 0 && stop()) return sat_result_t::stopped;
     terms.clear();
     for (int p = pb.offsets[r]; p < pb.offsets[r + 1]; ++p)
       terms.emplace_back(pb.variables[p], pb.coefficients[p]);
@@ -181,16 +179,16 @@ static pb_encoding_result_t encode_pb_model(const fj_bin_problem_t<coef_t>& pb,
       rhs -= std::min<int64_t>(0, coefficient);
       max_activity += std::abs(coefficient);
     }
-    if (rhs < 0) return pb_encoding_result_t::infeasible;
+    if (rhs < 0) return sat_result_t::infeasible;
     if (max_activity <= rhs) continue;  // constraint is always satisfied
 
     if (!try_encode_pb_row_direct(terms, rhs, subset_weight, cnf)) {
       const auto encoding = encode_pb_row_bdd(terms, rhs, variables, cnf);
-      if (encoding != pb_encoding_result_t::encoded) return encoding;
+      if (encoding != sat_result_t::successful) return encoding;
     }
-    if (cnf.size() > sat_clause_limit) return pb_encoding_result_t::declined;
+    if (cnf.size() > sat_clause_limit) return sat_result_t::declined;
   }
-  return pb_encoding_result_t::encoded;
+  return sat_result_t::successful;
 }
 
 // MiniSat-style EVSIDS [Een-Sorensson 2003, Sec. 4.6; Biere-Froehlich 2015].
