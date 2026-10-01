@@ -294,7 +294,7 @@ struct sat_t {
 
   sat_t(int n,
         std::vector<std::vector<int>> input,
-        const std::vector<int8_t>& seed,
+        const std::vector<int8_t>& initial_assignment,
         uint64_t rng_seed)
     : watches(2 * n),
       value(n, unassigned),
@@ -311,7 +311,7 @@ struct sat_t {
       restart_interval_unit * policy_rng.uniform(1, restart_interval_choices + 1);
 
     for (int v = 0; v < n; ++v)
-      if (v < (int)seed.size()) phase[v] = seed[v];
+      if (v < (int)initial_assignment.size()) phase[v] = initial_assignment[v];
 
     clause_refs.reserve(input.size() + learned_clause_reserve);
     size_t total_lits = 0;
@@ -324,7 +324,7 @@ struct sat_t {
       add(std::move(clause));
     }
     // Encoding nodes have no independent model meaning; conflicts may still promote them later.
-    for (int v = (int)seed.size(); v < n; ++v)
+    for (int v = (int)initial_assignment.size(); v < n; ++v)
       variable_order.clear_activity(v);
     variable_order.build_heap();
   }
@@ -457,13 +457,14 @@ struct sat_bve_t {
         if (!clauses[id].deleted) positive.push_back(id);
       for (int id : occurrence[LIT(v, 0)])
         if (!clauses[id].deleted) negative.push_back(id);
-      // gate expensive cases
+      // gate trivial or expensive cases
       if (positive.empty() || negative.empty() || positive.size() > occurrence_limit ||
           negative.size() > occurrence_limit)
         continue;
 
       size_t n_res = 0;
       bool reject  = false;
+      // eliminate all clauses involving v by combining their "remanants" together
       for (int p : positive) {
         for (int q : negative) {
           if (resolvents.size() <= n_res) resolvents.emplace_back();
@@ -475,6 +476,7 @@ struct sat_bve_t {
             if (LIT_VAR(lit) != v) resolvent.push_back(lit);
           if (!canonicalize(resolvent)) continue;
           ++n_res;
+          // avoid fill-in
           if (n_res > resolvent_limit || n_res > positive.size() + negative.size()) {
             reject = true;
             break;
@@ -484,6 +486,7 @@ struct sat_bve_t {
       }
       if (reject) continue;
 
+      // save the old clauses to enable reconstruction in postsolve, then delete them
       extension_t saved{v, {}};
       saved.clauses.reserve(positive.size() + negative.size());
       for (int id : positive) {
@@ -495,6 +498,7 @@ struct sat_bve_t {
         clauses[id].deleted = true;
       }
       extension.push_back(std::move(saved));
+      // insert the generated resolvent clauses
       for (size_t r = 0; r < n_res; ++r) {
         const int id = (int)clauses.size();
         clauses.push_back({resolvents[r], false});
@@ -503,6 +507,7 @@ struct sat_bve_t {
       }
     }
 
+    // compact surviving variables
     std::vector<uint8_t> used(n);
     for (const auto& clause : clauses)
       if (!clause.deleted)
@@ -511,6 +516,7 @@ struct sat_bve_t {
     for (int v = 0; v < original_variables; ++v)
       if (used[v]) compact_to_original.push_back(v);
 
+    // consider auxilliary generated variables
     model_variables = (int)compact_to_original.size();
     for (int v = original_variables; v < n; ++v)
       if (used[v]) compact_to_original.push_back(v);
@@ -531,9 +537,9 @@ struct sat_bve_t {
 
   void postsolve(const std::vector<int8_t>& compact,
                  std::vector<int8_t>& value,
-                 const std::vector<int8_t>& seed) const
+                 const std::vector<int8_t>& initial_assignment) const
   {
-    value = seed;
+    value = initial_assignment;
     for (size_t i = 0; i < compact_to_original.size(); ++i)
       value[compact_to_original[i]] = compact[i];
     for (auto it = extension.rbegin(); it != extension.rend(); ++it) {
@@ -551,7 +557,8 @@ struct sat_bve_t {
             required = LIT_POLARITY(lit);
           }
       }
-      value[it->variable] = required != no_required_value ? required : seed[it->variable];
+      value[it->variable] =
+        required != no_required_value ? required : initial_assignment[it->variable];
     }
   }
 };
@@ -571,18 +578,18 @@ sat_result_t fj_bin_sat_search(const fj_bin_problem_t<coef_t>& pb,
 
   sat_bve_t bve;
   if (!bve.presolve(cnf, variables, pb.n_variables, stop)) return sat_result_t::stopped;
-  std::vector<int8_t> compact_seed;
-  compact_seed.reserve(bve.model_variables);
+  std::vector<int8_t> compact_initial_assignment;
+  compact_initial_assignment.reserve(bve.model_variables);
   for (int k = 0; k < bve.model_variables; ++k)
-    compact_seed.push_back(assignment[bve.compact_to_original[k]]);
+    compact_initial_assignment.push_back(assignment[bve.compact_to_original[k]]);
 
-  sat_t sat((int)bve.compact_to_original.size(), std::move(cnf), compact_seed, seed);
+  sat_t sat((int)bve.compact_to_original.size(), std::move(cnf), compact_initial_assignment, seed);
   const auto result = sat.solve(stop);
   steps             = sat.steps;
   if (result == sat_result_t::successful) {
-    std::vector<int8_t> full_seed(variables, 0), full_value;
-    std::copy(assignment.begin(), assignment.end(), full_seed.begin());
-    bve.postsolve(sat.value, full_value, full_seed);
+    std::vector<int8_t> initial_assignment(variables, 0), full_value;
+    std::copy(assignment.begin(), assignment.end(), initial_assignment.begin());
+    bve.postsolve(sat.value, full_value, initial_assignment);
     for (int r = 0; r < pb.n_constraints; ++r) {
       [[maybe_unused]] int64_t lhs = 0;
       for (int p = pb.offsets[r]; p < pb.offsets[r + 1]; ++p)
