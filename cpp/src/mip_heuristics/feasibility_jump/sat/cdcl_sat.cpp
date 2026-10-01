@@ -75,9 +75,9 @@ struct sat_t {
   // enqueue an assignment to the queue. returns false if this causes a contradiction
   bool enqueue(int lit, clause_ref_t why)
   {
+    if (const int state = eval_literal(lit); state != unassigned) return state;
     const int v         = LIT_VAR(lit);
     const int requested = LIT_POLARITY(lit);
-    if (value[v] != unassigned) return value[v] == requested;
     value[v] = phase[v] = requested;
     assignment_depth[v] = trail.decision_depth();
     reason[v]           = why;
@@ -335,6 +335,8 @@ struct sat_t {
     for (clause_ref_t ref : clause_refs) {
       auto& clause     = arena[ref];
       const int n_lits = clause.size;
+      // empty clauses are false since the identity of OR is false
+      // if these is only one literal, then its value is forced
       if (n_lits == 0 || (n_lits == 1 && !enqueue(clause.literals[0], ref)))
         return sat_result_t::infeasible;
     }
@@ -344,6 +346,8 @@ struct sat_t {
       if (++steps % solve_stop_poll_period == 0 && stop()) return sat_result_t::stopped;
       const clause_ref_t conflict = propagate(stop);
       if (conflict == propagation_stopped) return sat_result_t::stopped;
+
+      // we've got conflicts with the current assginment!
       if (conflict != no_conflict) {
         ++conflicts;
         ++since_restart;
@@ -364,6 +368,7 @@ struct sat_t {
                             ? restart_limit * restart_growth_ratio
                             : restart_initial_limit;
         }
+        // no conflcits with the current partial assignment. let's make a decision
       } else {
         int decision = no_variable;
         while (!variable_order.empty()) {
@@ -373,6 +378,7 @@ struct sat_t {
             break;
           }
         }
+        // the assignment is full, and there's no conflict, so SAT!
         if (decision == no_variable) return sat_result_t::successful;
         trail.start_decision_depth();
         [[maybe_unused]] const bool decision_enqueued =
@@ -412,6 +418,8 @@ struct sat_bve_t {
     return true;
   }
 
+  // perform standard BVE elimination to remove a variable and its clause and replace them by
+  // projections
   template <typename Stop>
   bool presolve(std::vector<std::vector<int>>& input, int n, int original_variables, Stop& stop)
   {
@@ -424,6 +432,7 @@ struct sat_bve_t {
     for (auto& clause : input) {
       if (canonicalize(clause)) clauses.push_back({std::move(clause), false});
     }
+    // build a list of clauses containing a literal
     std::vector<std::vector<int>> occurrence(2 * n);
     for (size_t id = 0; id < clauses.size(); ++id)
       for (int lit : clauses[id].lits)
@@ -431,6 +440,7 @@ struct sat_bve_t {
 
     std::vector<int> order(n);
     std::iota(order.begin(), order.end(), 0);
+    // try variables with fewer occurences first
     std::sort(order.begin(), order.end(), [&](int a, int b) {
       const size_t degree_a = occurrence[LIT(a, 0)].size() + occurrence[LIT(a, 1)].size();
       const size_t degree_b = occurrence[LIT(b, 0)].size() + occurrence[LIT(b, 1)].size();
@@ -442,10 +452,12 @@ struct sat_bve_t {
       if (v % stop_poll_period == 0 && stop()) return false;
       positive.clear();
       negative.clear();
+      // gather live positive and negative clauses for this variable
       for (int id : occurrence[LIT(v, 1)])
         if (!clauses[id].deleted) positive.push_back(id);
       for (int id : occurrence[LIT(v, 0)])
         if (!clauses[id].deleted) negative.push_back(id);
+      // gate expensive cases
       if (positive.empty() || negative.empty() || positive.size() > occurrence_limit ||
           negative.size() > occurrence_limit)
         continue;
