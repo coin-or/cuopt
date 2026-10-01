@@ -123,10 +123,10 @@ struct sat_t {
           continue;
         }
         const clause_ref_t ref = w.id;
-        auto clause            = arena[ref];
+        auto& clause           = arena[ref];
         if (clause.deleted()) continue;
-        auto lits        = clause.literals();
-        const int n_lits = clause.size();
+        auto lits        = clause.literal_span();
+        const int n_lits = clause.size;
         if (lits[0] == false_lit) std::swap(lits[0], lits[1]);
         if (literal_value(lits[0]) == 1) {
           watched[out++] = {ref, lits[0]};
@@ -174,9 +174,9 @@ struct sat_t {
     int pivot = no_variable;
     int index = (int)trail.size() - 1;
     do {
-      auto clause = arena[conflict];
+      auto& clause = arena[conflict];
       clause.touch(conflicts);
-      for (int lit : clause.literals()) {
+      for (int lit : clause.literal_span()) {
         const int v = LIT_VAR(lit);
         if ((pivot != no_variable && v == LIT_VAR(pivot)) || seen[v] || level[v] == 0) continue;
         seen[v] = 1;
@@ -222,10 +222,10 @@ struct sat_t {
     for (int lit : trail)
       if (reason[LIT_VAR(lit)] != no_reason) arena[reason[LIT_VAR(lit)]].set_locked(true);
     for (clause_ref_t ref : clause_refs) {
-      auto clause = arena[ref];
+      auto& clause = arena[ref];
       if (clause.learned() && !clause.deleted() && !clause.locked() &&
-          clause.lbd() > protected_clause_lbd && clause.size() > protected_clause_size &&
-          clause.last_conflict() < conflicts - clause_stale_conflicts) {
+          clause.lbd > protected_clause_lbd && clause.size > protected_clause_size &&
+          clause.last_conflict < conflicts - clause_stale_conflicts) {
         clause.mark_deleted();
       }
     }
@@ -274,9 +274,9 @@ struct sat_t {
   fj_binary_sat_result_t solve(Stop stop)
   {
     for (clause_ref_t ref : clause_refs) {
-      auto clause      = arena[ref];
-      const int n_lits = clause.size();
-      if (n_lits == 0 || (n_lits == 1 && !enqueue(clause.literals()[0], ref)))
+      auto& clause     = arena[ref];
+      const int n_lits = clause.size;
+      if (n_lits == 0 || (n_lits == 1 && !enqueue(clause.literals[0], ref)))
         return fj_binary_sat_result_t::infeasible;
     }
     int restart_limit = restart_initial_limit;

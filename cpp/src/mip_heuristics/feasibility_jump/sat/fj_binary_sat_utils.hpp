@@ -38,10 +38,15 @@ enum class pb_row_encoding_result_t { encoded, infeasible, declined };
 
 // Both encoders use sum_i a_i z_i <= rhs, where a_i = |c_i| and z_i is x_i for c_i > 0
 // and !x_i otherwise.
-// Short rows are best represented by their prime clauses: each minimal overweight subset
-// forbids exactly one combination, without introducing branching-only Tseitin variables.
-// Minimal-cover CNF (Warners, IPL 1998): each inclusion-minimal C with
-// sum_{i in C} a_i > rhs contributes the prime clause OR_{i in C} !z_i.
+// For direct encoding, the idea is, for example, given the pseudo-boolean constraint
+// 2x_1+3x_2+5x_3 <= 5
+// Some violating assignments are:
+// (x_1, x_2, x_3) = {(1, 0, 1), (0, 1, 1), (1, 1, 1)}
+// Each forbidden assigmnent becomes a clause. For instance:
+// x_1 = 1, x_2 = 0, x_3 = 1 is forbidden by NOT(x_1) AND x_2 AND NOT(x_3).
+// For the above example, a simplifed equivalent CNF is:
+// (NOT(x_1) OR NOT(x_3)) AND (NOT(x_2) OR NOT(x_3))
+// Obviously, this becomes inefficient for large numbers of terms.
 static bool try_encode_pb_row_direct(const std::vector<pb_term_t>& terms,
                                      int64_t rhs,
                                      std::vector<int64_t>& subset_weight,
@@ -78,6 +83,8 @@ static bool try_encode_pb_row_direct(const std::vector<pb_term_t>& terms,
 // Two-clause monotone ROBDD encoding (Abio et al., JAIR 2012, Sec. 6).
 // Q(i,r) := sum_{j>=i} a_j z_j <= r
 // Q(i,r) -> Q(i+1,r) && (!z_i || Q(i+1,r-a_i)).
+// The idea of BDD encoding is inspired by dynamic programming, by encoding a "decision diagram"
+// whose state represents the accumulated weighted sum of the pseudo-boolean constraint.
 static int encode_pb_row_bdd_node(const std::vector<pb_term_t>& terms,
                                   const std::vector<int64_t>& suffix,
                                   std::map<std::pair<int, int64_t>, int>& memo,
@@ -140,8 +147,9 @@ static pb_row_encoding_result_t encode_pb_row_bdd(const std::vector<pb_term_t>& 
 }
 
 // MiniSat-style EVSIDS [Een-Sorensson 2003, Sec. 4.6; Biere-Froehlich 2015].
-// Bumping by increment and then dividing increment by decay is rank-equivalent to decaying every
-// activity after each conflict. The indexed max-heap maintains the highest-activity variable.
+// This is basically the equivalent of branching decisions/pseudocosts for SAT / the scores in FJ.
+// Pick the next variables based on their "conflict relevance". The more a variable causes conflict,
+// the higher its score. For this, a heap is maintained
 struct sat_variable_order_t {
   static constexpr int not_in_heap                   = -1;
   static constexpr double initial_activity_increment = 1.0;
@@ -236,9 +244,9 @@ struct sat_variable_order_t {
 };
 
 struct trail_t {
-  // Chronological assignment stack and BCP queue. propagation_head indexes the next assignment
-  // whose consequences must be scanned. level_starts[d] is the first assignment at decision
-  // level d + 1, so truncating there backtracks to level d.
+  // This is the variable assignment stack + the propagation queue. propagation_head indexes the
+  // next assignment whose consequences must be scanned. level_starts[d] is the first assignment at
+  // decision level d + 1, so truncating there backtracks to level d. Inspired by MiniSat.
   std::vector<int> literals;
   std::vector<size_t> level_starts;
   size_t propagation_head{0};
@@ -284,30 +292,26 @@ struct trail_t {
 
 using clause_ref_t = int;
 
-class clause_view_t {
+struct clause_t {
  public:
-  explicit clause_view_t(int* words) : words_(words) {}
+  static constexpr size_t header_words = 4;
 
   static size_t storage_words(size_t literal_count) { return header_words + literal_count; }
 
-  void initialize(int size, int lbd, int last_conflict, bool learned)
+  void initialize(int literal_count, int clause_lbd, int conflict, bool is_learned)
   {
-    cuopt_assert(size >= 0, "");
-    words_[size_word]          = size;
-    words_[lbd_word]           = lbd;
-    words_[last_conflict_word] = last_conflict;
-    words_[flags_word]         = learned ? learned_flag : 0;
+    cuopt_assert(literal_count >= 0, "");
+    size          = literal_count;
+    lbd           = clause_lbd;
+    last_conflict = conflict;
+    flags         = is_learned ? learned_flag : 0;
   }
-
-  int size() const { return words_[size_word]; }
-  int lbd() const { return words_[lbd_word]; }
-  int last_conflict() const { return words_[last_conflict_word]; }
 
   bool learned() const { return has_flag(learned_flag); }
   bool deleted() const { return has_flag(deleted_flag); }
   bool locked() const { return has_flag(locked_flag); }
 
-  void touch(int conflict) { words_[last_conflict_word] = conflict; }
+  void touch(int conflict) { last_conflict = conflict; }
   void mark_deleted() { set_flag(deleted_flag); }
 
   void set_locked(bool locked)
@@ -318,37 +322,38 @@ class clause_view_t {
       clear_flag(locked_flag);
   }
 
-  std::span<int> literals() { return {words_ + header_words, (size_t)size()}; }
+  std::span<int> literal_span() { return {literals, (size_t)size}; }
 
-  std::span<const int> literals() const { return {words_ + header_words, (size_t)size()}; }
+  std::span<const int> literal_span() const { return {literals, (size_t)size}; }
 
  private:
-  enum word_t : int {
-    size_word,
-    lbd_word,
-    last_conflict_word,
-    flags_word,
-    header_words,
-  };
-
   enum flag_t : int {
     learned_flag = 1 << 0,
     deleted_flag = 1 << 1,
     locked_flag  = 1 << 2,
   };
 
-  bool has_flag(flag_t flag) const { return words_[flags_word] & flag; }
-  void set_flag(flag_t flag) { words_[flags_word] |= flag; }
-  void clear_flag(flag_t flag) { words_[flags_word] &= ~flag; }
+  bool has_flag(flag_t flag) const { return flags & flag; }
+  void set_flag(flag_t flag) { flags |= flag; }
+  void clear_flag(flag_t flag) { flags &= ~flag; }
 
-  int* words_;
+ public:
+  int size;
+  int lbd;
+  int last_conflict;
+  int flags;
+  int literals[];
 };
 
+static_assert(sizeof(clause_t) == clause_t::header_words * sizeof(int));
+static_assert(alignof(clause_t) == alignof(int));
+
+// clauses are stored in a contiguous arena, header + each clause.
 class clause_arena_t {
  public:
   static size_t storage_words(size_t clause_count, size_t literal_count)
   {
-    return clause_count * clause_view_t::storage_words(0) + literal_count;
+    return clause_count * clause_t::storage_words(0) + literal_count;
   }
 
   void reserve(size_t words) { words_.reserve(words); }
@@ -356,18 +361,18 @@ class clause_arena_t {
   clause_ref_t add(std::span<const int> literals, bool learned, int lbd, int conflict)
   {
     const clause_ref_t ref = words_.size();
-    words_.resize(words_.size() + clause_view_t::storage_words(literals.size()));
+    words_.resize(words_.size() + clause_t::storage_words(literals.size()));
 
-    auto clause = (*this)[ref];
+    auto& clause = (*this)[ref];
     clause.initialize(literals.size(), lbd, conflict, learned);
-    std::copy(literals.begin(), literals.end(), clause.literals().begin());
+    std::copy(literals.begin(), literals.end(), clause.literals);
     return ref;
   }
 
-  clause_view_t operator[](clause_ref_t ref)
+  clause_t& operator[](clause_ref_t ref)
   {
-    cuopt_assert(ref >= 0 && (size_t)ref < words_.size(), "");
-    return clause_view_t{words_.data() + ref};
+    cuopt_assert(ref >= 0 && (size_t)ref + clause_t::header_words <= words_.size(), "");
+    return *(clause_t*)(words_.data() + ref);
   }
 
  private:
