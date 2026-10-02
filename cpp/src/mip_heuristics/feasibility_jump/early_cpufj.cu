@@ -25,12 +25,12 @@ early_cpufj_t<i_t, f_t>::early_cpufj_t(
   const typename mip_solver_settings_t<i_t, f_t>::tolerances_t& tolerances,
   early_incumbent_callback_t<f_t> incumbent_callback,
   uint64_t seed,
-  cuopt::lns::task_errors_t* lns_task_errors)
+  std::exception_ptr* task_exception)
   : early_heuristic_t<i_t, f_t, early_cpufj_t<i_t, f_t>>(op_problem, std::move(incumbent_callback)),
     problem_ptr_(&op_problem),
     tolerances_(tolerances),
     seed_(seed),
-    lns_task_errors_(lns_task_errors)
+    task_exception_(task_exception)
 {
 }
 
@@ -95,12 +95,12 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes, bool low_latency)
 
   // Construct both private search states before any lane starts mutating the anchor.
   if (improvement_lanes) {
-    cuopt_assert(lns_task_errors_ != nullptr, "early LNS lanes need the team error latch");
+    cuopt_assert(task_exception_ != nullptr, "early LNS lanes need the team exception slot");
     lns_ = std::make_unique<early_lns_t<i_t, f_t>>(
       *climbers_[0],
       shared,
       lns_preemption_flag_,
-      *lns_task_errors_,
+      *task_exception_,
       [this](f_t objective, const std::vector<f_t>& x, const char* origin) {
         std::lock_guard<std::mutex> guard(incumbent_mutex_);
         this->try_update_best(objective, x, origin);

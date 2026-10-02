@@ -9,9 +9,9 @@
 
 #include <mip_heuristics/early_heuristic.cuh>
 #include <mip_heuristics/feasibility_jump/fj_cpu.cuh>
-#include <mip_heuristics/lns/task_errors.hpp>
 
 #include <atomic>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -29,7 +29,7 @@ class early_cpufj_t : public early_heuristic_t<i_t, f_t, early_cpufj_t<i_t, f_t>
                 const typename mip_solver_settings_t<i_t, f_t>::tolerances_t& tolerances,
                 early_incumbent_callback_t<f_t> incumbent_callback,
                 uint64_t seed,
-                cuopt::lns::task_errors_t* lns_task_errors = nullptr);
+                std::exception_ptr* task_exception = nullptr);
 
   ~early_cpufj_t();
 
@@ -58,7 +58,7 @@ class early_cpufj_t : public early_heuristic_t<i_t, f_t, early_cpufj_t<i_t, f_t>
   // Explicit seed for this climber's FJ RNG, resolved once from the solve's base seed (see
   // mip_solver_context_t::base_seed) since this heuristic runs before that context exists.
   uint64_t seed_;
-  cuopt::lns::task_errors_t* lns_task_errors_;
+  std::exception_ptr* task_exception_;
   // try_update_best and the incumbent callback behind it are not thread-safe, and every lane
   // reports into them from its own task.
   std::mutex incumbent_mutex_;

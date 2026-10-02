@@ -7,7 +7,6 @@
 
 #include <cuopt/mathematical_optimization/mip/solver_stats.hpp>
 
-#include <mip_heuristics/lns/task_errors.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <mip_heuristics/problem/problem.cuh>
 #include <mip_heuristics/relaxed_lp/lp_state.cuh>
@@ -15,6 +14,7 @@
 #include <utilities/work_limit_context.hpp>
 #include <utilities/work_unit_scheduler.hpp>
 
+#include <exception>
 #include <limits>
 #include <memory>
 
@@ -65,8 +65,9 @@ struct mip_solver_context_t {
   mip::branch_and_bound_t<i_t, f_t>* branch_and_bound_ptr{nullptr};
   diversity_manager_t<i_t, f_t>* diversity_manager_ptr{nullptr};
   std::atomic<bool> preempt_heuristic_solver_ = false;
-  // Owned by solve_mip and rethrown after its OpenMP team joins.
-  cuopt::lns::task_errors_t* lns_task_errors{nullptr};
+  // Owned by solve_mip and rethrown after its OpenMP team joins. Tasks write it inside
+  // omp critical(cuopt_mip_task_exception).
+  std::exception_ptr* task_exception{nullptr};
   const mip_solver_settings_t<i_t, f_t> settings;
 
   // Base seed, all random number generators derive a seed and strem from it.

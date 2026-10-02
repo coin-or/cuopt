@@ -119,7 +119,7 @@ mip_solution_t<i_t, f_t> run_mip_solver(
   timer_t& timer,
   f_t& initial_upper_bound,
   std::vector<f_t>& initial_incumbent_assignment,
-  cuopt::lns::task_errors_t& lns_task_errors,
+  std::exception_ptr& task_exception,
   std::unique_ptr<mip::mip_symmetry_t<i_t, f_t>> symmetry = nullptr)
 {
   try {
@@ -235,7 +235,7 @@ mip_solution_t<i_t, f_t> run_mip_solver(
     // after cuOpt's presolve (probing cache, bounds propagation, trivial presolve) completes.
 
     mip::mip_solver_t<i_t, f_t> solver(scaled_problem, settings, timer);
-    solver.context.lns_task_errors = &lns_task_errors;
+    solver.context.task_exception = &task_exception;
     // initial_upper_bound is in user-space (representation-invariant).
     // It will be converted to the target solver-space at each consumption point.
     solver.context.initial_upper_bound          = initial_upper_bound;
@@ -325,7 +325,7 @@ mip_solution_t<i_t, f_t> run_mip_solver(
         settings.get_tolerances(),
         incumbent_callback,
         mip::derive_seed(solver.context.base_seed, mip::rng_id_t::early_cpufj),
-        &lns_task_errors);
+        &task_exception);
       // Convert initial_upper_bound from user-space to the CPUFJ's solver-space (papilo-presolved).
       // problem.get_solver_obj_from_user_obj uses the papilo offset/scale (matching the CPUFJ).
       if (std::isfinite(initial_upper_bound)) {
@@ -383,7 +383,7 @@ mip_solution_t<i_t, f_t> solve_mip_helper(
   optimization_problem_t<i_t, f_t>& op_problem,
   mip_solver_settings_t<i_t, f_t> const& settings_const,
   const std::shared_ptr<mip::early_cpufj_t<i_t, f_t>>& pre_solve_heuristics,
-  cuopt::lns::task_errors_t& lns_task_errors)
+  std::exception_ptr& task_exception)
 {
   try {
     mip_solver_settings_t<i_t, f_t> settings(settings_const);
@@ -587,7 +587,7 @@ mip_solution_t<i_t, f_t> solve_mip_helper(
         settings.get_tolerances(),
         early_fj_callback,
         mip::derive_seed(early_fj_base_seed, mip::rng_id_t::early_cpufj),
-        &lns_task_errors);
+        &task_exception);
       // Both are built from the same op_problem, so the probe's threshold needs no conversion.
       if (pre_solve_heuristics && pre_solve_heuristics->solution_found()) {
         early_cpufj->set_best_objective(pre_solve_heuristics->get_best_objective());
@@ -801,7 +801,7 @@ mip_solution_t<i_t, f_t> solve_mip_helper(
                               timer,
                               early_best_user_obj,
                               early_best_user_assignment,
-                              lns_task_errors,
+                              task_exception,
                               std::move(symmetry));
 
     const f_t cuopt_presolve_time = sol.get_stats().presolve_time;
@@ -944,7 +944,6 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
                                    mip_solver_settings_t<i_t, f_t> const& settings_const)
 {
   std::exception_ptr exception;
-  cuopt::lns::task_errors_t lns_task_errors;
   i_t num_threads = 0;
   if (settings_const.num_cpu_threads < 0) {
     num_threads = omp_get_max_threads();
@@ -1027,20 +1026,22 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
 
   // Creates the OpenMP thread pool. It will be shared across the entire MIP solver.
 #pragma omp parallel num_threads(num_threads) default(none) \
-  shared(sol, op_problem, settings_const, exception, pre_solve_heuristics, lns_task_errors)
+  shared(sol, op_problem, settings_const, exception, pre_solve_heuristics)
   {
 #pragma omp masked
     {
       try {
-        sol = solve_mip_helper<i_t, f_t>(
-          op_problem, settings_const, pre_solve_heuristics, lns_task_errors);
+        sol =
+          solve_mip_helper<i_t, f_t>(op_problem, settings_const, pre_solve_heuristics, exception);
       } catch (const std::exception& e) {
         CUOPT_LOG_ERROR("Exception in MIP OpenMP region: %s", e.what());
+#pragma omp critical(cuopt_mip_task_exception)
         exception = std::current_exception();
       } catch (...) {
         CUOPT_LOG_ERROR("Unknown exception in MIP OpenMP region");
         // We cannot throw inside an OpenMP parallel region. So we need to catch and then
         // re-throw later.
+#pragma omp critical(cuopt_mip_task_exception)
         exception = std::current_exception();
       }
     }
@@ -1049,7 +1050,6 @@ mip_solution_t<i_t, f_t> solve_mip(optimization_problem_t<i_t, f_t>& op_problem,
   if (saved_max_active_levels < 2) { omp_set_max_active_levels(saved_max_active_levels); }
 
   if (exception) { std::rethrow_exception(exception); }
-  lns_task_errors.rethrow_if_error();
   return sol;
 }
 

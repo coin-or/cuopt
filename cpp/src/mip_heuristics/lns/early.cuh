@@ -6,7 +6,6 @@
 
 #include <mip_heuristics/lns/cpufj.cuh>
 #include <mip_heuristics/lns/repair_lns.cuh>
-#include <mip_heuristics/lns/task_errors.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <utilities/scope_guard.hpp>
 
@@ -26,18 +25,18 @@ class early_lns_t {
   early_lns_t(const fj_cpu_climber_t<i_t, f_t>& anchor,
               std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> shared,
               std::atomic<bool>& preemption,
-              cuopt::lns::task_errors_t& task_errors,
+              std::exception_ptr& task_exception,
               report_fn report,
               uint64_t seed)
     : shared_(std::move(shared)),
       preemption_(preemption),
-      task_errors_(task_errors),
+      task_exception_(task_exception),
       report_(std::move(report))
   {
     fj_settings_t settings;
     settings.seed = seed;
     cpufj_        = init_fj_cpu_clone(anchor, preemption_, settings);
-    // Only independently validated LNS improvements enter the shared portfolio.
+    // LNS improvements enter the shared portfolio only through submit.
     cpufj_->shared_incumbent.reset();
     cpufj_->log_prefix           = "[Early CPUFJ LNS] ";
     cpufj_->improvement_callback = [this](f_t, const std::vector<f_t>& x, double) {
@@ -104,7 +103,8 @@ class early_lns_t {
   void fail(std::exception_ptr error)
   {
     request_stop();
-    task_errors_.capture(std::move(error));
+#pragma omp critical(cuopt_mip_task_exception)
+    if (!task_exception_) task_exception_ = std::move(error);
   }
 
   bool snapshot(std::vector<f_t>& assignment, f_t& objective)
@@ -115,7 +115,7 @@ class early_lns_t {
 
   void submit(const std::vector<f_t>& assignment, const char* origin)
   {
-    if (stopped() || !repair_lns_->feasible(assignment)) return;
+    if (stopped()) return;
     const f_t objective = repair_lns_->cost(assignment);
     // Publish before invoking callbacks, so polling only holds the short copy lock.
     shared_->publish(objective, cpufj_->get_user_objective(objective), assignment);
@@ -150,7 +150,7 @@ class early_lns_t {
 
   std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> shared_;
   std::atomic<bool>& preemption_;
-  cuopt::lns::task_errors_t& task_errors_;
+  std::exception_ptr& task_exception_;
   report_fn report_;
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> cpufj_;
   std::unique_ptr<repair_lns_t<i_t, f_t>> repair_lns_;

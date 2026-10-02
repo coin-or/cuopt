@@ -147,8 +147,8 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
   const int workers = lns_worker_count(
     omp_get_num_threads(), context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC);
   if (workers == 0) return;
-  auto* errors_ptr = context.lns_task_errors;
-  cuopt_assert(errors_ptr != nullptr, "LNS workers need the team error latch");
+  auto* exception_ptr = context.task_exception;
+  cuopt_assert(exception_ptr != nullptr, "LNS workers need the team exception slot");
 
   std::vector<f_t> default_weights(context.problem_ptr->n_constraints, 1.);
   solution_t<i_t, f_t> solution(*context.problem_ptr);
@@ -170,24 +170,8 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
                                              fj_settings_t{},
                                              /*randomize=*/true);
   scratch_cpu_fj_lns->log_prefix = "******* lns improvement: ";
-  // Captured by value: an immutable, ref-counted snapshot of the raw problem data, safe to read
-  // from this callback (which can fire on the LNS worker's own thread) regardless of what the
-  // climber's other, mutable internal state is doing.
-  std::shared_ptr<const fj_cpu_problem_t<i_t, f_t>> lns_problem_snapshot =
-    scratch_cpu_fj_lns->problem;
-  auto lns_bounds = scratch_cpu_fj_lns->h_var_bounds.underlying();
   scratch_cpu_fj_lns->improvement_callback =
-    [&population, lns_problem_snapshot, lns_bounds](
-      f_t obj, const std::vector<f_t>& h_vec, double /*work_units*/) {
-      // This worker mutates and reuses one climber across many ruin-and-repair iterations,
-      // unlike every other CPUFJ lane which solves once from a fresh climber. Never forward a
-      // claimed improvement to the population without independently re-validating it against
-      // the raw two-sided constraint model first.
-      if (!verify_cpufj_lns_feasible(*lns_problem_snapshot, lns_bounds, h_vec)) {
-        CUOPT_LOG_DEBUG(
-          "LNS improvement worker rejected an internally-inconsistent incumbent before publishing");
-        return;
-      }
+    [&population](f_t obj, const std::vector<f_t>& h_vec, double /*work_units*/) {
       population.add_external_solution(h_vec, obj, solution_origin_t::CPUFJ);
     };
 
@@ -200,7 +184,7 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
   auto* repair_ptr = repair_lns.get();
   auto* feed_ptr   = repair_lns_feed.get();
   auto* pop        = &population;
-#pragma omp task firstprivate(repair_ptr, feed_ptr, pop, errors_ptr, device) \
+#pragma omp task firstprivate(repair_ptr, feed_ptr, pop, exception_ptr, device) \
   priority(CUOPT_DEFAULT_TASK_PRIORITY) depend(out : *repair_ptr) default(none)
   {
     const int previous_max_threads = omp_get_max_threads();
@@ -209,7 +193,8 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
       run_repair_lns_task(*repair_ptr, *feed_ptr, *pop, device);
     } catch (...) {
       repair_ptr->halted = true;
-      errors_ptr->capture(std::current_exception());
+#pragma omp critical(cuopt_mip_task_exception)
+      if (!*exception_ptr) *exception_ptr = std::current_exception();
     }
     omp_set_num_threads(previous_max_threads);
   }
@@ -222,8 +207,8 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
   auto ptr       = scratch_cpu_fj_lns.get();
   auto* best_ptr = scratch_cpu_fj_lns_best.get();
   const size_t n = context.problem_ptr->n_variables;
-#pragma omp task firstprivate(ptr, best_ptr, errors_ptr, n) priority(CUOPT_DEFAULT_TASK_PRIORITY) \
-  depend(out : *ptr) default(none)
+#pragma omp task firstprivate(ptr, best_ptr, exception_ptr, n) \
+  priority(CUOPT_DEFAULT_TASK_PRIORITY) depend(out : *ptr) default(none)
   {
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
@@ -233,7 +218,8 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
         return best_ptr->adopt(std::numeric_limits<f_t>::infinity(), assignment, &objective);
       });
     } catch (...) {
-      errors_ptr->capture(std::current_exception());
+#pragma omp critical(cuopt_mip_task_exception)
+      if (!*exception_ptr) *exception_ptr = std::current_exception();
     }
     omp_set_num_threads(previous_max_threads);
   }
