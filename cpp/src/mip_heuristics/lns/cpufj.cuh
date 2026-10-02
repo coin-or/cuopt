@@ -122,12 +122,12 @@ void run_cpufj_lns_ruin_repair(fj_cpu_climber_t<i_t, f_t>* ptr,
          !ptr->preemption_flag.load(std::memory_order_relaxed)) {
     if (!snapshot(pop_assignment, pop_objective) ||
         pop_assignment.size() != static_cast<size_t>(n_vars)) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
 
     if (!normalize_cpufj_lns_seed(*ptr->problem, ptr->h_var_bounds.underlying(), pop_assignment)) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
     pop_objective = std::inner_product(
