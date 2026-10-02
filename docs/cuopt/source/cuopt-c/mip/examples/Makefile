@@ -17,10 +17,6 @@
 # Required variables (pass on command line):
 #   make INCLUDE_PATH=/path/to/libcuopt_mathopt/include LIBCUOPT_LIBRARY_PATH=/path/to/libcuopt_mathopt/lib \
 #        CLIENT_INCLUDE_PATH=/path/to/libcuopt_client/include CLIENT_LIBRARY_PATH=/path/to/libcuopt_client/lib
-#
-# libcuopt-mathopt and libcuopt-client are separate pip packages (and, for non-pip installs,
-# separate install components); the mathopt engine links against client's problem-representation
-# types, so both sets of paths are required to build these examples.
 
 # Compiler
 CC = gcc

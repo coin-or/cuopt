@@ -32,10 +32,6 @@ CC = gcc
 #   2. On command line: make INCLUDE_PATH=... LIBCUOPT_LIBRARY_PATH=... CLIENT_INCLUDE_PATH=... CLIENT_LIBRARY_PATH=...
 #   3. Uncomment and edit below for your system:
 #
-# libcuopt-mathopt and libcuopt-client are separate pip packages (and, for non-pip installs,
-# separate install components); the mathopt engine links against client's problem-representation
-# types, so both sets of paths are required to build these examples.
-#
 # INCLUDE_PATH = /path/to/libcuopt_mathopt/include
 # LIBCUOPT_LIBRARY_PATH = /path/to/libcuopt_mathopt/lib
 # CLIENT_INCLUDE_PATH = /path/to/libcuopt_client/include
