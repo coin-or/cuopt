@@ -503,19 +503,14 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
   }
 
   if (persistent_lns_threads) {
-    try {
-      persistent_lns =
-        std::make_unique<persistent_lns_bridge_t<i_t, f_t>>(*context.problem_ptr, dm.population);
-      context.early_cpufj_ptr->set_lns_source(
-        [&persistent_lns](auto& x) { return persistent_lns->snapshot(x); });
-      context.early_cpufj_ptr->set_incumbent_callback(
-        [&persistent_lns](f_t, f_t, const auto& x, const char*) { persistent_lns->submit(x); },
-        /*replay_best=*/true);
-      CUOPT_LOG_INFO("Persistent LNS pair continuing after cuOpt presolve");
-    } catch (const std::exception& e) {
-      CUOPT_LOG_WARN("Persistent LNS handoff failed: %s", e.what());
-      context.early_cpufj_ptr->stop();
-    }
+    persistent_lns =
+      std::make_unique<persistent_lns_bridge_t<i_t, f_t>>(*context.problem_ptr, dm.population);
+    context.early_cpufj_ptr->set_lns_source(
+      [&persistent_lns](auto& x) { return persistent_lns->snapshot(x); });
+    context.early_cpufj_ptr->set_incumbent_callback(
+      [&persistent_lns](f_t, f_t, const auto& x, const char*) { persistent_lns->submit(x); },
+      /*replay_best=*/true);
+    CUOPT_LOG_INFO("Persistent LNS pair continuing after cuOpt presolve");
   }
 
   std::unique_ptr<mip::root_structural_t<i_t, f_t>> root_structural;

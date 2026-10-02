@@ -24,11 +24,13 @@ early_cpufj_t<i_t, f_t>::early_cpufj_t(
   const optimization_problem_t<i_t, f_t>& op_problem,
   const typename mip_solver_settings_t<i_t, f_t>::tolerances_t& tolerances,
   early_incumbent_callback_t<f_t> incumbent_callback,
-  uint64_t seed)
+  uint64_t seed,
+  cuopt::lns::task_errors_t* lns_task_errors)
   : early_heuristic_t<i_t, f_t, early_cpufj_t<i_t, f_t>>(op_problem, std::move(incumbent_callback)),
     problem_ptr_(&op_problem),
     tolerances_(tolerances),
-    seed_(seed)
+    seed_(seed),
+    lns_task_errors_(lns_task_errors)
 {
 }
 
@@ -93,21 +95,17 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes, bool low_latency)
 
   // Construct both private search states before any lane starts mutating the anchor.
   if (improvement_lanes) {
-    try {
-      lns_ = std::make_unique<early_lns_t<i_t, f_t>>(
-        *climbers_[0],
-        shared,
-        lns_preemption_flag_,
-        [this](f_t objective, const std::vector<f_t>& x, const char* origin) {
-          std::lock_guard<std::mutex> guard(incumbent_mutex_);
-          this->try_update_best(objective, x, origin);
-        },
-        seed_);
-    } catch (const std::exception& e) {
-      CUOPT_LOG_WARN("Early LNS setup failed: %s", e.what());
-    } catch (...) {
-      CUOPT_LOG_WARN("Early LNS setup failed with unknown error");
-    }
+    cuopt_assert(lns_task_errors_ != nullptr, "early LNS lanes need the team error latch");
+    lns_ = std::make_unique<early_lns_t<i_t, f_t>>(
+      *climbers_[0],
+      shared,
+      lns_preemption_flag_,
+      *lns_task_errors_,
+      [this](f_t objective, const std::vector<f_t>& x, const char* origin) {
+        std::lock_guard<std::mutex> guard(incumbent_mutex_);
+        this->try_update_best(objective, x, origin);
+      },
+      seed_);
   }
   if (!threaded)
     CUOPT_LOG_INFO("Early CPUFJ budget: %d feasibility + %d LNS workers within %d OpenMP threads",

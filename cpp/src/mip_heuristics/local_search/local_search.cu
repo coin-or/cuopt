@@ -134,37 +134,35 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
                        context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) < 2)
     return;
 
-  try {
-    std::vector<f_t> default_weights(context.problem_ptr->n_constraints, 1.);
-    solution_t<i_t, f_t> solution(*context.problem_ptr);
-    thrust::fill(solution.handle_ptr->get_thrust_policy(),
-                 solution.assignment.begin(),
-                 solution.assignment.end(),
-                 0.0);
-    solution.clamp_within_bounds();
+  std::vector<f_t> default_weights(context.problem_ptr->n_constraints, 1.);
+  solution_t<i_t, f_t> solution(*context.problem_ptr);
+  thrust::fill(solution.handle_ptr->get_thrust_policy(),
+               solution.assignment.begin(),
+               solution.assignment.end(),
+               0.0);
+  solution.clamp_within_bounds();
 
-    // Paid once: every subsequent ruin-and-repair iteration reuses this exact climber, mutating
-    // its assignment directly and calling cpufj_solve() again instead of reconstructing (which
-    // would re-download the whole problem from device and re-pay O(nnz) setup every iteration).
-    scratch_cpu_fj_lns             = fj.create_cpu_climber(solution,
-                                               default_weights,
-                                               default_weights,
-                                               0.,
-                                               context.preempt_heuristic_solver_,
-                                               &constraint_prop.bounds_update.probing_cache,
-                                               fj_settings_t{},
-                                               /*randomize=*/true);
-    scratch_cpu_fj_lns->log_prefix = "******* lns improvement: ";
-    // Captured by value: an immutable, ref-counted snapshot of the raw problem data, safe to read
-    // from this callback (which can fire on the LNS worker's own thread) regardless of what the
-    // climber's other, mutable internal state is doing.
-    std::shared_ptr<const fj_cpu_problem_t<i_t, f_t>> lns_problem_snapshot =
-      scratch_cpu_fj_lns->problem;
-    auto lns_bounds                          = scratch_cpu_fj_lns->h_var_bounds.underlying();
-    scratch_cpu_fj_lns->improvement_callback = [&population, lns_problem_snapshot, lns_bounds](
-                                                 f_t obj,
-                                                 const std::vector<f_t>& h_vec,
-                                                 double /*work_units*/) {
+  // Paid once: every subsequent ruin-and-repair iteration reuses this exact climber, mutating
+  // its assignment directly and calling cpufj_solve() again instead of reconstructing (which
+  // would re-download the whole problem from device and re-pay O(nnz) setup every iteration).
+  scratch_cpu_fj_lns             = fj.create_cpu_climber(solution,
+                                             default_weights,
+                                             default_weights,
+                                             0.,
+                                             context.preempt_heuristic_solver_,
+                                             &constraint_prop.bounds_update.probing_cache,
+                                             fj_settings_t{},
+                                             /*randomize=*/true);
+  scratch_cpu_fj_lns->log_prefix = "******* lns improvement: ";
+  // Captured by value: an immutable, ref-counted snapshot of the raw problem data, safe to read
+  // from this callback (which can fire on the LNS worker's own thread) regardless of what the
+  // climber's other, mutable internal state is doing.
+  std::shared_ptr<const fj_cpu_problem_t<i_t, f_t>> lns_problem_snapshot =
+    scratch_cpu_fj_lns->problem;
+  auto lns_bounds = scratch_cpu_fj_lns->h_var_bounds.underlying();
+  scratch_cpu_fj_lns->improvement_callback =
+    [&population, lns_problem_snapshot, lns_bounds](
+      f_t obj, const std::vector<f_t>& h_vec, double /*work_units*/) {
       // This worker mutates and reuses one climber across many ruin-and-repair iterations,
       // unlike every other CPUFJ lane which solves once from a fresh climber. Never forward a
       // claimed improvement to the population without independently re-validating it against
@@ -177,34 +175,29 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
       population.add_external_solution(h_vec, obj, solution_origin_t::CPUFJ);
     };
 
-    scratch_cpu_fj_lns_best = population.best_feasible_incumbent();
+  scratch_cpu_fj_lns_best = population.best_feasible_incumbent();
 
-    CUOPT_LOG_DEBUG("Launching CPUFJ LNS improvement task");
+  CUOPT_LOG_DEBUG("Launching CPUFJ LNS improvement task");
 
-    auto ptr       = scratch_cpu_fj_lns.get();
-    auto* best_ptr = scratch_cpu_fj_lns_best.get();
-    const size_t n = context.problem_ptr->n_variables;
-#pragma omp task firstprivate(ptr, best_ptr, n) priority(CUOPT_DEFAULT_TASK_PRIORITY) \
+  auto ptr         = scratch_cpu_fj_lns.get();
+  auto* best_ptr   = scratch_cpu_fj_lns_best.get();
+  auto* errors_ptr = context.lns_task_errors;
+  cuopt_assert(errors_ptr != nullptr, "CPUFJ LNS worker needs the team error latch");
+  const size_t n = context.problem_ptr->n_variables;
+#pragma omp task firstprivate(ptr, best_ptr, errors_ptr, n) priority(CUOPT_DEFAULT_TASK_PRIORITY) \
   depend(out : *ptr) default(none)
-    {
-      const int previous_max_threads = omp_get_max_threads();
-      omp_set_num_threads(1);
-      try {
-        run_cpufj_lns_ruin_repair<i_t, f_t>(ptr, [best_ptr, n](auto& assignment, auto& objective) {
-          assignment.resize(n);
-          return best_ptr->adopt(std::numeric_limits<f_t>::infinity(), assignment, &objective);
-        });
-      } catch (const std::exception& e) {
-        CUOPT_LOG_WARN("CPUFJ LNS worker disabled after failure: %s", e.what());
-      } catch (...) {
-        CUOPT_LOG_WARN("CPUFJ LNS worker disabled after unknown failure");
-      }
-      omp_set_num_threads(previous_max_threads);
+  {
+    const int previous_max_threads = omp_get_max_threads();
+    omp_set_num_threads(1);
+    try {
+      run_cpufj_lns_ruin_repair<i_t, f_t>(ptr, [best_ptr, n](auto& assignment, auto& objective) {
+        assignment.resize(n);
+        return best_ptr->adopt(std::numeric_limits<f_t>::infinity(), assignment, &objective);
+      });
+    } catch (...) {
+      errors_ptr->capture(std::current_exception());
     }
-  } catch (const std::exception& e) {
-    CUOPT_LOG_WARN("CPUFJ LNS setup failed: %s", e.what());
-  } catch (...) {
-    CUOPT_LOG_WARN("CPUFJ LNS setup failed with unknown error");
+    omp_set_num_threads(previous_max_threads);
   }
 }
 

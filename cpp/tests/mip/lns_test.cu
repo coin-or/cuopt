@@ -200,7 +200,7 @@ void failing_worker(
   throw std::runtime_error("injected optional worker failure");
 }
 
-TEST(Lns, WorkerFailurePreservesValidatedPopulationIncumbent)
+TEST(Lns, WorkerFailureIsCapturedAndPreservesValidatedPopulationIncumbent)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -232,6 +232,8 @@ TEST(Lns, WorkerFailurePreservesValidatedPopulationIncumbent)
   const auto before = dm.population.best_feasible().get_host_assignment();
   for (int team_size : {2, 8, 9, 10}) {
     worker_ran = false;
+    cuopt::lns::task_errors_t task_errors;
+    context.lns_task_errors = &task_errors;
 #pragma omp parallel num_threads(team_size)
     {
 #pragma omp masked
@@ -242,6 +244,11 @@ TEST(Lns, WorkerFailurePreservesValidatedPopulationIncumbent)
       }
     }
     EXPECT_EQ(worker_ran.load(), team_size >= 9);
+    if (team_size >= 9) {
+      EXPECT_THROW(task_errors.rethrow_if_error(), std::runtime_error);
+    } else {
+      EXPECT_NO_THROW(task_errors.rethrow_if_error());
+    }
     EXPECT_FALSE(dm.population.has_observers());
   }
   EXPECT_TRUE(dm.population.best_feasible().compute_feasibility());
@@ -338,7 +345,7 @@ void polling_then_failing_early_repair_lns(const model_t& model,
   throw std::runtime_error("injected presolve LNS failure");
 }
 
-TEST(Lns, PresolveWorkersPollAndPublishSharedBestAndContainFailure)
+TEST(Lns, PresolveWorkersPollAndPublishSharedBestAndCaptureFailure)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -355,6 +362,7 @@ TEST(Lns, PresolveWorkersPollAndPublishSharedBestAndContainFailure)
   int reports = 0;
   std::atomic<bool> source_ready{false};
   early_repair_lns_completed = false;
+  cuopt::lns::task_errors_t task_errors;
 #pragma omp parallel num_threads(7)
   {
 #pragma omp masked
@@ -363,6 +371,7 @@ TEST(Lns, PresolveWorkersPollAndPublishSharedBestAndContainFailure)
         *anchor,
         shared,
         preemption,
+        task_errors,
         [&](double objective, const auto& x, const char* origin) {
           ++reports;
           EXPECT_STREQ(origin, "Repair LNS");
@@ -385,6 +394,7 @@ TEST(Lns, PresolveWorkersPollAndPublishSharedBestAndContainFailure)
     }
   }
   EXPECT_TRUE(early_repair_lns_completed.load());
+  EXPECT_THROW(task_errors.rethrow_if_error(), std::runtime_error);
   EXPECT_EQ(reports, 2);
   EXPECT_EQ(shared->objective.load(), .25);
   EXPECT_EQ(shared->assignment, (std::vector<double>{.25, 0}));
@@ -405,6 +415,7 @@ TEST(Lns, PresolveSearchImprovesAFeasibleCpuIncumbent)
   auto shared = std::make_shared<mip::fj_cpu_shared_incumbent_t<int, double>>();
   shared->publish(3, 3, {1, 1});
   std::atomic<int> reports{0};
+  cuopt::lns::task_errors_t task_errors;
 #pragma omp parallel num_threads(7)
   {
 #pragma omp masked
@@ -413,6 +424,7 @@ TEST(Lns, PresolveSearchImprovesAFeasibleCpuIncumbent)
         *anchor,
         shared,
         preemption,
+        task_errors,
         [&](double objective, const auto& x, const char*) {
           ++reports;
           EXPECT_GE(objective, 1);
@@ -429,6 +441,7 @@ TEST(Lns, PresolveSearchImprovesAFeasibleCpuIncumbent)
   EXPECT_EQ(shared->objective.load(), 1);
   EXPECT_EQ(shared->assignment, (std::vector<double>{1, 0}));
   EXPECT_GT(reports.load(), 0);
+  EXPECT_NO_THROW(task_errors.rethrow_if_error());
 }
 
 TEST(Lns, PresolvePortfolioBudgetAndLifetime)
@@ -437,12 +450,14 @@ TEST(Lns, PresolvePortfolioBudgetAndLifetime)
   opt::optimization_problem_t<int, double> op(&handle);
   init_early_lns_test_problem(op, true);
   opt::mip_solver_settings_t<int, double> settings;
+  cuopt::lns::task_errors_t task_errors;
   for (int team_size : {2, 6, 7, 10}) {
 #pragma omp parallel num_threads(team_size)
     {
 #pragma omp masked
       {
-        mip::early_cpufj_t<int, double> portfolio(op, settings.get_tolerances(), {}, 42);
+        mip::early_cpufj_t<int, double> portfolio(
+          op, settings.get_tolerances(), {}, 42, &task_errors);
         for (int restart = 0; restart < 2; ++restart) {
           // Even an oversized request must honor the presolve reservation.
           portfolio.start(team_size);
@@ -471,6 +486,7 @@ TEST(Lns, PresolvePortfolioBudgetAndLifetime)
       }
     }
   }
+  EXPECT_NO_THROW(task_errors.rethrow_if_error());
   // The short initialization probe precedes the OMP team and keeps its single lane.
   mip::early_cpufj_t<int, double> probe(op, settings.get_tolerances(), {}, 42);
   probe.start(20, true);

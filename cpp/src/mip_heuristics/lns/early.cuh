@@ -7,9 +7,11 @@
 #include <mip_heuristics/lns/cpufj.cuh>
 #include <mip_heuristics/lns/improvement.hpp>
 #include <mip_heuristics/lns/repair_tools.cuh>
+#include <mip_heuristics/lns/task_errors.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <utilities/scope_guard.hpp>
 
+#include <exception>
 #include <memory>
 #include <mutex>
 
@@ -25,11 +27,13 @@ class early_lns_t {
   early_lns_t(const fj_cpu_climber_t<i_t, f_t>& anchor,
               std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> shared,
               std::atomic<bool>& preemption,
+              cuopt::lns::task_errors_t& task_errors,
               report_fn report,
               uint64_t seed,
               cuopt::lns::run_lns_fn run_lns = cuopt::lns::run_lns)
     : shared_(std::move(shared)),
       preemption_(preemption),
+      task_errors_(task_errors),
       report_(std::move(report)),
       seed_(seed),
       run_lns_(run_lns)
@@ -80,10 +84,22 @@ class early_lns_t {
     auto* cpu    = cpufj_.get();
 #pragma omp task firstprivate(worker, cpu) depend(out : *cpu) default(none) \
   priority(CUOPT_DEFAULT_TASK_PRIORITY)
-    worker->run_cpufj();
+    {
+      try {
+        worker->run_cpufj();
+      } catch (...) {
+        worker->fail(std::current_exception());
+      }
+    }
 #pragma omp task firstprivate(worker) depend(out : *worker) default(none) \
   priority(CUOPT_DEFAULT_TASK_PRIORITY)
-    worker->run_repair_lns();
+    {
+      try {
+        worker->run_repair_lns();
+      } catch (...) {
+        worker->fail(std::current_exception());
+      }
+    }
     // Both tasks have reserved capacity. Do not enter a task scheduling point
     // until they are running on other team members: a taskwait for feasibility
     // lanes could otherwise execute a queued persistent task on the solve thread,
@@ -116,6 +132,12 @@ class early_lns_t {
 
  private:
   bool stopped() const { return stop_.load() || preemption_.load(); }
+
+  void fail(std::exception_ptr error)
+  {
+    request_stop();
+    task_errors_.capture(std::move(error));
+  }
 
   bool snapshot(std::vector<f_t>& assignment, f_t& objective)
   {
@@ -163,14 +185,8 @@ class early_lns_t {
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     cuopt::scope_guard restore([&] { omp_set_num_threads(previous_max_threads); });
-    try {
-      run_cpufj_lns_ruin_repair<i_t, f_t>(
-        cpufj_.get(), [this](auto& x, auto& objective) { return snapshot(x, objective); });
-    } catch (const std::exception& e) {
-      CUOPT_LOG_WARN("Early CPUFJ LNS disabled after failure: %s", e.what());
-    } catch (...) {
-      CUOPT_LOG_WARN("Early CPUFJ LNS disabled after unknown failure");
-    }
+    run_cpufj_lns_ruin_repair<i_t, f_t>(
+      cpufj_.get(), [this](auto& x, auto& objective) { return snapshot(x, objective); });
   }
 
   void run_repair_lns()
@@ -179,26 +195,20 @@ class early_lns_t {
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     cuopt::scope_guard restore([&] { omp_set_num_threads(previous_max_threads); });
-    try {
-      RAFT_CUDA_TRY(cudaSetDevice(device_));
-      raft::handle_t repair_handle;
-      model_.repair.cpufj = [this, &repair_handle](const auto& request) {
-        return repair(request, cuopt::lns::repair_backend_t::cpufj, repair_handle);
-      };
-      model_.repair.submip = [this, &repair_handle](const auto& request) {
-        return repair(request, cuopt::lns::repair_backend_t::submip, repair_handle);
-      };
-      run_lns_(
-        model_,
-        [this] { return repair_lns_snapshot(); },
-        [this](const auto& x) { submit(std::vector<f_t>(x.begin(), x.end()), "Repair LNS"); },
-        [this] { return stopped(); },
-        seed_);
-    } catch (const std::exception& e) {
-      CUOPT_LOG_WARN("Early repair LNS disabled after failure: %s", e.what());
-    } catch (...) {
-      CUOPT_LOG_WARN("Early repair LNS disabled after unknown failure");
-    }
+    RAFT_CUDA_TRY(cudaSetDevice(device_));
+    raft::handle_t repair_handle;
+    model_.repair.cpufj = [this, &repair_handle](const auto& request) {
+      return repair(request, cuopt::lns::repair_backend_t::cpufj, repair_handle);
+    };
+    model_.repair.submip = [this, &repair_handle](const auto& request) {
+      return repair(request, cuopt::lns::repair_backend_t::submip, repair_handle);
+    };
+    run_lns_(
+      model_,
+      [this] { return repair_lns_snapshot(); },
+      [this](const auto& x) { submit(std::vector<f_t>(x.begin(), x.end()), "Repair LNS"); },
+      [this] { return stopped(); },
+      seed_);
   }
 
   cuopt::lns::repair_result_t repair(const cuopt::lns::repair_request_t& request,
@@ -217,6 +227,7 @@ class early_lns_t {
 
   std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> shared_;
   std::atomic<bool>& preemption_;
+  cuopt::lns::task_errors_t& task_errors_;
   report_fn report_;
   std::mutex source_mutex_;
   std::function<bool(std::vector<f_t>&)> source_;

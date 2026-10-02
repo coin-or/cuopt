@@ -17,6 +17,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <utilities/copy_helpers.hpp>
+#include <utilities/scope_guard.hpp>
 
 namespace cuopt::mathematical_optimization::mip {
 // The LNS worker only receives immutable owning CPU copies of the problem and population.
@@ -34,13 +35,7 @@ class lns_bridge_t final : public population_observer_t<i_t, f_t> {
     if (lns_worker_count(omp_get_num_threads(),
                          context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) == 0)
       return;
-    try {
-      start(run);
-    } catch (const std::exception& e) {
-      CUOPT_LOG_WARN("LNS setup failed: %s", e.what());
-    } catch (...) {
-      CUOPT_LOG_WARN("LNS setup failed with unknown error");
-    }
+    start(run);
   }
   ~lns_bridge_t() override { finish(); }
   void request_stop() { stop_.store(true); }
@@ -93,13 +88,21 @@ class lns_bridge_t final : public population_observer_t<i_t, f_t> {
       model_.upper.push_back(bounds[j].y);
       model_.integer.push_back(types[j] == var_t::INTEGER);
     }
-    cudaGetDevice(&device_);
+    RAFT_CUDA_TRY(cudaGetDevice(&device_));
+    cuopt_assert(context_.lns_task_errors != nullptr, "LNS worker needs the team error latch");
     population_.add_observer(this);
     worker_started_ = true;
     auto* worker    = this;
 #pragma omp task firstprivate(worker, run) depend(out : *worker) default(none) \
   priority(CUOPT_DEFAULT_TASK_PRIORITY)
-    worker->run_worker(run);
+    {
+      try {
+        worker->run_worker(run);
+      } catch (...) {
+        worker->stop_.store(true);
+        worker->context_.lns_task_errors->capture(std::current_exception());
+      }
+    }
   }
 
   void run_worker(cuopt::lns::run_lns_fn run)
@@ -107,45 +110,36 @@ class lns_bridge_t final : public population_observer_t<i_t, f_t> {
     // OMP threads are reused by other solver tasks after this worker completes.
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
-    try {
-      if (cudaSetDevice(device_) != cudaSuccess)
-        throw std::runtime_error("LNS CUDA device setup failed");
-      // This handle and both repair backends belong exclusively to this worker.
-      raft::handle_t repair_handle;
-      model_.repair.cpufj = [this, &repair_handle](const auto& request) {
-        return cuopt::lns::repair_neighborhood(
-          model_,
-          request,
-          cuopt::lns::repair_backend_t::cpufj,
-          [this] { return stopped(); },
-          &repair_handle,
-          timer_.remaining_time(),
-          context_.preempt_heuristic_solver_);
-      };
-      model_.repair.submip = [this, &repair_handle](const auto& request) {
-        return cuopt::lns::repair_neighborhood(
-          model_,
-          request,
-          cuopt::lns::repair_backend_t::submip,
-          [this] { return stopped(); },
-          &repair_handle,
-          timer_.remaining_time(),
-          context_.preempt_heuristic_solver_);
-      };
-      run(
+    cuopt::scope_guard restore([&] { omp_set_num_threads(previous_max_threads); });
+    RAFT_CUDA_TRY(cudaSetDevice(device_));
+    // This handle and both repair backends belong exclusively to this worker.
+    raft::handle_t repair_handle;
+    model_.repair.cpufj = [this, &repair_handle](const auto& request) {
+      return cuopt::lns::repair_neighborhood(
         model_,
-        [this] { return snapshot(); },
-        [this](const auto& x) { submit(x); },
+        request,
+        cuopt::lns::repair_backend_t::cpufj,
         [this] { return stopped(); },
-        context_.base_seed);
-    } catch (const std::exception& e) {
-      stop_.store(true);
-      CUOPT_LOG_WARN("LNS worker disabled after failure: %s", e.what());
-    } catch (...) {
-      stop_.store(true);
-      CUOPT_LOG_WARN("LNS worker disabled after unknown failure");
-    }
-    omp_set_num_threads(previous_max_threads);
+        &repair_handle,
+        timer_.remaining_time(),
+        context_.preempt_heuristic_solver_);
+    };
+    model_.repair.submip = [this, &repair_handle](const auto& request) {
+      return cuopt::lns::repair_neighborhood(
+        model_,
+        request,
+        cuopt::lns::repair_backend_t::submip,
+        [this] { return stopped(); },
+        &repair_handle,
+        timer_.remaining_time(),
+        context_.preempt_heuristic_solver_);
+    };
+    run(
+      model_,
+      [this] { return snapshot(); },
+      [this](const auto& x) { submit(x); },
+      [this] { return stopped(); },
+      context_.base_seed);
   }
   bool stopped() const
   {
