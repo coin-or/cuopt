@@ -23,7 +23,7 @@ CC = gcc
 
 # Compiler flags
 CFLAGS = -I$(INCLUDE_PATH) -I$(CLIENT_INCLUDE_PATH) -Wall -Wextra
-LDFLAGS = -L$(LIBCUOPT_LIBRARY_PATH) -L$(CLIENT_LIBRARY_PATH) -lcuopt_mathopt -lcuopt_client \
+LDFLAGS = -L$(LIBCUOPT_LIBRARY_PATH) -L$(CLIENT_LIBRARY_PATH) -Wl,--no-as-needed -lcuopt_mathopt -lcuopt_client \
           -Wl,-rpath,$(LIBCUOPT_LIBRARY_PATH) -Wl,-rpath,$(CLIENT_LIBRARY_PATH)
 
 # Automatically discover all C source files in current directory
