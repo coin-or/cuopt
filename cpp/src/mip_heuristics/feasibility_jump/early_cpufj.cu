@@ -6,9 +6,9 @@
 /* clang-format on */
 
 #include "early_cpufj.cuh"
-#include "early_lns.cuh"
 
-#include <mip_heuristics/lns_thread_budget.hpp>
+#include <mip_heuristics/lns/early.cuh>
+#include <mip_heuristics/lns/thread_budget.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <utilities/splitmix64.hpp>
 

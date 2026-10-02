@@ -4,20 +4,20 @@
  */
 
 #include "../../../benchmarks/linear_programming/cuopt/c_api_check.hpp"
-#include "../../../experiments/hive_lns/bridge.cuh"
 
 #include <mip_heuristics/diversity/diversity_manager.cuh>
 #include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
-#include <mip_heuristics/feasibility_jump/early_lns.cuh>
-#include <mip_heuristics/feasibility_jump/persistent_lns_bridge.cuh>
-#include <mip_heuristics/local_search/cpufj_lns_validation.cuh>
+#include <mip_heuristics/lns/bridge.cuh>
+#include <mip_heuristics/lns/cpufj_validation.cuh>
+#include <mip_heuristics/lns/early.cuh>
+#include <mip_heuristics/lns/persistent_bridge.cuh>
 
 #include <gtest/gtest.h>
 
 #include <atomic>
 #include <limits>
 
-namespace cuopt::hive_lns::test {
+namespace cuopt::lns::test {
 namespace mip = cuopt::mathematical_optimization::mip;
 namespace opt = cuopt::mathematical_optimization;
 
@@ -41,7 +41,7 @@ model_t make_model(bool integer = false)
   return model;
 }
 
-TEST(HiveLns, NormalizesPrivateSeedAndKeepsStrictDomains)
+TEST(Lns, NormalizesPrivateSeedAndKeepsStrictDomains)
 {
   auto model      = make_model();
   model.row_lower = {-1.0};
@@ -62,7 +62,7 @@ TEST(HiveLns, NormalizesPrivateSeedAndKeepsStrictDomains)
   EXPECT_FALSE(make_repair_problem(model, request).possible);
 }
 
-TEST(HiveLns, RoundsIntegersAndRejectsEmptyIntegerDomains)
+TEST(Lns, RoundsIntegersAndRejectsEmptyIntegerDomains)
 {
   auto model = make_model(true);
   std::vector<double> seed{1.0 - 5e-5};
@@ -79,7 +79,7 @@ TEST(HiveLns, RoundsIntegersAndRejectsEmptyIntegerDomains)
   EXPECT_FALSE(model.normalize_seed(seed));
 }
 
-TEST(HiveLns, RevalidatesRowsAfterRoundingOrClamping)
+TEST(Lns, RevalidatesRowsAfterRoundingOrClamping)
 {
   auto model      = make_model(true);
   model.row_lower = model.row_upper = {1.0 - 5e-5};
@@ -94,7 +94,7 @@ TEST(HiveLns, RevalidatesRowsAfterRoundingOrClamping)
   EXPECT_FALSE(model.normalize_seed(seed));
 }
 
-TEST(HiveLns, HonorsConfiguredBoundsIntegralityAndRelativeRowTolerance)
+TEST(Lns, HonorsConfiguredBoundsIntegralityAndRelativeRowTolerance)
 {
   auto model      = make_model(true);
   model.row_upper = {2.0};
@@ -116,7 +116,7 @@ TEST(HiveLns, HonorsConfiguredBoundsIntegralityAndRelativeRowTolerance)
   EXPECT_TRUE(make_repair_problem(model, request).possible);
 }
 
-TEST(HiveLns, BothRepairBackendsContainWidenedNeighborhoods)
+TEST(Lns, BothRepairBackendsContainWidenedNeighborhoods)
 {
   auto model = make_model();
   repair_request_t request;
@@ -138,7 +138,7 @@ TEST(HiveLns, BothRepairBackendsContainWidenedNeighborhoods)
   }
 }
 
-TEST(HiveLns, RenormalizesBackendOutputBeforeNextFixing)
+TEST(Lns, RenormalizesBackendOutputBeforeNextFixing)
 {
   auto model = make_model(true);
   model.lower.assign(40, 0.0);
@@ -200,7 +200,7 @@ void failing_worker(
   throw std::runtime_error("injected optional worker failure");
 }
 
-TEST(HiveLns, WorkerFailurePreservesValidatedPopulationIncumbent)
+TEST(Lns, WorkerFailurePreservesValidatedPopulationIncumbent)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -236,7 +236,7 @@ TEST(HiveLns, WorkerFailurePreservesValidatedPopulationIncumbent)
     {
 #pragma omp masked
       {
-        mip::hive_lns_bridge_t<int, double> worker(
+        mip::lns_bridge_t<int, double> worker(
           context, dm.population, cuopt::timer_t(10), failing_worker);
         EXPECT_NO_THROW(worker.finish());
       }
@@ -250,7 +250,7 @@ TEST(HiveLns, WorkerFailurePreservesValidatedPopulationIncumbent)
   EXPECT_FALSE(dm.population.lns_observer);
 }
 
-TEST(HiveLns, ThreadBudgetLeavesCapacityForExistingSolver)
+TEST(Lns, ThreadBudgetLeavesCapacityForExistingSolver)
 {
   for (int size = 2; size <= 48; ++size) {
     const int workers = mip::lns_worker_count(size, false);
@@ -260,7 +260,7 @@ TEST(HiveLns, ThreadBudgetLeavesCapacityForExistingSolver)
   }
 }
 
-TEST(HiveLns, CpufjLnsRevalidatesWithSolverTolerances)
+TEST(Lns, CpufjLnsRevalidatesWithSolverTolerances)
 {
   mip::fj_cpu_problem_t<int, double> problem;
   problem.n_variables = problem.n_constraints = 1;
@@ -311,13 +311,13 @@ void init_early_lns_test_problem(opt::optimization_problem_t<int, double>& op, b
   op.set_constraint_upper_bounds(row_upper.data(), 1);
 }
 
-std::atomic<bool> early_hive_completed{false};
+std::atomic<bool> early_repair_lns_completed{false};
 
-void polling_then_failing_early_hive(const model_t& model,
-                                     const snapshot_fn& snapshot,
-                                     const submit_fn& submit,
-                                     const stop_fn&,
-                                     uint64_t)
+void polling_then_failing_early_repair_lns(const model_t& model,
+                                           const snapshot_fn& snapshot,
+                                           const submit_fn& submit,
+                                           const stop_fn&,
+                                           uint64_t)
 {
   EXPECT_TRUE(omp_in_parallel());
   EXPECT_EQ(omp_get_num_threads(), 7);
@@ -334,11 +334,11 @@ void polling_then_failing_early_hive(const model_t& model,
   EXPECT_EQ(best, (population_t{{.5, 0.0}}));
   submit({.25, 0});
   submit({-1, 0});  // Invalid candidate must not reach the callback or shared best.
-  early_hive_completed = true;
+  early_repair_lns_completed = true;
   throw std::runtime_error("injected presolve LNS failure");
 }
 
-TEST(HiveLns, PresolveWorkersPollAndPublishSharedBestAndContainFailure)
+TEST(Lns, PresolveWorkersPollAndPublishSharedBestAndContainFailure)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -354,7 +354,7 @@ TEST(HiveLns, PresolveWorkersPollAndPublishSharedBestAndContainFailure)
   shared->publish(1, 1, {1, 0});
   int reports = 0;
   std::atomic<bool> source_ready{false};
-  early_hive_completed = false;
+  early_repair_lns_completed = false;
 #pragma omp parallel num_threads(7)
   {
 #pragma omp masked
@@ -365,12 +365,12 @@ TEST(HiveLns, PresolveWorkersPollAndPublishSharedBestAndContainFailure)
         preemption,
         [&](double objective, const auto& x, const char* origin) {
           ++reports;
-          EXPECT_STREQ(origin, "Hive LNS");
+          EXPECT_STREQ(origin, "Repair LNS");
           EXPECT_EQ(x[0], objective);
           if (reports == 1) source_ready = true;
         },
         42,
-        polling_then_failing_early_hive);
+        polling_then_failing_early_repair_lns);
       workers.set_source([&](auto& x) {
         if (!source_ready.exchange(false)) return false;
         x = {.5, 0};
@@ -378,20 +378,20 @@ TEST(HiveLns, PresolveWorkersPollAndPublishSharedBestAndContainFailure)
       });
       workers.start();
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-      while (!early_hive_completed.load() && std::chrono::steady_clock::now() < deadline)
+      while (!early_repair_lns_completed.load() && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       EXPECT_NO_THROW(workers.finish());
       EXPECT_NO_THROW(workers.finish());
     }
   }
-  EXPECT_TRUE(early_hive_completed.load());
+  EXPECT_TRUE(early_repair_lns_completed.load());
   EXPECT_EQ(reports, 2);
   EXPECT_EQ(shared->objective.load(), .25);
   EXPECT_EQ(shared->assignment, (std::vector<double>{.25, 0}));
   EXPECT_FALSE(preemption.load());
 }
 
-TEST(HiveLns, PresolveSearchImprovesAFeasibleCpuIncumbent)
+TEST(Lns, PresolveSearchImprovesAFeasibleCpuIncumbent)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -431,7 +431,7 @@ TEST(HiveLns, PresolveSearchImprovesAFeasibleCpuIncumbent)
   EXPECT_GT(reports.load(), 0);
 }
 
-TEST(HiveLns, PresolvePortfolioBudgetAndLifetime)
+TEST(Lns, PresolvePortfolioBudgetAndLifetime)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -479,7 +479,7 @@ TEST(HiveLns, PresolvePortfolioBudgetAndLifetime)
   probe.stop();
 }
 
-TEST(HiveLns, PersistentBridgeMapsAssignmentsAndRejectsRowViolations)
+TEST(Lns, PersistentBridgeMapsAssignmentsAndRejectsRowViolations)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -523,7 +523,7 @@ TEST(HiveLns, PersistentBridgeMapsAssignmentsAndRejectsRowViolations)
   EXPECT_EQ(source, (std::vector<double>{-1, 0}));
 }
 
-TEST(HiveLns, PendingSeedsUseSolverTolerancesAndDoNotPoisonValidatedCache)
+TEST(Lns, PendingSeedsUseSolverTolerancesAndDoNotPoisonValidatedCache)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -563,7 +563,7 @@ TEST(HiveLns, PendingSeedsUseSolverTolerancesAndDoNotPoisonValidatedCache)
   EXPECT_DOUBLE_EQ(source[0], 1 - 2e-7);
 }
 
-TEST(HiveLns, RejectedCachedSeedDoesNotHidePendingImprovement)
+TEST(Lns, RejectedCachedSeedDoesNotHidePendingImprovement)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -606,7 +606,7 @@ TEST(HiveLns, RejectedCachedSeedDoesNotHidePendingImprovement)
   EXPECT_DOUBLE_EQ(cached_objective, -1e-6);
 }
 
-TEST(HiveLns, PendingSeedQueueRetainsBestUnderWeakerProducerTraffic)
+TEST(Lns, PendingSeedQueueRetainsBestUnderWeakerProducerTraffic)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -630,7 +630,7 @@ TEST(HiveLns, PendingSeedQueueRetainsBestUnderWeakerProducerTraffic)
   EXPECT_FALSE(bridge.snapshot(source));
 }
 
-TEST(HiveLns, ExternalQueueKeepsGlobalBestFiftyAcrossOrigins)
+TEST(Lns, ExternalQueueKeepsGlobalBestFiftyAcrossOrigins)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -672,7 +672,7 @@ TEST(HiveLns, ExternalQueueKeepsGlobalBestFiftyAcrossOrigins)
   }
 }
 
-TEST(HiveLns, ExternalQueueRejectsNonfiniteObjectivesAndNonimprovingOverflow)
+TEST(Lns, ExternalQueueRejectsNonfiniteObjectivesAndNonimprovingOverflow)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -719,7 +719,7 @@ TEST(HiveLns, ExternalQueueRejectsNonfiniteObjectivesAndNonimprovingOverflow)
   EXPECT_EQ(dm.population.get_external_solution_size(), 0);
 }
 
-TEST(HiveLns, ExternalQueueValidatesWithSolverTolerancesBeforeReplacingIncumbent)
+TEST(Lns, ExternalQueueValidatesWithSolverTolerancesBeforeReplacingIncumbent)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -774,7 +774,7 @@ TEST(HiveLns, ExternalQueueValidatesWithSolverTolerancesBeforeReplacingIncumbent
   EXPECT_EQ(dm.population.best_feasible().get_host_assignment(), (std::vector<double>{inside, 0}));
 }
 
-TEST(HiveLns, ExternalQueueDrainAllowsReentrantProducerAndLeavesNewHeapPending)
+TEST(Lns, ExternalQueueDrainAllowsReentrantProducerAndLeavesNewHeapPending)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
@@ -816,7 +816,7 @@ TEST(HiveLns, ExternalQueueDrainAllowsReentrantProducerAndLeavesNewHeapPending)
   EXPECT_EQ(dm.population.best_feasible().get_objective(), 1.0 / 128);
 }
 
-TEST(HiveLns, BenchmarkApiErrorsAreDistinctFromNoSolution)
+TEST(Lns, BenchmarkApiErrorsAreDistinctFromNoSolution)
 {
   EXPECT_NO_THROW(cuopt_bench::check_c_api(CUOPT_SUCCESS, "cuOptSolve"));
   try {
@@ -827,7 +827,7 @@ TEST(HiveLns, BenchmarkApiErrorsAreDistinctFromNoSolution)
     EXPECT_STREQ(error.operation, "cuOptSolve");
   }
 }
-TEST(HiveLns, PresolveBudgetsIncludePapiloAndAuxiliaryWorkers)
+TEST(Lns, PresolveBudgetsIncludePapiloAndAuxiliaryWorkers)
 {
   for (int team_size = 2; team_size <= 128; ++team_size) {
     const int gpu_workers = team_size >= CUOPT_MIP_EARLY_GPUFJ_REQUIRED_THREAD_COUNT ? 1 : 0;
@@ -883,4 +883,4 @@ TEST(HiveLns, PresolveBudgetsIncludePapiloAndAuxiliaryWorkers)
   EXPECT_FALSE(mip::early_structural_has_capacity(3, 1, 1));
 }
 
-}  // namespace cuopt::hive_lns::test
+}  // namespace cuopt::lns::test

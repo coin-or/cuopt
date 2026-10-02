@@ -4,30 +4,29 @@
  */
 
 #pragma once
-// Frozen integration. The evolvable header receives only immutable owning CPU data.
-#include <pthread.h>
 #include <atomic>
 #include <deque>
 #include <exception>
 #include <mip_heuristics/diversity/population.cuh>
-#include <mip_heuristics/lns_thread_budget.hpp>
+#include <mip_heuristics/lns/improvement.hpp>
+#include <mip_heuristics/lns/repair_tools.cuh>
+#include <mip_heuristics/lns/thread_budget.hpp>
 #include <mip_heuristics/solver_context.cuh>
 #include <mip_heuristics/utils.cuh>
 #include <mutex>
 #include <stdexcept>
 #include <utilities/copy_helpers.hpp>
-#include "../../cpp/src/mip_heuristics/lns_improvement.hpp"
-#include "repair_tools.cuh"
 
 namespace cuopt::mathematical_optimization::mip {
+// The LNS worker only receives immutable owning CPU copies of the problem and population.
 template <typename i_t, typename f_t>
-class hive_lns_bridge_t {
+class lns_bridge_t {
  public:
-  hive_lns_bridge_t(mip_solver_context_t<i_t, f_t>& context,
-                    population_t<i_t, f_t>& population,
-                    cuopt::timer_t timer,
-                    cuopt::hive_lns::run_lns_fn run = cuopt::hive_lns::run_lns,
-                    bool enabled                    = true)
+  lns_bridge_t(mip_solver_context_t<i_t, f_t>& context,
+               population_t<i_t, f_t>& population,
+               cuopt::timer_t timer,
+               cuopt::lns::run_lns_fn run = cuopt::lns::run_lns,
+               bool enabled               = true)
     : context_(context), population_(population), timer_(timer)
   {
     if (!enabled) return;
@@ -37,12 +36,12 @@ class hive_lns_bridge_t {
     try {
       start(run);
     } catch (const std::exception& e) {
-      CUOPT_LOG_WARN("Hive LNS setup failed: %s", e.what());
+      CUOPT_LOG_WARN("LNS setup failed: %s", e.what());
     } catch (...) {
-      CUOPT_LOG_WARN("Hive LNS setup failed with unknown error");
+      CUOPT_LOG_WARN("LNS setup failed with unknown error");
     }
   }
-  ~hive_lns_bridge_t() { finish(); }
+  ~lns_bridge_t() { finish(); }
   void request_stop() { stop_.store(true); }
   void finish()
   {
@@ -56,7 +55,7 @@ class hive_lns_bridge_t {
   const std::vector<f_t>& best_assignment() const { return best_; }
 
  private:
-  void start(cuopt::hive_lns::run_lns_fn run)
+  void start(cuopt::lns::run_lns_fn run)
   {
     auto& pb    = *context_.problem_ptr;
     auto stream = pb.handle_ptr->get_stream();
@@ -104,42 +103,36 @@ class hive_lns_bridge_t {
     worker->run_worker(run);
   }
 
-  void run_worker(cuopt::hive_lns::run_lns_fn run)
+  void run_worker(cuopt::lns::run_lns_fn run)
   {
     // OMP threads are reused by other solver tasks after this worker completes.
-    char previous_name[16]{};
-    pthread_getname_np(pthread_self(), previous_name, sizeof(previous_name));
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     try {
       if (cudaSetDevice(device_) != cudaSuccess)
         throw std::runtime_error("LNS CUDA device setup failed");
-      if (pthread_setname_np(pthread_self(), "cuopt-hive-lns") != 0)
-        throw std::runtime_error("LNS thread attribution setup failed");
       // This handle and both repair backends belong exclusively to this worker.
       raft::handle_t repair_handle;
       model_.repair.cpufj = [this, &repair_handle](const auto& request) {
-        return cuopt::hive_lns::repair_neighborhood(
+        return cuopt::lns::repair_neighborhood(
           model_,
           request,
-          cuopt::hive_lns::repair_backend_t::cpufj,
+          cuopt::lns::repair_backend_t::cpufj,
           [this] { return stopped(); },
           &repair_handle,
           timer_.remaining_time(),
           context_.preempt_heuristic_solver_);
       };
       model_.repair.submip = [this, &repair_handle](const auto& request) {
-        return cuopt::hive_lns::repair_neighborhood(
+        return cuopt::lns::repair_neighborhood(
           model_,
           request,
-          cuopt::hive_lns::repair_backend_t::submip,
+          cuopt::lns::repair_backend_t::submip,
           [this] { return stopped(); },
           &repair_handle,
           timer_.remaining_time(),
           context_.preempt_heuristic_solver_);
       };
-      CUOPT_LOG_INFO(
-        "HIVE_LNS_STARTED omp_thread=%d team_size=%d", omp_get_thread_num(), omp_get_num_threads());
       run(
         model_,
         [this] { return snapshot(); },
@@ -153,10 +146,7 @@ class hive_lns_bridge_t {
       stop_.store(true);
       CUOPT_LOG_WARN("LNS worker disabled after unknown failure");
     }
-    CUOPT_LOG_INFO("HIVE_LNS_INPUTS %lu", inputs_);
-    CUOPT_LOG_INFO("HIVE_LNS_FINISHED");
     omp_set_num_threads(previous_max_threads);
-    if (previous_name[0]) pthread_setname_np(pthread_self(), previous_name);
   }
   bool stopped() const
   {
@@ -170,9 +160,9 @@ class hive_lns_bridge_t {
     if (cache_.size() == 8) cache_.pop_front();
     cache_.push_back(std::move(x));
   }
-  cuopt::hive_lns::population_t snapshot()
+  cuopt::lns::population_t snapshot()
   {
-    cuopt::hive_lns::population_t result;
+    cuopt::lns::population_t result;
     {
       std::lock_guard<std::mutex> lock(cache_mutex_);
       result.assign(cache_.begin(), cache_.end());
@@ -181,7 +171,6 @@ class hive_lns_bridge_t {
       std::remove_if(
         result.begin(), result.end(), [this](const auto& x) { return !model_.feasible(x); }),
       result.end());
-    inputs_ += result.size();
     return result;
   }
   void submit(const std::vector<double>& x)
@@ -208,14 +197,13 @@ class hive_lns_bridge_t {
   mip_solver_context_t<i_t, f_t>& context_;
   population_t<i_t, f_t>& population_;
   cuopt::timer_t timer_;
-  cuopt::hive_lns::model_t model_;
+  cuopt::lns::model_t model_;
   std::mutex cache_mutex_;
   std::deque<std::vector<double>> cache_;
   std::atomic<bool> stop_{false};
   bool worker_started_{false};
   std::vector<f_t> best_;
   double best_cost_ = std::numeric_limits<double>::infinity();
-  size_t inputs_    = 0;
   int device_       = 0;
 };
 }  // namespace cuopt::mathematical_optimization::mip

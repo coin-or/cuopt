@@ -10,7 +10,7 @@
 
 namespace cuopt::mathematical_optimization::mip {
 // Persistent LNS tasks share the solve's OpenMP team. Leave the existing eight-thread
-// feasibility portfolio available, then enable Hive LNS and CPUFJ LNS in that order.
+// feasibility portfolio available, then enable repair LNS and CPUFJ LNS in that order.
 inline int lns_worker_count(int team_size, bool deterministic)
 {
   if (deterministic || team_size <= CUOPT_MIP_FJ_REQUIRED_THREAD_COUNT) return 0;

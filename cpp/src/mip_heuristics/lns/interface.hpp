@@ -11,7 +11,7 @@
 #include <limits>
 #include <vector>
 
-namespace cuopt::hive_lns {
+namespace cuopt::lns {
 // Repair a private neighborhood: equal lower/upper bounds fix a variable.
 // Bounds must lie within the model's domains. Start may be infeasible.
 struct repair_request_t {
@@ -104,4 +104,4 @@ using submit_fn    = std::function<void(const std::vector<double>&)>;
 using stop_fn      = std::function<bool()>;
 using run_lns_fn =
   void (*)(const model_t&, const snapshot_fn&, const submit_fn&, const stop_fn&, uint64_t);
-}  // namespace cuopt::hive_lns
+}  // namespace cuopt::lns

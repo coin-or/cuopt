@@ -5,8 +5,8 @@
  */
 /* clang-format on */
 
-#include <mip_heuristics/lns_thread_budget.hpp>
-#include "../../../experiments/hive_lns/bridge.cuh"
+#include <mip_heuristics/lns/bridge.cuh>
+#include <mip_heuristics/lns/thread_budget.hpp>
 #include "diversity/diversity_manager.cuh"
 #include "local_search/local_search.cuh"
 #include "local_search/rounding/simple_rounding.cuh"
@@ -25,7 +25,7 @@
 #define DETECT_SYMMETRY_AFTER_PRESOLVE
 
 #include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
-#include <mip_heuristics/feasibility_jump/persistent_lns_bridge.cuh>
+#include <mip_heuristics/lns/persistent_bridge.cuh>
 #include <mip_heuristics/presolve/conflict_graph/clique_table.cuh>
 #include <mip_heuristics/structural/early_structural.cuh>
 #include <utilities/scope_guard.hpp>
@@ -509,9 +509,7 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
       context.early_cpufj_ptr->set_lns_source(
         [&persistent_lns](auto& x) { return persistent_lns->snapshot(x); });
       context.early_cpufj_ptr->set_incumbent_callback(
-        [&persistent_lns](f_t, f_t, const auto& x, const char* origin) {
-          persistent_lns->submit(x, origin);
-        },
+        [&persistent_lns](f_t, f_t, const auto& x, const char*) { persistent_lns->submit(x); },
         /*replay_best=*/true);
       CUOPT_LOG_INFO("Persistent LNS pair continuing after cuOpt presolve");
     } catch (const std::exception& e) {
@@ -536,8 +534,8 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
 
   // Launch outside the taskgroup: LNS can keep improving while B&B finishes,
   // and finish() can signal it before waiting for its task after the group ends.
-  hive_lns_bridge_t<i_t, f_t> lns_worker(
-    context, dm.population, timer_, cuopt::hive_lns::run_lns, !persistent_lns_threads);
+  lns_bridge_t<i_t, f_t> lns_worker(
+    context, dm.population, timer_, cuopt::lns::run_lns, !persistent_lns_threads);
 
 #pragma omp taskgroup
   {

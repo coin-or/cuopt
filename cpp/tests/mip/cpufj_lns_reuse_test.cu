@@ -4,8 +4,8 @@
  */
 
 #include <mip_heuristics/feasibility_jump/cpu/climber.hpp>
-#include <mip_heuristics/local_search/cpufj_lns.cuh>
-#include <mip_heuristics/local_search/cpufj_lns_geometry.cuh>
+#include <mip_heuristics/lns/cpufj.cuh>
+#include <mip_heuristics/lns/cpufj_geometry.cuh>
 
 #include <gtest/gtest.h>
 

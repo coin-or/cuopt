@@ -18,7 +18,7 @@
 #include <utilities/timer.hpp>
 #include "interface.hpp"
 
-namespace cuopt::hive_lns {
+namespace cuopt::lns {
 namespace mip     = cuopt::mathematical_optimization::mip;
 namespace simplex = cuopt::mathematical_optimization::simplex;
 enum class repair_backend_t { cpufj, submip };
@@ -279,4 +279,4 @@ inline repair_result_t repair_neighborhood(const model_t& model,
   result.elapsed_seconds = timer.elapsed_time();
   return result;
 }
-}  // namespace cuopt::hive_lns
+}  // namespace cuopt::lns

@@ -75,7 +75,7 @@ class population_t {
   bool is_better_than_best_feasible(solution_t<i_t, f_t>& sol);
   void run_all_recombiners(solution_t<i_t, f_t>& sol);
 
-  // Frozen observer: owning copies of stored feasible members, never a writer.
+  // Receives owning copies of stored feasible members; must never write to the population.
   std::function<void(const std::vector<f_t>&)> lns_observer;
   void notify_lns(solution_t<i_t, f_t>& sol)
   {

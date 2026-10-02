@@ -119,11 +119,9 @@ class solution_publication_t {
                                      get_sol_callback->get_user_data());
     }
     if (lns_population_best.has_value()) {
-      CUOPT_LOG_INFO(
-        "HIVE_LNS_ACCEPT user_objective=%.17g solver_objective=%.17g "
-        "population_best=%.17g previous_global_best=%.17g",
+      CUOPT_LOG_DEBUG(
+        "LNS incumbent accepted: user objective %g, population best %g, previous global best %g",
         double(user_objective),
-        double(solver_objective),
         double(*lns_population_best),
         double(previous_global_best));
     }

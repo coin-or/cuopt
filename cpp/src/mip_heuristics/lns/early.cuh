@@ -4,11 +4,11 @@
  */
 #pragma once
 
-#include <mip_heuristics/lns_improvement.hpp>
-#include <mip_heuristics/local_search/cpufj_lns.cuh>
+#include <mip_heuristics/lns/cpufj.cuh>
+#include <mip_heuristics/lns/improvement.hpp>
+#include <mip_heuristics/lns/repair_tools.cuh>
 #include <mip_heuristics/mip_constants.hpp>
 #include <utilities/scope_guard.hpp>
-#include "../../../../experiments/hive_lns/repair_tools.cuh"
 
 #include <memory>
 #include <mutex>
@@ -27,12 +27,12 @@ class early_lns_t {
               std::atomic<bool>& preemption,
               report_fn report,
               uint64_t seed,
-              cuopt::hive_lns::run_lns_fn hive_run = cuopt::hive_lns::run_lns)
+              cuopt::lns::run_lns_fn run_lns = cuopt::lns::run_lns)
     : shared_(std::move(shared)),
       preemption_(preemption),
       report_(std::move(report)),
       seed_(seed),
-      hive_run_(hive_run)
+      run_lns_(run_lns)
   {
     fj_settings_t settings;
     settings.seed = seed;
@@ -83,7 +83,7 @@ class early_lns_t {
     worker->run_cpufj();
 #pragma omp task firstprivate(worker) depend(out : *worker) default(none) \
   priority(CUOPT_DEFAULT_TASK_PRIORITY)
-    worker->run_hive();
+    worker->run_repair_lns();
     // Both tasks have reserved capacity. Do not enter a task scheduling point
     // until they are running on other team members: a taskwait for feasibility
     // lanes could otherwise execute a queued persistent task on the solve thread,
@@ -136,7 +136,7 @@ class early_lns_t {
     return shared_->adopt(std::numeric_limits<f_t>::infinity(), assignment, &objective);
   }
 
-  cuopt::hive_lns::population_t hive_snapshot()
+  cuopt::lns::population_t repair_lns_snapshot()
   {
     std::vector<f_t> assignment;
     f_t objective;
@@ -163,9 +163,6 @@ class early_lns_t {
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     cuopt::scope_guard restore([&] { omp_set_num_threads(previous_max_threads); });
-    CUOPT_LOG_INFO("EARLY_CPUFJ_LNS_STARTED omp_thread=%d team_size=%d",
-                   omp_get_thread_num(),
-                   omp_get_num_threads());
     try {
       run_cpufj_lns_ruin_repair<i_t, f_t>(
         cpufj_.get(), [this](auto& x, auto& objective) { return snapshot(x, objective); });
@@ -174,46 +171,41 @@ class early_lns_t {
     } catch (...) {
       CUOPT_LOG_WARN("Early CPUFJ LNS disabled after unknown failure");
     }
-    CUOPT_LOG_INFO("EARLY_CPUFJ_LNS_FINISHED");
   }
 
-  void run_hive()
+  void run_repair_lns()
   {
     ++workers_started_;
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     cuopt::scope_guard restore([&] { omp_set_num_threads(previous_max_threads); });
-    CUOPT_LOG_INFO("EARLY_HIVE_LNS_STARTED omp_thread=%d team_size=%d",
-                   omp_get_thread_num(),
-                   omp_get_num_threads());
     try {
       RAFT_CUDA_TRY(cudaSetDevice(device_));
       raft::handle_t repair_handle;
       model_.repair.cpufj = [this, &repair_handle](const auto& request) {
-        return repair(request, cuopt::hive_lns::repair_backend_t::cpufj, repair_handle);
+        return repair(request, cuopt::lns::repair_backend_t::cpufj, repair_handle);
       };
       model_.repair.submip = [this, &repair_handle](const auto& request) {
-        return repair(request, cuopt::hive_lns::repair_backend_t::submip, repair_handle);
+        return repair(request, cuopt::lns::repair_backend_t::submip, repair_handle);
       };
-      hive_run_(
+      run_lns_(
         model_,
-        [this] { return hive_snapshot(); },
-        [this](const auto& x) { submit(std::vector<f_t>(x.begin(), x.end()), "Hive LNS"); },
+        [this] { return repair_lns_snapshot(); },
+        [this](const auto& x) { submit(std::vector<f_t>(x.begin(), x.end()), "Repair LNS"); },
         [this] { return stopped(); },
         seed_);
     } catch (const std::exception& e) {
-      CUOPT_LOG_WARN("Early Hive LNS disabled after failure: %s", e.what());
+      CUOPT_LOG_WARN("Early repair LNS disabled after failure: %s", e.what());
     } catch (...) {
-      CUOPT_LOG_WARN("Early Hive LNS disabled after unknown failure");
+      CUOPT_LOG_WARN("Early repair LNS disabled after unknown failure");
     }
-    CUOPT_LOG_INFO("EARLY_HIVE_LNS_FINISHED");
   }
 
-  cuopt::hive_lns::repair_result_t repair(const cuopt::hive_lns::repair_request_t& request,
-                                          cuopt::hive_lns::repair_backend_t backend,
-                                          const raft::handle_t& handle)
+  cuopt::lns::repair_result_t repair(const cuopt::lns::repair_request_t& request,
+                                     cuopt::lns::repair_backend_t backend,
+                                     const raft::handle_t& handle)
   {
-    return cuopt::hive_lns::repair_neighborhood(
+    return cuopt::lns::repair_neighborhood(
       model_,
       request,
       backend,
@@ -229,9 +221,9 @@ class early_lns_t {
   std::mutex source_mutex_;
   std::function<bool(std::vector<f_t>&)> source_;
   uint64_t seed_;
-  cuopt::hive_lns::run_lns_fn hive_run_;
+  cuopt::lns::run_lns_fn run_lns_;
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> cpufj_;
-  cuopt::hive_lns::model_t model_;
+  cuopt::lns::model_t model_;
   std::atomic<bool> stop_{false};
   std::atomic<int> workers_started_{0};
   bool started_{false};

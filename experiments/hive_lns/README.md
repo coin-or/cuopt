@@ -16,7 +16,7 @@ This branch contains the highest-scoring candidate from the completed
 
 [Experiment dashboard](https://nv.platform.live.hiverge.ai/static/experiments/46655e89-5812-4bc7-b53a-9892336ae101/overview?organization_id=nvidia)
 
-The heuristic lives in `cpp/src/mip_heuristics/lns_improvement.hpp`. It runs
+The heuristic lives in `cpp/src/mip_heuristics/lns/improvement.hpp`. It runs
 on a dedicated worker using read-only copies of feasible population members.
 The interface exposes CPUFJ and sub-MIP repair on private neighborhoods.
 The frozen publication path checks submitted solutions against both the

@@ -28,7 +28,7 @@ class persistent_lns_bridge_t {
     population_.enable_lns_seed_polling();
   }
 
-  void submit(const std::vector<f_t>& papilo_assignment, const char* origin = "LNS")
+  void submit(const std::vector<f_t>& papilo_assignment)
   {
     std::vector<f_t> assignment;
     f_t objective;
@@ -45,9 +45,8 @@ class persistent_lns_bridge_t {
     }
     // Publication uses the main solver's common incumbent gate and configured tolerances.
     population_.add_external_solution(assignment, objective, solution_origin_t::CPUFJ);
-    CUOPT_LOG_INFO("PERSISTENT_LNS_CANDIDATE source=%s objective=%.17g",
-                   origin,
-                   problem_->get_user_obj_from_solver_obj(objective));
+    CUOPT_LOG_DEBUG("Persistent LNS candidate with objective %g",
+                    problem_->get_user_obj_from_solver_obj(objective));
   }
 
   bool snapshot(std::vector<f_t>& papilo_assignment)
@@ -85,8 +84,8 @@ class persistent_lns_bridge_t {
       problem_->post_process_assignment(x, true, handle_.get_stream());
       papilo_assignment      = cuopt::host_copy(x, handle_.get_stream());
       last_source_objective_ = objective;
-      CUOPT_LOG_INFO("PERSISTENT_LNS_SEED objective=%.17g",
-                     problem_->get_user_obj_from_solver_obj(objective));
+      CUOPT_LOG_DEBUG("Persistent LNS seeded with objective %g",
+                      problem_->get_user_obj_from_solver_obj(objective));
       return true;
     }
     return false;

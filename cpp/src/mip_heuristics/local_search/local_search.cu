@@ -12,11 +12,11 @@
 
 #include <branch_and_bound/branch_and_bound.hpp>
 #include <mip_heuristics/diversity/diversity_manager.cuh>
-#include <mip_heuristics/lns_thread_budget.hpp>
+#include <mip_heuristics/lns/cpufj.cuh>
+#include <mip_heuristics/lns/thread_budget.hpp>
 #include <mip_heuristics/relaxed_lp/relaxed_lp.cuh>
 #include <mip_heuristics/utils.cuh>
 #include <utilities/timer.hpp>
-#include "cpufj_lns.cuh"
 
 #include <mip_heuristics/feasibility_jump/cpu/search/api.hpp>
 #include <mip_heuristics/feasibility_jump/fj_cpu.cuh>
@@ -186,9 +186,6 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
     {
       const int previous_max_threads = omp_get_max_threads();
       omp_set_num_threads(1);
-      CUOPT_LOG_INFO("CPUFJ_LNS_STARTED omp_thread=%d team_size=%d",
-                     omp_get_thread_num(),
-                     omp_get_num_threads());
       try {
         run_cpufj_lns_ruin_repair<i_t, f_t>(ptr, [pop_ptr](auto& assignment, auto& objective) {
           return pop_ptr->get_best_feasible_snapshot(assignment, objective);
@@ -198,7 +195,6 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
       } catch (...) {
         CUOPT_LOG_WARN("CPUFJ LNS worker disabled after unknown failure");
       }
-      CUOPT_LOG_INFO("CPUFJ_LNS_FINISHED");
       omp_set_num_threads(previous_max_threads);
     }
   } catch (const std::exception& e) {

@@ -12,9 +12,9 @@
 #include <random>
 #include <thread>
 #include <utility>
-#include "../../../experiments/hive_lns/interface.hpp"
+#include "interface.hpp"
 
-namespace cuopt::hive_lns {
+namespace cuopt::lns {
 // Improvement only: every trajectory starts from a feasible population copy.
 inline void run_lns(const model_t& model,
                     const snapshot_fn& snapshot,
@@ -641,4 +641,4 @@ inline void run_lns(const model_t& model,
     }
   }
 }
-}  // namespace cuopt::hive_lns
+}  // namespace cuopt::lns

@@ -6,8 +6,8 @@
 
 #include <mip_heuristics/feasibility_jump/cpu/search/api.hpp>
 #include <mip_heuristics/feasibility_jump/fj_cpu.cuh>
-#include "cpufj_lns_geometry.cuh"
-#include "cpufj_lns_validation.cuh"
+#include "cpufj_geometry.cuh"
+#include "cpufj_validation.cuh"
 
 #include <algorithm>
 #include <chrono>
