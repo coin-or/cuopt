@@ -366,11 +366,6 @@ test_c_examples() {
             local make_vars=()
             [ -n "${include_path}" ] && make_vars+=("INCLUDE_PATH=${include_path}")
             [ -n "${lib_path}" ] && make_vars+=("LIBCUOPT_LIBRARY_PATH=${lib_path}")
-            # libcuopt-mathopt and libcuopt-client are separate wheels/install components since
-            # the split; mathopt links against client's problem-representation types, so the
-            # Makefiles need both pairs of paths. For non-split installs (local build, conda)
-            # client_include_path/client_lib_path are unset because status_codes.h and
-            # libcuopt_client.so already live alongside mathopt's own paths -- fall back to those.
             make_vars+=("CLIENT_INCLUDE_PATH=${client_include_path:-${include_path}}")
             make_vars+=("CLIENT_LIBRARY_PATH=${client_lib_path:-${lib_path}}")
 
@@ -520,22 +515,15 @@ find_cuopt_libraries() {
             fi
         fi
 
-        # status_codes.h lives in libcuopt-client's own wheel, a different package than
-        # cuopt_c.h (libcuopt-mathopt), but mathematical_optimization/constants.h includes it.
         if [ -z "${client_include_path}" ] && [ -n "${include_path}" ] && \
            [ ! -f "${include_path}/cuopt/status_codes.h" ]; then
             local found_status_codes
             found_status_codes=$(find "${search_dir}" -path "*/cuopt/status_codes.h" 2>/dev/null | head -1)
             if [ -n "${found_status_codes}" ]; then
-                # status_codes.h sits directly under cuopt/ (unlike cuopt_c.h, nested one more
-                # level under mathematical_optimization/), so both layouts need only 2 dirnames.
                 client_include_path=$(dirname "$(dirname "${found_status_codes}")")
             fi
         fi
 
-        # libcuopt_mathopt.so has real undefined references into libcuopt_client.so (the
-        # host-side problem-representation types) since the client/mathopt split, so the C
-        # examples need to link it too, not just libcuopt_mathopt.
         if [ -z "${client_lib_path}" ] && [ -n "${lib_path}" ] && \
            [ ! -f "${lib_path}/libcuopt_client.so" ]; then
             local found_client_lib
