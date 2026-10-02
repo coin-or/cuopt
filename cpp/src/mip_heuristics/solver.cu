@@ -5,7 +5,6 @@
  */
 /* clang-format on */
 
-#include <mip_heuristics/lns/bridge.cuh>
 #include <mip_heuristics/lns/thread_budget.hpp>
 #include "diversity/diversity_manager.cuh"
 #include "local_search/local_search.cuh"
@@ -527,11 +526,6 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     if (!root_structural->recognized()) { root_structural.reset(); }
   }
 
-  // Launch outside the taskgroup: LNS can keep improving while B&B finishes,
-  // and finish() can signal it before waiting for its task after the group ends.
-  lns_bridge_t<i_t, f_t> lns_worker(
-    context, dm.population, timer_, cuopt::lns::run_lns, !persistent_lns_threads);
-
 #pragma omp taskgroup
   {
     if (!context.settings.heuristics_only) {
@@ -554,7 +548,6 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
   }  // implicit barrier for all tasks created in B&B and heuristics
 
   if (context.early_cpufj_ptr) context.early_cpufj_ptr->stop();
-  lns_worker.finish();
   dm.population.add_external_solutions_to_population();
   if (dm.population.is_feasible() &&
       (!sol.get_feasible() ||
@@ -570,17 +563,6 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
     if (branch_and_bound_sol.get_feasible() &&
         (!sol.get_feasible() || branch_and_bound_sol.get_objective() < sol.get_objective())) {
       sol = std::move(branch_and_bound_sol);
-    }
-  }
-
-  if (!lns_worker.best_assignment().empty()) {
-    solution_t<i_t, f_t> lns_sol(*context.problem_ptr);
-    lns_sol.copy_new_assignment(lns_worker.best_assignment());
-    lns_sol.compute_feasibility();
-    if (!lns_sol.get_feasible()) {
-      CUOPT_LOG_WARN("Ignoring LNS final candidate that failed solver feasibility checks");
-    } else if (!sol.get_feasible() || lns_sol.get_objective() < sol.get_objective()) {
-      sol = std::move(lns_sol);
     }
   }
 

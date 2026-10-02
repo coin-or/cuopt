@@ -5,8 +5,7 @@
 #pragma once
 
 #include <mip_heuristics/lns/cpufj.cuh>
-#include <mip_heuristics/lns/improvement.hpp>
-#include <mip_heuristics/lns/repair_tools.cuh>
+#include <mip_heuristics/lns/repair_lns.cuh>
 #include <mip_heuristics/lns/task_errors.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <utilities/scope_guard.hpp>
@@ -29,14 +28,11 @@ class early_lns_t {
               std::atomic<bool>& preemption,
               cuopt::lns::task_errors_t& task_errors,
               report_fn report,
-              uint64_t seed,
-              cuopt::lns::run_lns_fn run_lns = cuopt::lns::run_lns)
+              uint64_t seed)
     : shared_(std::move(shared)),
       preemption_(preemption),
       task_errors_(task_errors),
-      report_(std::move(report)),
-      seed_(seed),
-      run_lns_(run_lns)
+      report_(std::move(report))
   {
     fj_settings_t settings;
     settings.seed = seed;
@@ -47,30 +43,7 @@ class early_lns_t {
     cpufj_->improvement_callback = [this](f_t, const std::vector<f_t>& x, double) {
       submit(x, "CPUFJ LNS");
     };
-
-    const auto& problem = *anchor.problem;
-    model_.offsets.assign(problem.offsets.begin(), problem.offsets.end());
-    model_.columns.assign(problem.variables.begin(), problem.variables.end());
-    model_.coefficients.assign(problem.coefficients.begin(), problem.coefficients.end());
-    model_.objective.assign(problem.h_obj_coeffs.begin(), problem.h_obj_coeffs.end());
-    model_.row_lower.assign(problem.cstr_lb.begin(), problem.cstr_lb.end());
-    model_.row_upper.assign(problem.cstr_ub.begin(), problem.cstr_ub.end());
-    model_.feasibility_tolerance = problem.tolerances.absolute_tolerance;
-    model_.relative_tolerance    = problem.tolerances.relative_tolerance;
-    model_.integrality_tolerance = problem.tolerances.integrality_tolerance;
-    for (i_t r = 0; r < problem.n_constraints; ++r) {
-      model_.row_tolerances.push_back(
-        get_cstr_tolerance<i_t, f_t>(problem.cstr_lb[r],
-                                     problem.cstr_ub[r],
-                                     problem.tolerances.absolute_tolerance,
-                                     problem.tolerances.relative_tolerance));
-    }
-    for (i_t v = 0; v < problem.n_variables; ++v) {
-      const auto bounds = anchor.h_var_bounds[v];
-      model_.lower.push_back(get_lower(bounds));
-      model_.upper.push_back(get_upper(bounds));
-      model_.integer.push_back(problem.h_var_types[v] == var_t::INTEGER);
-    }
+    repair_lns_ = std::make_unique<repair_lns_t<i_t, f_t>>(anchor, preemption_, seed);
     RAFT_CUDA_TRY(cudaGetDevice(&device_));
   }
 
@@ -117,7 +90,8 @@ class early_lns_t {
   void request_stop()
   {
     stop_.store(true);
-    cpufj_->halted = true;
+    cpufj_->halted      = true;
+    repair_lns_->halted = true;
   }
 
   void finish()
@@ -147,33 +121,18 @@ class early_lns_t {
       source = source_;
     }
     std::vector<f_t> external;
-    if (source && source(external)) {
-      const std::vector<double> x(external.begin(), external.end());
-      if (model_.feasible(x)) {
-        const f_t cost = model_.cost(x);
-        shared_->publish(cost, cpufj_->get_user_objective(cost), external);
-      }
+    if (source && source(external) && repair_lns_->feasible(external)) {
+      const f_t cost = repair_lns_->cost(external);
+      shared_->publish(cost, cpufj_->get_user_objective(cost), external);
     }
-    assignment.resize(model_.lower.size());
+    assignment.resize(cpufj_->problem->n_variables);
     return shared_->adopt(std::numeric_limits<f_t>::infinity(), assignment, &objective);
-  }
-
-  cuopt::lns::population_t repair_lns_snapshot()
-  {
-    std::vector<f_t> assignment;
-    f_t objective;
-    if (!snapshot(assignment, objective)) return {};
-    std::vector<double> x(assignment.begin(), assignment.end());
-    if (!model_.feasible(x)) return {};
-    return {std::move(x)};
   }
 
   void submit(const std::vector<f_t>& assignment, const char* origin)
   {
-    if (stopped()) return;
-    const std::vector<double> x(assignment.begin(), assignment.end());
-    if (!model_.feasible(x)) return;
-    const f_t objective = model_.cost(x);
+    if (stopped() || !repair_lns_->feasible(assignment)) return;
+    const f_t objective = repair_lns_->cost(assignment);
     // Publish before invoking callbacks, so polling only holds the short copy lock.
     shared_->publish(objective, cpufj_->get_user_objective(objective), assignment);
     report_(objective, assignment, origin);
@@ -196,33 +155,13 @@ class early_lns_t {
     omp_set_num_threads(1);
     cuopt::scope_guard restore([&] { omp_set_num_threads(previous_max_threads); });
     RAFT_CUDA_TRY(cudaSetDevice(device_));
-    raft::handle_t repair_handle;
-    model_.repair.cpufj = [this, &repair_handle](const auto& request) {
-      return repair(request, cuopt::lns::repair_backend_t::cpufj, repair_handle);
-    };
-    model_.repair.submip = [this, &repair_handle](const auto& request) {
-      return repair(request, cuopt::lns::repair_backend_t::submip, repair_handle);
-    };
-    run_lns_(
-      model_,
-      [this] { return repair_lns_snapshot(); },
-      [this](const auto& x) { submit(std::vector<f_t>(x.begin(), x.end()), "Repair LNS"); },
-      [this] { return stopped(); },
-      seed_);
-  }
-
-  cuopt::lns::repair_result_t repair(const cuopt::lns::repair_request_t& request,
-                                     cuopt::lns::repair_backend_t backend,
-                                     const raft::handle_t& handle)
-  {
-    return cuopt::lns::repair_neighborhood(
-      model_,
-      request,
-      backend,
-      [this] { return stopped(); },
-      &handle,
-      std::numeric_limits<double>::infinity(),
-      preemption_);
+    repair_lns_->run(
+      [this](auto& seeds) {
+        std::vector<f_t> assignment;
+        f_t objective;
+        if (snapshot(assignment, objective)) seeds.push_back(std::move(assignment));
+      },
+      [this](const auto& x, f_t) { submit(x, "Repair LNS"); });
   }
 
   std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> shared_;
@@ -231,10 +170,8 @@ class early_lns_t {
   report_fn report_;
   std::mutex source_mutex_;
   std::function<bool(std::vector<f_t>&)> source_;
-  uint64_t seed_;
-  cuopt::lns::run_lns_fn run_lns_;
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> cpufj_;
-  cuopt::lns::model_t model_;
+  std::unique_ptr<repair_lns_t<i_t, f_t>> repair_lns_;
   std::atomic<bool> stop_{false};
   std::atomic<int> workers_started_{0};
   bool started_{false};

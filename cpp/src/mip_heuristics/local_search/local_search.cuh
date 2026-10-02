@@ -9,6 +9,8 @@
 
 #include <mip_heuristics/diversity/population.cuh>
 #include <mip_heuristics/feasibility_jump/fj_cpu.cuh>
+#include <mip_heuristics/lns/population_feed.cuh>
+#include <mip_heuristics/lns/repair_lns.cuh>
 #include <mip_heuristics/local_search/feasibility_pump/feasibility_pump.cuh>
 #include <mip_heuristics/local_search/line_segment_search/line_segment_search.cuh>
 #include <mip_heuristics/solver.cuh>
@@ -46,10 +48,10 @@ class local_search_t {
 
   void start_cpufj_scratch_threads(population_t<i_t, f_t>& population);
   void start_cpufj_lptopt_scratch_threads(population_t<i_t, f_t>& population);
-  // Dedicated ruin-and-repair improvement worker. Runs on a spare thread (never taken from the
-  // feasibility-finding scratch CPUFJ lanes) and deepens the objective of the population's
-  // incumbent once a feasible solution exists, via population-guided LNS on a single reused
-  // (cloned) CPU FJ climber.
+  // Dedicated ruin-and-repair improvement workers on spare threads (never taken from the
+  // feasibility-finding scratch CPUFJ lanes). They deepen the objective of the population's
+  // incumbent once a feasible solution exists: the repair LNS first, then population-guided
+  // LNS on a single reused CPU FJ climber.
   void start_cpufj_lns_improvement_thread(population_t<i_t, f_t>& population);
   void stop_cpufj_scratch_threads();
   void generate_fast_solution(solution_t<i_t, f_t>& solution, timer_t timer);
@@ -128,6 +130,8 @@ class local_search_t {
   // improvement worker, so that only the first iteration pays the O(nnz) climber construction.
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> scratch_cpu_fj_lns;
   std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> scratch_cpu_fj_lns_best;
+  std::unique_ptr<lns_population_feed_t<i_t, f_t>> repair_lns_feed;
+  std::unique_ptr<repair_lns_t<i_t, f_t>> repair_lns;
   problem_t<i_t, f_t> problem_with_objective_cut;
   bool cutting_plane_added_for_active_run{false};
 

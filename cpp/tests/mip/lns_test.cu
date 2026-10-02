@@ -7,254 +7,233 @@
 
 #include <mip_heuristics/diversity/diversity_manager.cuh>
 #include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
-#include <mip_heuristics/lns/bridge.cuh>
 #include <mip_heuristics/lns/cpufj_validation.cuh>
 #include <mip_heuristics/lns/early.cuh>
 #include <mip_heuristics/lns/persistent_bridge.cuh>
+#include <mip_heuristics/lns/repair_lns.cuh>
+#include <mip_heuristics/lns/thread_budget.hpp>
 
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <limits>
+#include <numeric>
+#include <thread>
 
 namespace cuopt::lns::test {
 namespace mip = cuopt::mathematical_optimization::mip;
 namespace opt = cuopt::mathematical_optimization;
 
-model_t make_model(bool integer = false)
+using tolerances_t = opt::mip_solver_settings_t<int, double>::tolerances_t;
+
+struct host_model_t {
+  std::vector<double> coefficients, lower, upper, objective, row_lower, row_upper;
+  std::vector<int> columns, offsets;
+  std::vector<opt::var_t> types;
+};
+
+tolerances_t test_tolerances()
 {
-  model_t model;
-  model.lower                 = {0.0};
-  model.upper                 = {1.0};
-  model.integer               = {integer};
-  model.objective             = {1.0};
-  model.offsets               = {0, 1};
-  model.columns               = {0};
-  model.coefficients          = {1.0};
-  model.row_lower             = {0.0};
-  model.row_upper             = {1.0};
-  model.feasibility_tolerance = 1e-7;
-  model.relative_tolerance    = 2e-8;
-  model.integrality_tolerance = 1e-4;
-  model.row_tolerances        = {mip::get_cstr_tolerance<int, double>(
-    0.0, 1.0, model.feasibility_tolerance, model.relative_tolerance)};
-  return model;
+  tolerances_t tolerances;
+  tolerances.absolute_tolerance    = 1e-7;
+  tolerances.relative_tolerance    = 2e-8;
+  tolerances.integrality_tolerance = 1e-4;
+  return tolerances;
 }
 
-TEST(Lns, NormalizesPrivateSeedAndKeepsStrictDomains)
+host_model_t single_variable(
+  bool integer, double lower, double upper, double row_lower, double row_upper)
 {
-  auto model      = make_model();
-  model.row_lower = {-1.0};
-  const std::vector<double> population_member{-5e-5};
-  auto seed = population_member;
-  ASSERT_TRUE(model.feasible(seed));
-  ASSERT_TRUE(model.normalize_seed(seed));
-  EXPECT_EQ(seed[0], 0.0);
-  EXPECT_EQ(population_member[0], -5e-5);
+  return {{1.0},
+          {lower},
+          {upper},
+          {1.0},
+          {row_lower},
+          {row_upper},
+          {0},
+          {0, 1},
+          {integer ? opt::var_t::INTEGER : opt::var_t::CONTINUOUS}};
+}
 
-  repair_request_t request;
-  request.start = request.lower = request.upper = seed;
-  EXPECT_TRUE(make_repair_problem(model, request).possible);
-  request.lower = request.upper = population_member;
-  EXPECT_FALSE(make_repair_problem(model, request).possible);
+// min x0 + 2 x1 subject to 1 <= x0 + x1 <= 2 over binaries.
+host_model_t covering_pair()
+{
+  return {{1.0, 1.0},
+          {0.0, 0.0},
+          {1.0, 1.0},
+          {1.0, 2.0},
+          {1.0},
+          {2.0},
+          {0, 1},
+          {0, 2},
+          {opt::var_t::INTEGER, opt::var_t::INTEGER}};
+}
+
+std::unique_ptr<mip::fj_cpu_climber_t<int, double>> make_anchor(const host_model_t& m,
+                                                                std::atomic<bool>& preemption,
+                                                                tolerances_t tolerances)
+{
+  return mip::init_fj_cpu_from_host_model<int, double>((int)m.lower.size(),
+                                                       (int)m.row_lower.size(),
+                                                       (int)m.coefficients.size(),
+                                                       false,
+                                                       1.0,
+                                                       0.0,
+                                                       m.coefficients,
+                                                       m.columns,
+                                                       m.offsets,
+                                                       m.objective,
+                                                       m.lower,
+                                                       m.upper,
+                                                       m.row_lower,
+                                                       m.row_upper,
+                                                       {},
+                                                       {},
+                                                       m.types,
+                                                       tolerances,
+                                                       preemption,
+                                                       mip::fj_settings_t{});
+}
+
+TEST(Lns, NeighborhoodKeepsStrictDomainsAndRejectsEmptyIntegerDomains)
+{
+  std::atomic<bool> preemption{false};
+  auto anchor = make_anchor(single_variable(false, 0, 1, -1, 1), preemption, test_tolerances());
+  mip::repair_lns_t<int, double> lns(*anchor, preemption, 42);
+  mip::lns_repair_request_t<double> request;
+  request.start = request.lower = request.upper = {0.0};
+  EXPECT_TRUE(lns.make_neighborhood(request).possible);
+  request.lower = request.upper = {-5e-5};
+  EXPECT_FALSE(lns.make_neighborhood(request).possible);
   request.lower = {0.0};
   request.upper = {1.0 + 1e-10};
-  EXPECT_FALSE(make_repair_problem(model, request).possible);
+  EXPECT_FALSE(lns.make_neighborhood(request).possible);
+
+  auto integer_anchor =
+    make_anchor(single_variable(true, 0, 1, 0, 1), preemption, test_tolerances());
+  mip::repair_lns_t<int, double> integer_lns(*integer_anchor, preemption, 42);
+  request.lower = {.2};
+  request.upper = {.8};
+  EXPECT_FALSE(integer_lns.make_neighborhood(request).possible);
 }
 
-TEST(Lns, RoundsIntegersAndRejectsEmptyIntegerDomains)
+TEST(Lns, NeighborhoodEliminatesFixedColumnsWithRelativeRowTolerance)
 {
-  auto model = make_model(true);
-  std::vector<double> seed{1.0 - 5e-5};
-  ASSERT_TRUE(model.normalize_seed(seed));
-  EXPECT_EQ(seed[0], 1.0);
-  repair_request_t request;
-  request.start = request.lower = request.upper = seed;
-  EXPECT_TRUE(make_repair_problem(model, request).possible);
+  std::atomic<bool> preemption{false};
+  // x0 - x1 = 1e6 is not tightened by the climber's bound propagation.
+  const host_model_t shifted{{1.0, -1.0},
+                             {1e6, 0.0},
+                             {1e6 + 1, 1.0},
+                             {1.0, 0.0},
+                             {1e6},
+                             {1e6},
+                             {0, 1},
+                             {0, 2},
+                             {opt::var_t::CONTINUOUS, opt::var_t::CONTINUOUS}};
+  auto anchor = make_anchor(shifted, preemption, test_tolerances());
+  mip::repair_lns_t<int, double> lns(*anchor, preemption, 42);
+  EXPECT_TRUE(lns.feasible({1e6 + .01, 0}));
+  EXPECT_FALSE(lns.feasible({1e6 + .03, 0}));
+  mip::lns_repair_request_t<double> request;
+  request.start = request.lower = request.upper = {1e6 + .01, 0};
+  EXPECT_TRUE(lns.make_neighborhood(request).possible);
+  request.start = request.lower = request.upper = {1e6 + .03, 0};
+  EXPECT_FALSE(lns.make_neighborhood(request).possible);
 
-  model.lower = {.2};
-  model.upper = {.99999};
-  seed        = {.99999};
-  ASSERT_TRUE(model.feasible(seed));
-  EXPECT_FALSE(model.normalize_seed(seed));
-}
-
-TEST(Lns, RevalidatesRowsAfterRoundingOrClamping)
-{
-  auto model      = make_model(true);
-  model.row_lower = model.row_upper = {1.0 - 5e-5};
-  std::vector<double> seed{1.0 - 5e-5};
-  ASSERT_TRUE(model.feasible(seed));
-  EXPECT_FALSE(model.normalize_seed(seed));
-
-  model.integer   = {false};
-  model.row_lower = model.row_upper = {-5e-5};
-  seed                              = {-5e-5};
-  ASSERT_TRUE(model.feasible(seed));
-  EXPECT_FALSE(model.normalize_seed(seed));
-}
-
-TEST(Lns, HonorsConfiguredBoundsIntegralityAndRelativeRowTolerance)
-{
-  auto model      = make_model(true);
-  model.row_upper = {2.0};
-  EXPECT_TRUE(model.feasible({1.0 + 5e-5}));
-  model.integrality_tolerance = 1e-6;
-  EXPECT_FALSE(model.feasible({1.0 + 5e-5}));
-  EXPECT_FALSE(model.feasible({std::numeric_limits<double>::quiet_NaN()}));
-
-  model.integer   = {false};
-  model.lower     = {1e6};
-  model.upper     = {1e6 + 1.0};
-  model.row_lower = model.row_upper = {1e6};
-  model.row_tolerances              = {mip::get_cstr_tolerance<int, double>(
-    1e6, 1e6, model.feasibility_tolerance, model.relative_tolerance)};
-  EXPECT_TRUE(model.feasible({1e6 + .01}));
-  EXPECT_FALSE(model.feasible({1e6 + .03}));
-  repair_request_t request;
-  request.start = request.lower = request.upper = {1e6 + .01};
-  EXPECT_TRUE(make_repair_problem(model, request).possible);
+  auto pair_anchor = make_anchor(covering_pair(), preemption, test_tolerances());
+  mip::repair_lns_t<int, double> pair_lns(*pair_anchor, preemption, 42);
+  request.start           = {1, 1};
+  request.lower           = {1, 0};
+  request.upper           = {1, 1};
+  const auto neighborhood = pair_lns.make_neighborhood(request);
+  ASSERT_TRUE(neighborhood.possible);
+  EXPECT_EQ(neighborhood.free_columns, (std::vector<int>{1}));
+  EXPECT_EQ(neighborhood.row_lower, (std::vector<double>{0}));
+  EXPECT_EQ(neighborhood.row_upper, (std::vector<double>{1}));
+  EXPECT_EQ(neighborhood.full, (std::vector<double>{1, 1}));
 }
 
 TEST(Lns, BothRepairBackendsContainWidenedNeighborhoods)
 {
-  auto model = make_model();
-  repair_request_t request;
+  raft::handle_t handle;
+  std::atomic<bool> preemption{false};
+  auto anchor = make_anchor(single_variable(false, 0, 1, 0, 1), preemption, test_tolerances());
+  mip::repair_lns_t<int, double> lns(*anchor, preemption, 42);
+  mip::lns_repair_request_t<double> request;
   request.start = {0.0};
   request.lower = {-1e-10};
   request.upper = {1.0};
-  std::atomic<bool> preemption{false};
-  for (auto backend : {repair_backend_t::cpufj, repair_backend_t::submip}) {
-    auto result =
-      repair_neighborhood(model, request, backend, [] { return false; }, nullptr, 1.0, preemption);
+  for (auto backend : {mip::lns_repair_backend_t::cpufj, mip::lns_repair_backend_t::submip}) {
+    auto result = lns.repair(request, backend, &handle);
     EXPECT_FALSE(result.feasible);
     EXPECT_TRUE(result.assignment.empty());
     auto valid_request  = request;
     valid_request.lower = valid_request.upper = valid_request.start;
-    auto recovered                            = repair_neighborhood(
-      model, valid_request, backend, [] { return false; }, nullptr, 1.0, preemption);
+    auto recovered                            = lns.repair(valid_request, backend, &handle);
     EXPECT_TRUE(recovered.feasible);
     EXPECT_EQ(recovered.assignment, valid_request.start);
   }
 }
 
-TEST(Lns, RenormalizesBackendOutputBeforeNextFixing)
-{
-  auto model = make_model(true);
-  model.lower.assign(40, 0.0);
-  model.upper.assign(40, 1.0);
-  model.integer.assign(40, true);
-  model.objective.assign(40, 1.0);
-  model.offsets.resize(41);
-  model.columns.resize(40);
-  std::iota(model.offsets.begin(), model.offsets.end(), 0);
-  std::iota(model.columns.begin(), model.columns.end(), 0);
-  model.coefficients.assign(40, 1.0);
-  model.row_lower.assign(40, 0.0);
-  model.row_upper.assign(40, 1.0);
-  model.row_tolerances.assign(40, model.row_tolerances.front());
-  const population_t population{std::vector<double>(40, 1.0 - 5e-5)};
-  int repairs = 0;
-  auto repair = [&](const repair_request_t& request) {
-    ++repairs;
-    for (size_t j = 0; j < request.start.size(); ++j) {
-      EXPECT_EQ(request.start[j], 1.0);
-      EXPECT_GE(request.lower[j], model.lower[j]);
-      EXPECT_LE(request.upper[j], model.upper[j]);
-      EXPECT_EQ(request.lower[j], std::round(request.lower[j]));
-      EXPECT_EQ(request.upper[j], std::round(request.upper[j]));
-    }
-    repair_result_t result;
-    result.feasible   = true;
-    result.assignment = population.front();
-    result.objective  = model.cost(result.assignment);
-    return result;
-  };
-  model.repair.cpufj  = repair;
-  model.repair.submip = repair;
-  int polls           = 0;
-  run_lns(
-    model,
-    [&] { return population; },
-    [](const auto&) {},
-    [&] { return repairs >= 2 || ++polls > 1000; },
-    42);
-  EXPECT_EQ(repairs, 2);
-  EXPECT_EQ(population.front()[1], 1.0 - 5e-5);
-}
-
-std::atomic<bool> worker_ran{false};
-
-void failing_worker(
-  const model_t& model, const snapshot_fn& snapshot, const submit_fn&, const stop_fn&, uint64_t)
-{
-  worker_ran = true;
-  EXPECT_TRUE(omp_in_parallel());
-  EXPECT_GE(omp_get_num_threads(), 9);
-  EXPECT_EQ(omp_get_max_threads(), 1);
-  EXPECT_EQ(model.feasibility_tolerance, 3e-7);
-  EXPECT_EQ(model.relative_tolerance, 4e-8);
-  EXPECT_EQ(model.integrality_tolerance, 2e-4);
-  EXPECT_EQ(model.row_tolerances[0], (mip::get_cstr_tolerance<int, double>(1, 2, 3e-7, 4e-8)));
-  EXPECT_FALSE(snapshot().empty());
-  throw std::runtime_error("injected optional worker failure");
-}
-
-TEST(Lns, WorkerFailureIsCapturedAndPreservesValidatedPopulationIncumbent)
+TEST(Lns, BothRepairBackendsImproveWithinNeighborhood)
 {
   raft::handle_t handle;
-  opt::optimization_problem_t<int, double> op(&handle);
-  const std::vector<double> coefficients{1, 1}, lower{0, 0}, upper{1, 1}, objective{1, 2};
-  const std::vector<double> row_lower{1}, row_upper{2};
-  const std::vector<int> columns{0, 1}, offsets{0, 2};
-  const std::vector<opt::var_t> types(2, opt::var_t::INTEGER);
-  op.set_csr_constraint_matrix(coefficients.data(), 2, columns.data(), 2, offsets.data(), 2);
-  op.set_variable_lower_bounds(lower.data(), 2);
-  op.set_variable_upper_bounds(upper.data(), 2);
-  op.set_variable_types(types.data(), 2);
-  op.set_objective_coefficients(objective.data(), 2);
-  op.set_constraint_lower_bounds(row_lower.data(), 1);
-  op.set_constraint_upper_bounds(row_upper.data(), 1);
-  opt::mip_solver_settings_t<int, double> settings;
-  settings.tolerances.absolute_tolerance    = 3e-7;
-  settings.tolerances.relative_tolerance    = 4e-8;
-  settings.tolerances.integrality_tolerance = 2e-4;
-  mip::problem_t<int, double> problem(op, settings.get_tolerances());
-  mip::mip_solver_context_t<int, double> context(&handle, &problem, settings);
-  mip::diversity_manager_t<int, double> dm(context);
-  dm.population.initialize_population();
-  dm.population.allocate_solutions();
-  mip::solution_t<int, double> incumbent(problem);
-  incumbent.copy_new_assignment(std::vector<double>{1, 0});
-  ASSERT_TRUE(incumbent.compute_feasibility());
-  dm.population.add_solution(std::move(incumbent));
-  ASSERT_TRUE(dm.population.is_feasible());
-  const auto before = dm.population.best_feasible().get_host_assignment();
-  for (int team_size : {2, 8, 9, 10}) {
-    worker_ran = false;
-    cuopt::lns::task_errors_t task_errors;
-    context.lns_task_errors = &task_errors;
-#pragma omp parallel num_threads(team_size)
-    {
-#pragma omp masked
-      {
-        mip::lns_bridge_t<int, double> worker(
-          context, dm.population, cuopt::timer_t(10), failing_worker);
-        EXPECT_NO_THROW(worker.finish());
-      }
-    }
-    EXPECT_EQ(worker_ran.load(), team_size >= 9);
-    if (team_size >= 9) {
-      EXPECT_THROW(task_errors.rethrow_if_error(), std::runtime_error);
-    } else {
-      EXPECT_NO_THROW(task_errors.rethrow_if_error());
-    }
-    EXPECT_FALSE(dm.population.has_observers());
+  std::atomic<bool> preemption{false};
+  auto anchor = make_anchor(covering_pair(), preemption, test_tolerances());
+  mip::repair_lns_t<int, double> lns(*anchor, preemption, 42);
+  mip::lns_repair_request_t<double> request;
+  request.start              = {1, 1};
+  request.lower              = {0, 0};
+  request.upper              = {1, 1};
+  request.time_limit_seconds = 2;
+  for (auto backend : {mip::lns_repair_backend_t::cpufj, mip::lns_repair_backend_t::submip}) {
+    auto result = lns.repair(request, backend, &handle);
+    ASSERT_TRUE(result.feasible);
+    EXPECT_TRUE(lns.feasible(result.assignment));
+    EXPECT_DOUBLE_EQ(result.objective, 1);
   }
-  EXPECT_TRUE(dm.population.best_feasible().compute_feasibility());
-  EXPECT_EQ(dm.population.best_feasible().get_host_assignment(), before);
-  EXPECT_FALSE(context.preempt_heuristic_solver_.load());
-  EXPECT_FALSE(dm.population.has_observers());
+}
+
+TEST(Lns, RunImprovesFromToleranceFeasibleSeedWithoutMutatingSource)
+{
+  host_model_t model;
+  const int n = 40;
+  model.lower.assign(n, 0.0);
+  model.upper.assign(n, 1.0);
+  model.objective.assign(n, 1.0);
+  model.coefficients.assign(n, 1.0);
+  model.row_lower.assign(n, 0.0);
+  model.row_upper.assign(n, 1.0);
+  model.types.assign(n, opt::var_t::INTEGER);
+  model.columns.resize(n);
+  model.offsets.resize(n + 1);
+  std::iota(model.columns.begin(), model.columns.end(), 0);
+  std::iota(model.offsets.begin(), model.offsets.end(), 0);
+  std::atomic<bool> preemption{false};
+  auto anchor = make_anchor(model, preemption, test_tolerances());
+  mip::repair_lns_t<int, double> lns(*anchor, preemption, 42);
+  const std::vector<double> source(n, 1.0 - 5e-5);
+  ASSERT_TRUE(lns.feasible(source));
+  double last         = lns.cost(source);
+  int submissions     = 0;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  lns.run(
+    [&](auto& seeds) {
+      if (std::chrono::steady_clock::now() > deadline) lns.halted = true;
+      seeds.push_back(source);
+    },
+    [&](const auto& x, double objective) {
+      ++submissions;
+      EXPECT_TRUE(lns.feasible(x));
+      EXPECT_DOUBLE_EQ(objective, lns.cost(x));
+      EXPECT_LT(objective, last);
+      last = objective;
+      if (objective <= 0) lns.halted = true;
+    });
+  EXPECT_GT(submissions, 0);
+  EXPECT_LE(last, 0);
+  EXPECT_EQ(source, std::vector<double>(n, 1.0 - 5e-5));
 }
 
 TEST(Lns, ThreadBudgetLeavesCapacityForExistingSolver)
@@ -318,50 +297,20 @@ void init_early_lns_test_problem(opt::optimization_problem_t<int, double>& op, b
   op.set_constraint_upper_bounds(row_upper.data(), 1);
 }
 
-std::atomic<bool> early_repair_lns_completed{false};
-
-void polling_then_failing_early_repair_lns(const model_t& model,
-                                           const snapshot_fn& snapshot,
-                                           const submit_fn& submit,
-                                           const stop_fn&,
-                                           uint64_t)
-{
-  EXPECT_TRUE(omp_in_parallel());
-  EXPECT_EQ(omp_get_num_threads(), 7);
-  EXPECT_EQ(omp_get_max_threads(), 1);
-  EXPECT_EQ(model.feasibility_tolerance, 3e-7);
-  EXPECT_EQ(model.relative_tolerance, 4e-8);
-  EXPECT_EQ(model.integrality_tolerance, 2e-4);
-  EXPECT_EQ(model.row_tolerances[0], (mip::get_cstr_tolerance<int, double>(0, 2, 3e-7, 4e-8)));
-  auto best = snapshot();
-  EXPECT_EQ(best, (population_t{{1.0, 0.0}}));
-  submit({.75, 0});
-  // The test's producer supplies a newer best through the shared CPUFJ store.
-  best = snapshot();
-  EXPECT_EQ(best, (population_t{{.5, 0.0}}));
-  submit({.25, 0});
-  submit({-1, 0});  // Invalid candidate must not reach the callback or shared best.
-  early_repair_lns_completed = true;
-  throw std::runtime_error("injected presolve LNS failure");
-}
-
-TEST(Lns, PresolveWorkersPollAndPublishSharedBestAndCaptureFailure)
+TEST(Lns, PresolveWorkerFailureIsCapturedAfterPublishingValidatedImprovement)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
-  init_early_lns_test_problem(op);
+  init_early_lns_test_problem(op, true);
+  const double row_lower = 1;
+  op.set_constraint_lower_bounds(&row_lower, 1);
   opt::mip_solver_settings_t<int, double> settings;
-  settings.tolerances.absolute_tolerance    = 3e-7;
-  settings.tolerances.relative_tolerance    = 4e-8;
-  settings.tolerances.integrality_tolerance = 2e-4;
   std::atomic<bool> preemption{false};
   auto anchor =
     mip::init_fj_cpu_from_optimization_problem(op, settings.get_tolerances(), preemption);
   auto shared = std::make_shared<mip::fj_cpu_shared_incumbent_t<int, double>>();
-  shared->publish(1, 1, {1, 0});
-  int reports = 0;
-  std::atomic<bool> source_ready{false};
-  early_repair_lns_completed = false;
+  shared->publish(3, 3, {1, 1});
+  std::atomic<bool> reported{false};
   cuopt::lns::task_errors_t task_errors;
 #pragma omp parallel num_threads(7)
   {
@@ -372,32 +321,26 @@ TEST(Lns, PresolveWorkersPollAndPublishSharedBestAndCaptureFailure)
         shared,
         preemption,
         task_errors,
-        [&](double objective, const auto& x, const char* origin) {
-          ++reports;
-          EXPECT_STREQ(origin, "Repair LNS");
-          EXPECT_EQ(x[0], objective);
-          if (reports == 1) source_ready = true;
+        [&](double objective, const auto& x, const char*) {
+          EXPECT_TRUE(omp_in_parallel());
+          EXPECT_EQ(omp_get_max_threads(), 1);
+          EXPECT_LT(objective, 3);
+          EXPECT_GE(x[0] + x[1], 1);
+          reported = true;
+          throw std::runtime_error("injected presolve LNS failure");
         },
-        42,
-        polling_then_failing_early_repair_lns);
-      workers.set_source([&](auto& x) {
-        if (!source_ready.exchange(false)) return false;
-        x = {.5, 0};
-        return true;
-      });
+        42);
       workers.start();
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-      while (!early_repair_lns_completed.load() && std::chrono::steady_clock::now() < deadline)
+      while (!reported.load() && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       EXPECT_NO_THROW(workers.finish());
       EXPECT_NO_THROW(workers.finish());
     }
   }
-  EXPECT_TRUE(early_repair_lns_completed.load());
+  EXPECT_TRUE(reported.load());
   EXPECT_THROW(task_errors.rethrow_if_error(), std::runtime_error);
-  EXPECT_EQ(reports, 2);
-  EXPECT_EQ(shared->objective.load(), .25);
-  EXPECT_EQ(shared->assignment, (std::vector<double>{.25, 0}));
+  EXPECT_LT(shared->objective.load(), 3);
   EXPECT_FALSE(preemption.load());
 }
 

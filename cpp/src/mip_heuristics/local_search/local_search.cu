@@ -124,15 +124,31 @@ void local_search_t<i_t, f_t>::start_cpufj_scratch_threads(population_t<i_t, f_t
   }
 }
 
+// The current device is per thread, and the task may run on any team member.
+template <typename i_t, typename f_t>
+static void run_repair_lns_task(repair_lns_t<i_t, f_t>& repair_lns,
+                                lns_population_feed_t<i_t, f_t>& feed,
+                                population_t<i_t, f_t>& population,
+                                int device)
+{
+  RAFT_CUDA_TRY(cudaSetDevice(device));
+  repair_lns.run([&feed](auto& seeds) { feed.recent_feasible(seeds); },
+                 [&population](const auto& x, f_t objective) {
+                   population.add_external_solution(x, objective, solution_origin_t::CPUFJ);
+                 });
+}
+
 template <typename i_t, typename f_t>
 void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
   population_t<i_t, f_t>& population)
 {
   if (context.early_cpufj_ptr && context.early_cpufj_ptr->improvement_lane_count()) return;
   // Share the solve team and leave capacity for feasibility discovery.
-  if (lns_worker_count(omp_get_num_threads(),
-                       context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC) < 2)
-    return;
+  const int workers = lns_worker_count(
+    omp_get_num_threads(), context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC);
+  if (workers == 0) return;
+  auto* errors_ptr = context.lns_task_errors;
+  cuopt_assert(errors_ptr != nullptr, "LNS workers need the team error latch");
 
   std::vector<f_t> default_weights(context.problem_ptr->n_constraints, 1.);
   solution_t<i_t, f_t> solution(*context.problem_ptr);
@@ -175,14 +191,36 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
       population.add_external_solution(h_vec, obj, solution_origin_t::CPUFJ);
     };
 
+  repair_lns_feed = std::make_unique<lns_population_feed_t<i_t, f_t>>(population);
+  repair_lns      = std::make_unique<repair_lns_t<i_t, f_t>>(
+    *scratch_cpu_fj_lns, context.preempt_heuristic_solver_, context.base_seed, population.timer);
+  int device;
+  RAFT_CUDA_TRY(cudaGetDevice(&device));
+  CUOPT_LOG_DEBUG("Launching repair LNS improvement task");
+  auto* repair_ptr = repair_lns.get();
+  auto* feed_ptr   = repair_lns_feed.get();
+  auto* pop        = &population;
+#pragma omp task firstprivate(repair_ptr, feed_ptr, pop, errors_ptr, device) \
+  priority(CUOPT_DEFAULT_TASK_PRIORITY) depend(out : *repair_ptr) default(none)
+  {
+    const int previous_max_threads = omp_get_max_threads();
+    omp_set_num_threads(1);
+    try {
+      run_repair_lns_task(*repair_ptr, *feed_ptr, *pop, device);
+    } catch (...) {
+      repair_ptr->halted = true;
+      errors_ptr->capture(std::current_exception());
+    }
+    omp_set_num_threads(previous_max_threads);
+  }
+  if (workers < 2) return;
+
   scratch_cpu_fj_lns_best = population.best_feasible_incumbent();
 
   CUOPT_LOG_DEBUG("Launching CPUFJ LNS improvement task");
 
-  auto ptr         = scratch_cpu_fj_lns.get();
-  auto* best_ptr   = scratch_cpu_fj_lns_best.get();
-  auto* errors_ptr = context.lns_task_errors;
-  cuopt_assert(errors_ptr != nullptr, "CPUFJ LNS worker needs the team error latch");
+  auto ptr       = scratch_cpu_fj_lns.get();
+  auto* best_ptr = scratch_cpu_fj_lns_best.get();
   const size_t n = context.problem_ptr->n_variables;
 #pragma omp task firstprivate(ptr, best_ptr, errors_ptr, n) priority(CUOPT_DEFAULT_TASK_PRIORITY) \
   depend(out : *ptr) default(none)
@@ -250,6 +288,7 @@ void local_search_t<i_t, f_t>::stop_cpufj_scratch_threads()
 
   // Signal every persistent worker before reaching any task scheduling point.
   if (scratch_cpu_fj_lns) scratch_cpu_fj_lns->halted = true;
+  if (repair_lns) repair_lns->halted = true;
   if (scratch_cpu_fj_on_lp_opt) scratch_cpu_fj_on_lp_opt->halted = true;
   for (auto& cpu_fj : scratch_cpu_fj) {
     cuopt_assert(cpu_fj != nullptr, "scratch climbers must have been created");
@@ -269,6 +308,11 @@ void local_search_t<i_t, f_t>::stop_cpufj_scratch_threads()
   if (scratch_cpu_fj_lns) {
 #pragma omp taskwait depend(in : *scratch_cpu_fj_lns)  // Wait for the LNS improvement task
     CUOPT_LOG_DEBUG("CPUFJ LNS improvement task was stopped");
+  }
+
+  if (repair_lns) {
+#pragma omp taskwait depend(in : *repair_lns)  // Wait for the repair LNS improvement task
+    CUOPT_LOG_DEBUG("Repair LNS improvement task was stopped");
   }
 }
 
