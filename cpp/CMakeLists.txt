@@ -757,6 +757,17 @@ if((CUOPT_FIND_CLIENT_EXTERNALLY OR CUOPT_FIND_MATHOPT_EXTERNALLY OR CUOPT_FIND_
     find_package(cuopt "${RAPIDS_VERSION}" QUIET)
 endif()
 
+# A requested external component must not silently fall back to a local build.
+if(CUOPT_FIND_CLIENT_EXTERNALLY AND NOT TARGET cuopt::client)
+    message(FATAL_ERROR "CUOPT_FIND_CLIENT_EXTERNALLY=ON but find_package(cuopt) did not provide cuopt::client")
+endif()
+if(CUOPT_FIND_MATHOPT_EXTERNALLY AND NOT TARGET cuopt::mathopt)
+    message(FATAL_ERROR "CUOPT_FIND_MATHOPT_EXTERNALLY=ON but find_package(cuopt) did not provide cuopt::mathopt")
+endif()
+if(CUOPT_FIND_ROUTING_EXTERNALLY AND NOT TARGET cuopt::routing)
+    message(FATAL_ERROR "CUOPT_FIND_ROUTING_EXTERNALLY=ON but find_package(cuopt) did not provide cuopt::routing")
+endif()
+
 # - cuopt_client - CPU-only support library ----------------------------------------------------------
 #
 # Host-side problem representation (parsers, data_model_view, mps_data_model, writers), the
@@ -1107,6 +1118,12 @@ endif ()
 # Built for the internal tests, the MIP benchmarks, and for consumers that embed cuOpt into a
 # single self-contained shared object rather than linking the shared libcuopt (see the Java
 # classifier JARs).
+if ((BUILD_TESTS OR (BUILD_MIP_BENCHMARKS AND NOT BUILD_LP_ONLY) OR CUOPT_BUILD_STATIC_LIB)
+    AND (CUOPT_FIND_CLIENT_EXTERNALLY OR CUOPT_FIND_MATHOPT_EXTERNALLY OR CUOPT_FIND_ROUTING_EXTERNALLY))
+    message(FATAL_ERROR "cuopt_static embeds *_objs directly, which an externally-resolved "
+                         "component doesn't have; it is incompatible with CUOPT_FIND_*_EXTERNALLY")
+endif()
+
 if (BUILD_TESTS OR (BUILD_MIP_BENCHMARKS AND NOT BUILD_LP_ONLY) OR CUOPT_BUILD_STATIC_LIB)
     # Embeds the *_objs directly rather than linking the shared component libraries: internal
     # tests and the Java classifier JAR reach internals the shared libraries don't export.
