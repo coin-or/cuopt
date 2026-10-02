@@ -109,13 +109,13 @@ two_opt_move_t find_cardinality_exchange(fj_cpu_climber_t<i_t, f_t>& c)
   if (!c.violated_constraints.empty() &&
       c.problem->card_group_of_variable.size() == c.h_assignment.size()) {
     const auto& violated = c.violated_constraints.contents;
-    const i_t first      = c.rng.next_u32() % (uint32_t)violated.size();
+    const i_t first      = c.rng.uniform((i_t)0, (i_t)violated.size());
     for (i_t r = 0; r < std::min<i_t>(4, (i_t)violated.size()); ++r) {
       const i_t row           = violated[(first + r) % violated.size()];
       const auto [begin, end] = c.range_for_row(row);
       const i_t width         = end - begin;
       if (!width) continue;
-      const i_t start = begin + c.rng.next_u32() % (uint32_t)width;
+      const i_t start = c.rng.uniform(begin, end);
       for (i_t q = 0, p = start; q < std::min<i_t>(128, width);
            ++q, p       = p + 1 == end ? begin : p + 1) {
         const i_t group = c.problem->card_group_of_variable[c.h_variables[p]];
@@ -126,7 +126,7 @@ two_opt_move_t find_cardinality_exchange(fj_cpu_climber_t<i_t, f_t>& c)
       }
     }
   }
-  const i_t random_start = c.rng.next_u32() % (uint32_t)n_rows;
+  const i_t random_start = c.rng.uniform((i_t)0, n_rows);
   for (i_t d = 0; (i_t)groups.size() < draws && d < n_rows; ++d) {
     const i_t group = (random_start + d) % n_rows;
     if (!seen[group]) {
@@ -140,8 +140,8 @@ two_opt_move_t find_cardinality_exchange(fj_cpu_climber_t<i_t, f_t>& c)
     if (scored >= limit) break;
     const i_t begin = offsets[row], width = offsets[row + 1] - begin;
     if (width <= 1) continue;
-    const i_t first_start  = c.rng.next_u32() % (uint32_t)width;
-    const i_t second_start = c.rng.next_u32() % (uint32_t)width;
+    const i_t first_start  = c.rng.uniform((i_t)0, width);
+    const i_t second_start = c.rng.uniform((i_t)0, width);
     for (i_t pi = 0; pi < width && scored < limit; ++pi) {
       const i_t first = vars[begin + (first_start + pi) % width];
       if (c.h_assignment[first].get() < 0.5 || tabu_check<i_t, f_t>(c, first, -1, true)) continue;
@@ -178,11 +178,11 @@ two_opt_move_t find_tight_row_exchange(fj_cpu_climber_t<i_t, f_t>& c)
   two_opt_move_t best;
   if (!c.violated_constraints.empty() || c.h_objective_weight <= 0 || c.n_rows == 0) return best;
 
-  cuopt::pcgenerator_t rng(c.settings.seed + 3628273133u * c.iterations, 0, 0);
+  auto& rng                 = c.rng;
   const i_t row_samples     = 4;
   const i_t primary_samples = 12;
   const i_t helper_samples  = 16;
-  const i_t first_row       = rng.next_u32() % (uint32_t)c.n_rows;
+  const i_t first_row       = rng.uniform((i_t)0, c.n_rows);
 
   for (i_t ri = 0; ri < row_samples; ++ri) {
     const i_t target = (first_row + ri) % c.n_rows;
@@ -192,7 +192,7 @@ two_opt_move_t find_tight_row_exchange(fj_cpu_climber_t<i_t, f_t>& c)
     const auto [begin, end] = c.range_for_row(target);
     const i_t width         = end - begin;
     if (width < 2) continue;
-    const i_t start = begin + rng.next_u32() % (uint32_t)width;
+    const i_t start = rng.uniform(begin, end);
     for (i_t q = 0, p = start; q < std::min<i_t>(primary_samples, width);
          ++q, p       = p + 1 == end ? begin : p + 1) {
       const i_t primary = c.h_variables[p];
@@ -205,7 +205,7 @@ two_opt_move_t find_tight_row_exchange(fj_cpu_climber_t<i_t, f_t>& c)
       if (!check_variable_within_bounds<i_t, f_t>(c, primary, old + delta)) continue;
       if (tabu_check<i_t, f_t>(c, primary, delta, true)) continue;
 
-      const i_t helper_start = begin + rng.next_u32() % (uint32_t)width;
+      const i_t helper_start = rng.uniform(begin, end);
       for (i_t hq = 0, hp = helper_start; hq < std::min<i_t>(helper_samples, width);
            ++hq, hp       = hp + 1 == end ? begin : hp + 1) {
         const i_t helper = c.h_variables[hp];
@@ -248,18 +248,18 @@ two_opt_move_t find_compound_repair(fj_cpu_climber_t<i_t, f_t>& c)
 {
   two_opt_move_t best;
   if (!c.use_compound_repair || c.violated_constraints.empty()) return best;
-  auto& violated = c.violated_constraints.contents;
-  cuopt::pcgenerator_t rng(c.settings.seed + 2246822519u * c.iterations, 0, 0);
+  auto& violated            = c.violated_constraints.contents;
+  auto& rng                 = c.rng;
   const i_t row_samples     = 4;
   const i_t primary_samples = 12;
   const i_t helper_samples  = 16;
-  const i_t first_row       = rng.next_u32() % (uint32_t)violated.size();
+  const i_t first_row       = rng.uniform((i_t)0, (i_t)violated.size());
   for (i_t ri = 0; ri < std::min<i_t>(row_samples, violated.size()); ++ri) {
     const i_t target        = violated[(first_row + ri) % violated.size()];
     const auto [begin, end] = c.range_for_row(target);
     const i_t width         = end - begin;
     if (!width) continue;
-    const i_t start = begin + rng.next_u32() % (uint32_t)width;
+    const i_t start = rng.uniform(begin, end);
     for (i_t q = 0, p = start; q < std::min<i_t>(primary_samples, width);
          ++q, p       = p + 1 == end ? begin : p + 1) {
       const i_t primary = c.h_variables[p];
@@ -292,7 +292,7 @@ two_opt_move_t find_compound_repair(fj_cpu_climber_t<i_t, f_t>& c)
       const auto [hb, he]    = c.range_for_row(blocker);
       const i_t helper_width = he - hb;
       if (!helper_width) continue;
-      const i_t helper_start = hb + rng.next_u32() % (uint32_t)helper_width;
+      const i_t helper_start = rng.uniform(hb, he);
       for (i_t hq = 0, hp = helper_start; hq < std::min<i_t>(helper_samples, helper_width);
            ++hq, hp       = hp + 1 == he ? hb : hp + 1) {
         const i_t helper      = c.h_variables[hp];
@@ -380,8 +380,7 @@ static thrust::tuple<fj_move_t, fj_staged_score_t> find_mtm_move(
     auto [offset_begin, offset_end] = fj_cpu.range_for_row((i_t)cstr_idx);
     const i_t width                 = offset_end - offset_begin;
     const i_t visit                 = std::min(width, per_row_cap);
-    const i_t start =
-      visit == width ? offset_begin : offset_begin + (i_t)(rng.next_u32() % (uint32_t)width);
+    const i_t start = visit == width ? offset_begin : rng.uniform(offset_begin, offset_end);
     for (i_t q = 0, i = start; q < visit; ++q, i = (i + 1 == offset_end ? offset_begin : i + 1)) {
       const i_t var_idx = fj_cpu.h_variables[i];
       if (fj_cpu.degree_balance_mtm) {
@@ -597,7 +596,7 @@ static thrust::tuple<fj_move_t, fj_move_t, fj_staged_score_t> find_lift_2opt_mov
   const i_t n_draws = n_obj < fj_cpu.hp.two_opt_candidates ? n_obj : fj_cpu.hp.two_opt_candidates;
 
   for (i_t t = 0; t < n_draws; ++t) {
-    const i_t var1 = fj_cpu.problem->h_objective_vars[rng.next_u32() % (uint32_t)n_obj];
+    const i_t var1 = fj_cpu.problem->h_objective_vars[rng.uniform((i_t)0, n_obj)];
     if (!fj_cpu.h_is_binary_variable[var1]) continue;
 
     const f_t coeff1 = fj_cpu.problem->h_obj_coeffs[var1];

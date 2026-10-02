@@ -18,12 +18,14 @@
 
 #include <utilities/inline_lp_test_utils.hpp>
 
+#include <cuopt/mathematical_optimization/constants.h>
 #include <cuopt/mathematical_optimization/cpu_optimization_problem.hpp>
 #include <cuopt/mathematical_optimization/cpu_optimization_problem_solution.hpp>
 #include <cuopt/mathematical_optimization/mip/solver_settings.hpp>
 #include <cuopt/mathematical_optimization/optimization_problem_interface.hpp>
 #include <cuopt/mathematical_optimization/optimization_problem_utils.hpp>
 #include <cuopt/mathematical_optimization/pdlp/solver_settings.hpp>
+#include <cuopt/mathematical_optimization/solver_settings.hpp>
 #include <raft/util/cudart_utils.hpp>
 #include <rmm/device_uvector.hpp>
 #include "grpc_client.hpp"
@@ -1291,6 +1293,48 @@ TEST_F(GrpcClientTest, SubmitMIP_Success)
   EXPECT_EQ(result.job_id, "mip-job-001");
 }
 
+TEST_F(GrpcClientTest, SubmitMIP_UnaryPreservesIncumbentSetFlag)
+{
+  EXPECT_CALL(*mock_stub_, SubmitJob(_, _, _))
+    .WillOnce([](grpc::ClientContext*,
+                 const cuopt::remote::SubmitJobRequest& req,
+                 cuopt::remote::SubmitJobResponse* resp) {
+      EXPECT_TRUE(req.has_mip_request());
+      EXPECT_TRUE(req.mip_request().enable_incumbents());
+      EXPECT_TRUE(req.mip_request().enable_set_incumbent());
+      resp->set_job_id("mip-incumbent-set-unary");
+      return grpc::Status::OK;
+    });
+
+  auto problem = create_test_mip_problem();
+  mip_solver_settings_t<int32_t, double> settings;
+
+  auto result = client_->submit_mip(problem, settings, true, true);
+
+  EXPECT_TRUE(result.success);
+}
+
+TEST_F(GrpcClientTest, SubmitMIP_UnaryPreservesSetIncumbentWithoutIncumbents)
+{
+  EXPECT_CALL(*mock_stub_, SubmitJob(_, _, _))
+    .WillOnce([](grpc::ClientContext*,
+                 const cuopt::remote::SubmitJobRequest& req,
+                 cuopt::remote::SubmitJobResponse* resp) {
+      EXPECT_TRUE(req.has_mip_request());
+      EXPECT_FALSE(req.mip_request().enable_incumbents());
+      EXPECT_TRUE(req.mip_request().enable_set_incumbent());
+      resp->set_job_id("mip-set-incumbent-only-unary");
+      return grpc::Status::OK;
+    });
+
+  auto problem = create_test_mip_problem();
+  mip_solver_settings_t<int32_t, double> settings;
+
+  auto result = client_->submit_mip(problem, settings, false, true);
+
+  EXPECT_TRUE(result.success);
+}
+
 TEST_F(GrpcClientTest, SubmitMIP_RpcFailure)
 {
   EXPECT_CALL(*mock_stub_, SubmitJob(_, _, _))
@@ -1843,6 +1887,116 @@ TEST_F(GrpcClientTest, SubmitLP_ChunkedUploadForLargePayload)
   EXPECT_GT(chunk_count, 0) << "Should have sent at least one array chunk";
 }
 
+TEST_F(GrpcClientTest, SubmitMIP_ChunkedPreservesIncumbentSetFlag)
+{
+  grpc_client_config_t cfg;
+  cfg.server_address                = "mock://test";
+  cfg.chunked_array_threshold_bytes = 0;
+  cfg.chunk_size_bytes              = 4 * 1024;
+
+  auto client = std::make_unique<grpc_client_t>(cfg);
+  auto mock   = std::make_shared<NiceMock<MockCuOptStub>>();
+  grpc_test_inject_mock_stub_typed(*client, mock);
+
+  EXPECT_CALL(*mock, StartChunkedUpload(_, _, _))
+    .WillOnce([](grpc::ClientContext*,
+                 const cuopt::remote::StartChunkedUploadRequest& req,
+                 cuopt::remote::StartChunkedUploadResponse* resp) {
+      EXPECT_TRUE(req.has_problem_header());
+      EXPECT_TRUE(req.problem_header().enable_incumbents());
+      EXPECT_TRUE(req.problem_header().enable_set_incumbent());
+      resp->set_upload_id("mip-incumbent-set-chunked");
+      resp->set_max_message_bytes(4 * 1024 * 1024);
+      return grpc::Status::OK;
+    });
+
+  int chunk_count = 0;
+  EXPECT_CALL(*mock, SendArrayChunk(_, _, _))
+    .WillRepeatedly([&chunk_count](grpc::ClientContext*,
+                                   const cuopt::remote::SendArrayChunkRequest& req,
+                                   cuopt::remote::SendArrayChunkResponse* resp) {
+      EXPECT_EQ(req.upload_id(), "mip-incumbent-set-chunked");
+      EXPECT_TRUE(req.has_chunk());
+      chunk_count++;
+      resp->set_upload_id("mip-incumbent-set-chunked");
+      resp->set_chunks_received(chunk_count);
+      return grpc::Status::OK;
+    });
+
+  EXPECT_CALL(*mock, FinishChunkedUpload(_, _, _))
+    .WillOnce([](grpc::ClientContext*,
+                 const cuopt::remote::FinishChunkedUploadRequest& req,
+                 cuopt::remote::SubmitJobResponse* resp) {
+      EXPECT_EQ(req.upload_id(), "mip-incumbent-set-chunked");
+      resp->set_job_id("mip-incumbent-set-chunked-job");
+      return grpc::Status::OK;
+    });
+
+  auto problem = create_test_mip_problem();
+  mip_solver_settings_t<int32_t, double> settings;
+
+  auto result = client->submit_mip(problem, settings, true, true);
+
+  EXPECT_TRUE(result.success) << result.error_message;
+  EXPECT_EQ(result.job_id, "mip-incumbent-set-chunked-job");
+  EXPECT_GT(chunk_count, 0) << "Should have sent at least one array chunk";
+}
+
+TEST_F(GrpcClientTest, SubmitMIP_ChunkedPreservesSetIncumbentWithoutIncumbents)
+{
+  grpc_client_config_t cfg;
+  cfg.server_address                = "mock://test";
+  cfg.chunked_array_threshold_bytes = 0;
+  cfg.chunk_size_bytes              = 4 * 1024;
+
+  auto client = std::make_unique<grpc_client_t>(cfg);
+  auto mock   = std::make_shared<NiceMock<MockCuOptStub>>();
+  grpc_test_inject_mock_stub_typed(*client, mock);
+
+  EXPECT_CALL(*mock, StartChunkedUpload(_, _, _))
+    .WillOnce([](grpc::ClientContext*,
+                 const cuopt::remote::StartChunkedUploadRequest& req,
+                 cuopt::remote::StartChunkedUploadResponse* resp) {
+      EXPECT_TRUE(req.has_problem_header());
+      EXPECT_FALSE(req.problem_header().enable_incumbents());
+      EXPECT_TRUE(req.problem_header().enable_set_incumbent());
+      resp->set_upload_id("mip-set-incumbent-only-chunked");
+      resp->set_max_message_bytes(4 * 1024 * 1024);
+      return grpc::Status::OK;
+    });
+
+  int chunk_count = 0;
+  EXPECT_CALL(*mock, SendArrayChunk(_, _, _))
+    .WillRepeatedly([&chunk_count](grpc::ClientContext*,
+                                   const cuopt::remote::SendArrayChunkRequest& req,
+                                   cuopt::remote::SendArrayChunkResponse* resp) {
+      EXPECT_EQ(req.upload_id(), "mip-set-incumbent-only-chunked");
+      EXPECT_TRUE(req.has_chunk());
+      chunk_count++;
+      resp->set_upload_id("mip-set-incumbent-only-chunked");
+      resp->set_chunks_received(chunk_count);
+      return grpc::Status::OK;
+    });
+
+  EXPECT_CALL(*mock, FinishChunkedUpload(_, _, _))
+    .WillOnce([](grpc::ClientContext*,
+                 const cuopt::remote::FinishChunkedUploadRequest& req,
+                 cuopt::remote::SubmitJobResponse* resp) {
+      EXPECT_EQ(req.upload_id(), "mip-set-incumbent-only-chunked");
+      resp->set_job_id("mip-set-incumbent-only-chunked-job");
+      return grpc::Status::OK;
+    });
+
+  auto problem = create_test_mip_problem();
+  mip_solver_settings_t<int32_t, double> settings;
+
+  auto result = client->submit_mip(problem, settings, false, true);
+
+  EXPECT_TRUE(result.success) << result.error_message;
+  EXPECT_EQ(result.job_id, "mip-set-incumbent-only-chunked-job");
+  EXPECT_GT(chunk_count, 0) << "Should have sent at least one array chunk";
+}
+
 TEST_F(GrpcClientTest, SubmitLP_UnaryForSmallPayload)
 {
   EXPECT_CALL(*mock_stub_, SubmitJob(_, _, _))
@@ -1934,7 +2088,7 @@ TEST(MapperRoundtrip, MIPSettingsAllFields)
   orig.heuristic_params.enabled_recombiners                = 7;      // default 15 (bitmask)
   orig.heuristic_params.cycle_detection_length             = 40;     // default 30
   orig.heuristic_params.relaxed_lp_time_limit              = 2.5;    // default 1.0
-  orig.heuristic_params.related_vars_time_limit            = 45.0;   // default 30.0
+  orig.heuristic_params.related_vars_time_limit            = 45.0;   // default 2.0
 
   // Roundtrip: C++ -> proto -> C++
   cuopt::remote::MIPSolverSettings pb;
@@ -2324,6 +2478,112 @@ TEST(MapperRoundtrip, PDLPSettingsAllFields)
   EXPECT_EQ(restored.save_best_primal_so_far, true);
   EXPECT_EQ(restored.first_primal_feasible, true);
   EXPECT_EQ(restored.hyper_params.do_curtis_reid_scaling, false);
+}
+
+TEST(MapperRoundtrip, ParameterMapEmptyLeavesTypedField)
+{
+  cuopt::remote::PDLPSolverSettings pb;
+  pb.set_time_limit(3.5);
+
+  solver_settings_t<int32_t, double> settings;
+  map_proto_to_pdlp_settings(pb, settings.get_pdlp_settings());
+  apply_parameter_overrides(settings, pb.parameters());
+
+  EXPECT_DOUBLE_EQ(settings.get_pdlp_settings().time_limit, 3.5);
+}
+
+TEST(MapperRoundtrip, ParameterMapOverridesDeprecatedFields)
+{
+  cuopt::remote::PDLPSolverSettings pb;
+  pb.set_time_limit(3.5);
+  (*pb.mutable_parameters())[CUOPT_TIME_LIMIT] = "9.25";
+
+  solver_settings_t<int32_t, double> settings;
+  map_proto_to_pdlp_settings(pb, settings.get_pdlp_settings());
+  apply_parameter_overrides(settings, pb.parameters());
+
+  EXPECT_DOUBLE_EQ(settings.get_pdlp_settings().time_limit, 9.25);
+}
+
+TEST(MapperRoundtrip, ParameterMapRejectsUnknownName)
+{
+  cuopt::remote::PDLPSolverSettings pb;
+  (*pb.mutable_parameters())["not_a_parameter"] = "1";
+
+  solver_settings_t<int32_t, double> settings;
+  EXPECT_THROW(apply_parameter_overrides(settings, pb.parameters()), std::invalid_argument);
+}
+
+TEST(MapperRoundtrip, ParameterMapRejectsOutOfRangeValue)
+{
+  cuopt::remote::PDLPSolverSettings pb;
+  (*pb.mutable_parameters())[CUOPT_METHOD] = "99";
+
+  solver_settings_t<int32_t, double> settings;
+  EXPECT_THROW(apply_parameter_overrides(settings, pb.parameters()), std::invalid_argument);
+}
+
+TEST(MapperRoundtrip, ParameterMapRejectsTooManyEntries)
+{
+  solver_settings_t<int32_t, double> settings;
+  const std::size_t registered =
+    settings.get_float_parameters().size() + settings.get_int_parameters().size() +
+    settings.get_bool_parameters().size() + settings.get_string_parameters().size();
+  const std::size_t cap = registered * 2;
+
+  cuopt::remote::PDLPSolverSettings pb;
+  for (std::size_t i = 0; i < cap + 1; ++i) {
+    (*pb.mutable_parameters())["extra_" + std::to_string(i)] = "1";
+  }
+
+  try {
+    apply_parameter_overrides(settings, pb.parameters());
+    FAIL() << "Expected too many solver parameters";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string(e.what()).find("Too many solver parameters"), std::string::npos);
+  }
+}
+
+TEST(MapperRoundtrip, ParameterMapRoundTripsSolverSettings)
+{
+  using settings_t = solver_settings_t<int32_t, double>;
+  settings_t src;
+  const double precise = 1.2345678901234567e-4;
+  src.set_parameter(CUOPT_TIME_LIMIT, 4.5);
+  src.set_parameter(CUOPT_ABSOLUTE_DUAL_TOLERANCE, precise);
+  src.set_parameter(CUOPT_SEQUENCE_SOLVE, true);
+  src.set_parameter(CUOPT_MIP_FLOW_COVER_CUTS, 1);
+
+  cuopt::remote::PDLPSolverSettings lp_pb;
+  map_pdlp_settings_to_proto(src.get_pdlp_settings(), &lp_pb);
+  append_solver_parameters(src, lp_pb.mutable_parameters());
+
+  EXPECT_EQ(lp_pb.parameters().at(CUOPT_SEQUENCE_SOLVE), "true");
+  // A published client can still set the typed field. The map wins.
+  lp_pb.set_time_limit(1.0);
+
+  settings_t dst;
+  map_proto_to_pdlp_settings(lp_pb, dst.get_pdlp_settings());
+  EXPECT_DOUBLE_EQ(dst.get_pdlp_settings().time_limit, 1.0);
+  apply_parameter_overrides(dst, lp_pb.parameters());
+  EXPECT_DOUBLE_EQ(dst.get_pdlp_settings().time_limit, 4.5);
+  EXPECT_DOUBLE_EQ(dst.get_pdlp_settings().tolerances.absolute_dual_tolerance, precise);
+  EXPECT_TRUE(dst.get_pdlp_settings().sequence_solve);
+
+  cuopt::remote::MIPSolverSettings mip_pb;
+  map_mip_settings_to_proto(src.get_mip_settings(), &mip_pb);
+  append_solver_parameters(src, mip_pb.mutable_parameters());
+  EXPECT_EQ(mip_pb.parameters().at(CUOPT_MIP_FLOW_COVER_CUTS), "1");
+
+  settings_t mip_dst;
+  map_proto_to_mip_settings(mip_pb, mip_dst.get_mip_settings());
+  apply_parameter_overrides(mip_dst, mip_pb.parameters());
+  EXPECT_EQ(mip_dst.get_mip_settings().flow_cover_cuts, 1);
+
+  settings_t defaults;
+  cuopt::remote::PDLPSolverSettings inf_pb;
+  append_solver_parameters(defaults, inf_pb.mutable_parameters());
+  EXPECT_EQ(inf_pb.parameters().at(CUOPT_TIME_LIMIT), "inf");
 }
 
 TEST(MapperRoundtrip, PDLPSettingsIterationLimitSentinel)

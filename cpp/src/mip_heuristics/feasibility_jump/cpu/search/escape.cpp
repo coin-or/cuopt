@@ -18,7 +18,7 @@ void randomize_variable(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, cuopt::
 {
   f_t lb  = std::max(get_lower(fj_cpu.h_var_bounds[var_idx].get()), -1e7);
   f_t ub  = std::min(get_upper(fj_cpu.h_var_bounds[var_idx].get()), 1e7);
-  f_t val = lb + (ub - lb) * rng.next_double();
+  f_t val = rng.uniform(lb, ub);
   if (is_integer_var<i_t, f_t>(fj_cpu, var_idx)) {
     lb  = std::ceil(lb);
     ub  = std::floor(ub);
@@ -77,7 +77,7 @@ void perturb(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   if (categorical_kick) {
     const auto& offsets   = fj_cpu.problem->card_row_offsets;
     const auto& variables = fj_cpu.problem->card_variables;
-    const i_t group       = rng.next_u32() % static_cast<uint32_t>(offsets.size() - 1);
+    const i_t group       = rng.uniform((i_t)0, (i_t)offsets.size() - 1);
     const i_t begin       = offsets[group];
     const i_t width       = offsets[group + 1] - begin;
     i_t active            = -1;
@@ -88,7 +88,7 @@ void perturb(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
       }
     }
     if (active >= 0 && width > 1) {
-      i_t replacement = begin + rng.next_u32() % static_cast<uint32_t>(width - 1);
+      i_t replacement = rng.uniform(begin, begin + width - 1);
       if (replacement >= active) ++replacement;
       fj_cpu.h_assignment[variables[active]]      = f_t{0};
       fj_cpu.h_assignment[variables[replacement]] = f_t{1};
@@ -118,7 +118,7 @@ void perturb(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
         if (coefficient > 0) upper = current;
         if (coefficient < 0) lower = current;
       }
-      fj_cpu.h_assignment[variable] = lower + (upper - lower) * rng.next_double();
+      fj_cpu.h_assignment[variable] = rng.uniform(lower, upper);
     } else {
       randomize_variable<i_t, f_t>(fj_cpu, variable, rng);
     }
@@ -155,11 +155,11 @@ template <typename i_t, typename f_t>
 void infeasible_kick(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
 {
   if (fj_cpu.violated_constraints.empty()) return;
-  cuopt::pcgenerator_t rng(fj_cpu.settings.seed + 2654435761u * fj_cpu.iterations, 0, 0);
+  auto& rng  = fj_cpu.rng;
   bool moved = false;
   if (fj_cpu.use_directed_infeasible_kick) {
     const auto& violated = fj_cpu.violated_constraints.contents;
-    const i_t row        = violated[rng.next_u32() % (uint32_t)violated.size()];
+    const i_t row        = violated[rng.uniform((i_t)0, (i_t)violated.size())];
     const f_t slack      = fj_cpu.row_state()[row].slack;
     f_t best_error = std::numeric_limits<f_t>::infinity(), best_value = 0;
     i_t best_var            = -1;
@@ -191,11 +191,10 @@ void infeasible_kick(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   if (!moved) {
     const auto& violated = fj_cpu.violated_constraints.contents;
     for (i_t k = 0; k < std::max<i_t>(1, fj_cpu.infeasible_kick_vars); ++k) {
-      const i_t row           = violated[rng.next_u32() % (uint32_t)violated.size()];
+      const i_t row           = violated[rng.uniform((i_t)0, (i_t)violated.size())];
       const auto [begin, end] = fj_cpu.range_for_row(row);
       if (begin < end)
-        randomize_variable<i_t, f_t>(
-          fj_cpu, fj_cpu.h_variables[begin + rng.next_u32() % (uint32_t)(end - begin)], rng);
+        randomize_variable<i_t, f_t>(fj_cpu, fj_cpu.h_variables[rng.uniform(begin, end)], rng);
     }
   }
   ++fj_cpu.stats.n_lhs_recompute_perturb;
@@ -241,7 +240,7 @@ void track_infeasible_checkpoint(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
     if (fj_cpu.iters_since_infeasible_improve >=
           fj_cpu.hp.restart_window_multiple * fj_cpu.infeasible_restart_window * capped &&
         fj_cpu.restores_since_improvement >= fj_cpu.infeasible_restart_max_streak) {
-      cuopt::pcgenerator_t rng(fj_cpu.settings.seed + fj_cpu.iterations, 0, 0);
+      auto& rng       = fj_cpu.rng;
       const bool soft = !(fj_cpu.settings.seed & 1) && !fj_cpu.h_best_infeasible_assignment.empty();
       if (soft) fj_cpu.h_assignment = fj_cpu.h_best_infeasible_assignment;
       for (i_t var = 0; var < fj_cpu.problem->n_variables; ++var)

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -32,7 +32,7 @@ static bool try_commit_start(fj_cpu_climber_t<i_t, f_t>& c, const std::vector<f_
         (is_integer_var(c, variable) && candidate[variable] != std::round(candidate[variable])))
       return false;
   }
-  const f_t tolerance = 1e-7;
+  const f_t tolerance = problem.tolerances.absolute_tolerance;
   for (i_t row = 0; row < problem.n_constraints; ++row) {
     const f_t activity = compensated_dot2_csr(problem, candidate, row);
     if (!std::isfinite(activity) || activity < problem.cstr_lb[row] - tolerance ||
@@ -84,7 +84,7 @@ template <typename i_t, typename f_t>
 void apply_affine_equality_start(fj_cpu_climber_t<i_t, f_t>& c, double budget);
 
 template <typename i_t, typename f_t>
-void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c);
+void apply_unit_commitment_start(fj_cpu_climber_t<i_t, f_t>& c, double budget);
 
 template <typename i_t, typename f_t>
 bool apply_fixed_charge_network_start(fj_cpu_climber_t<i_t, f_t>& c, double budget);
