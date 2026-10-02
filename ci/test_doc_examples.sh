@@ -366,15 +366,13 @@ test_c_examples() {
             local make_vars=()
             [ -n "${include_path}" ] && make_vars+=("INCLUDE_PATH=${include_path}")
             [ -n "${lib_path}" ] && make_vars+=("LIBCUOPT_LIBRARY_PATH=${lib_path}")
-            [ -n "${client_include_path}" ] && make_vars+=("EXTRA_CFLAGS=-I${client_include_path}")
-            # libcuopt_mathopt.so has real undefined references into libcuopt_client.so (see
-            # find_cuopt_libraries), so link it explicitly; add -L/-rpath only if it lives in a
-            # separate directory from libcuopt_mathopt.so.
-            local extra_ldflags="-lcuopt_client"
-            if [ -n "${client_lib_path}" ] && [ "${client_lib_path}" != "${lib_path}" ]; then
-                extra_ldflags="-L${client_lib_path} -Wl,-rpath,${client_lib_path} ${extra_ldflags}"
-            fi
-            make_vars+=("EXTRA_LDFLAGS=${extra_ldflags}")
+            # libcuopt-mathopt and libcuopt-client are separate wheels/install components since
+            # the split; mathopt links against client's problem-representation types, so the
+            # Makefiles need both pairs of paths. For non-split installs (local build, conda)
+            # client_include_path/client_lib_path are unset because status_codes.h and
+            # libcuopt_client.so already live alongside mathopt's own paths -- fall back to those.
+            make_vars+=("CLIENT_INCLUDE_PATH=${client_include_path:-${include_path}}")
+            make_vars+=("CLIENT_LIBRARY_PATH=${client_lib_path:-${lib_path}}")
 
             if make clean > "${RESULTS_DIR}/c-clean-${relative_path//\//_}.log" 2>&1 && \
                make "${make_vars[@]}" all > "${RESULTS_DIR}/c-build-${relative_path//\//_}.log" 2>&1; then
