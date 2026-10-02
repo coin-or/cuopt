@@ -9,7 +9,6 @@
 #include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
 #include <mip_heuristics/lns/cpufj_validation.cuh>
 #include <mip_heuristics/lns/early.cuh>
-#include <mip_heuristics/lns/persistent_bridge.cuh>
 #include <mip_heuristics/lns/repair_lns.cuh>
 #include <mip_heuristics/lns/thread_budget.hpp>
 
@@ -236,12 +235,11 @@ TEST(Lns, RunImprovesFromToleranceFeasibleSeedWithoutMutatingSource)
   EXPECT_EQ(source, std::vector<double>(n, 1.0 - 5e-5));
 }
 
-TEST(Lns, ThreadBudgetLeavesCapacityForExistingSolver)
+TEST(Lns, MainSolveBudgetMatchesPresolvePair)
 {
   for (int size = 2; size <= 48; ++size) {
     const int workers = mip::lns_worker_count(size, false);
-    EXPECT_EQ(workers, size <= 8 ? 0 : (size == 9 ? 1 : 2));
-    if (workers) EXPECT_GE(size - workers, 8);
+    EXPECT_EQ(workers, size >= 7 ? 2 : 0);
     EXPECT_EQ(mip::lns_worker_count(size, true), 0);
   }
 }
@@ -406,22 +404,6 @@ TEST(Lns, PresolvePortfolioBudgetAndLifetime)
           portfolio.start(team_size);
           EXPECT_EQ(portfolio.lane_count(), std::max(1, team_size - 4));
           EXPECT_EQ(portfolio.improvement_lane_count(), team_size >= 7 ? 2 : 0);
-          EXPECT_NO_THROW(portfolio.stop(/*keep_lns=*/true));
-          EXPECT_EQ(portfolio.lane_count(), team_size >= 7 ? 2 : 0);
-          if (team_size >= 7) {
-            std::atomic<int> polls{0};
-            portfolio.set_incumbent_callback({});
-            portfolio.set_lns_source([&](auto&) {
-              ++polls;
-              return false;
-            });
-            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-            while (!polls.load() && std::chrono::steady_clock::now() < deadline)
-              std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            EXPECT_GT(polls.load(), 0);
-            // Stop before destroying the source callback's captured counter.
-            EXPECT_NO_THROW(portfolio.stop());
-          }
           EXPECT_NO_THROW(portfolio.stop());
           EXPECT_EQ(portfolio.lane_count(), 0);
           EXPECT_NO_THROW(portfolio.stop());
@@ -438,158 +420,27 @@ TEST(Lns, PresolvePortfolioBudgetAndLifetime)
   probe.stop();
 }
 
-TEST(Lns, PersistentBridgeMapsAssignmentsAndRejectsRowViolations)
+TEST(Lns, PresolveIncumbentIsHandedToMainPopulationOnce)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
-  init_early_lns_test_problem(op);
-  const double inf = std::numeric_limits<double>::infinity();
-  const std::vector<double> lower{-inf, 0}, upper{inf, 1};
-  const std::vector<opt::var_t> types{opt::var_t::CONTINUOUS, opt::var_t::INTEGER};
-  const double row_lower = -1;
-  op.set_variable_lower_bounds(lower.data(), 2);
-  op.set_variable_upper_bounds(upper.data(), 2);
-  op.set_variable_types(types.data(), 2);
-  op.set_constraint_lower_bounds(&row_lower, 1);
-  opt::mip_solver_settings_t<int, double> settings;
-  settings.tolerances.absolute_tolerance = 3e-7;
-  settings.tolerances.relative_tolerance = 4e-8;
-  mip::problem_t<int, double> problem(op, settings.get_tolerances());
-  problem.preprocess_problem();  // Splits the free variable, changing assignment size.
-  ASSERT_GT(problem.n_variables, op.get_n_variables());
-  mip::mip_solver_context_t<int, double> context(&handle, &problem, settings);
-  mip::diversity_manager_t<int, double> dm(context);
-  dm.population.initialize_population();
-  dm.population.allocate_solutions();
-  mip::persistent_lns_bridge_t<int, double> bridge(problem, dm.population);
-  bridge.submit({-1, 1});
-  // The LNS seed must be available before the GPU population drains its queue.
-  std::vector<double> source;
-  ASSERT_TRUE(bridge.snapshot(source));
-  EXPECT_EQ(source, (std::vector<double>{-1, 1}));
-  EXPECT_FALSE(bridge.snapshot(source));
-  dm.population.add_external_solutions_to_population();
-  ASSERT_TRUE(dm.population.is_feasible());
-  EXPECT_EQ(dm.population.best_feasible().get_objective(), 1);
-  EXPECT_FALSE(bridge.snapshot(source));
-  bridge.submit({-2, 0});  // Bounds and integrality pass, but the row fails.
-  dm.population.add_external_solutions_to_population();
-  EXPECT_EQ(dm.population.best_feasible().get_objective(), 1);
-  bridge.submit({-1, 0});
-  dm.population.add_external_solutions_to_population();
-  EXPECT_EQ(dm.population.best_feasible().get_objective(), -1);
-  ASSERT_TRUE(bridge.snapshot(source));
-  EXPECT_EQ(source, (std::vector<double>{-1, 0}));
-}
-
-TEST(Lns, PendingSeedsUseSolverTolerancesAndDoNotPoisonValidatedCache)
-{
-  raft::handle_t handle;
-  opt::optimization_problem_t<int, double> op(&handle);
-  init_early_lns_test_problem(op);
+  init_early_lns_test_problem(op, true);
   const double row_lower = 1;
   op.set_constraint_lower_bounds(&row_lower, 1);
   opt::mip_solver_settings_t<int, double> settings;
-  settings.tolerances.absolute_tolerance = 3e-7;
-  settings.tolerances.relative_tolerance = 4e-8;
   mip::problem_t<int, double> problem(op, settings.get_tolerances());
   problem.preprocess_problem();
   mip::mip_solver_context_t<int, double> context(&handle, &problem, settings);
+  context.initial_incumbent_assignment = {1, 0};
   mip::diversity_manager_t<int, double> dm(context);
-  dm.population.initialize_population();
-  dm.population.allocate_solutions();
-  mip::persistent_lns_bridge_t<int, double> bridge(problem, dm.population);
-  // Deliberately queue an invalid low objective and a valid incumbent. No callback
-  // is registered; queued seeds must still be independently checked by the bridge.
-  dm.population.add_external_solution({0, 0}, 0, mip::solution_origin_t::CPUFJ);
-  dm.population.add_external_solution({-0.1, 1.1}, -1, mip::solution_origin_t::CPUFJ);
-  dm.population.add_external_solution({1 + 1e-6, 0}, 1 + 1e-6, mip::solution_origin_t::CPUFJ);
-  std::vector<double> source;
-  ASSERT_TRUE(bridge.snapshot(source));
-  EXPECT_EQ(source, (std::vector<double>{1, 0}));
-  EXPECT_FALSE(bridge.snapshot(source));
-  double objective = 0;
-  source.resize(2);
-  EXPECT_FALSE(dm.population.best_feasible_incumbent()->adopt(
-    std::numeric_limits<double>::infinity(), source, &objective));
-  // A row residual within the configured tolerance is an admissible seed.
-  dm.population.add_external_solution({1 - 1e-7, 0}, 1 - 1e-7, mip::solution_origin_t::CPUFJ);
-  ASSERT_TRUE(bridge.snapshot(source));
-  EXPECT_DOUBLE_EQ(source[0], 1 - 1e-7);
-  // A larger violation is rejected, without advancing the objective cutoff.
-  dm.population.add_external_solution({1 - 1e-4, 0}, 1 - 1e-4, mip::solution_origin_t::CPUFJ);
-  EXPECT_FALSE(bridge.snapshot(source));
-  dm.population.add_external_solution({1 - 2e-7, 0}, 1 - 2e-7, mip::solution_origin_t::CPUFJ);
-  ASSERT_TRUE(bridge.snapshot(source));
-  EXPECT_DOUBLE_EQ(source[0], 1 - 2e-7);
-}
-
-TEST(Lns, RejectedCachedSeedDoesNotHidePendingImprovement)
-{
-  raft::handle_t handle;
-  opt::optimization_problem_t<int, double> op(&handle);
-  init_early_lns_test_problem(op);
-  const std::vector<opt::var_t> types{opt::var_t::INTEGER, opt::var_t::CONTINUOUS};
-  op.set_variable_types(types.data(), 2);
-  const std::vector<double> objective{1, -1};
-  const double lower = -std::numeric_limits<double>::infinity();
-  const double upper = 1;
-  op.set_objective_coefficients(objective.data(), 2);
-  op.set_constraint_lower_bounds(&lower, 1);
-  op.set_constraint_upper_bounds(&upper, 1);
-  opt::mip_solver_settings_t<int, double> settings;
-  settings.tolerances.integrality_tolerance = 1e-5;
-  mip::problem_t<int, double> problem(op, settings.get_tolerances());
-  problem.preprocess_problem();
-  mip::mip_solver_context_t<int, double> context(&handle, &problem, settings);
-  mip::diversity_manager_t<int, double> dm(context);
-  dm.population.initialize_population();
-  dm.population.allocate_solutions();
-  mip::persistent_lns_bridge_t<int, double> bridge(problem, dm.population);
-  dm.population.add_external_solution({0, 0}, 0, mip::solution_origin_t::CPUFJ);
-  std::vector<double> source;
-  ASSERT_TRUE(bridge.snapshot(source));
-  // This cached point passes the solver's tolerances, but its objective returns
-  // to zero when the private LNS seed is clamped onto the exact domain.
-  mip::solution_t<int, double> cached(problem);
-  cached.copy_new_assignment(std::vector<double>{-1e-6, 0});
-  ASSERT_TRUE(cached.compute_feasibility());
-  ASSERT_LE(cached.compute_max_variable_violation(), settings.tolerances.integrality_tolerance);
-  dm.population.add_solution(std::move(cached));
-  dm.population.add_external_solution({0, 5e-7}, -5e-7, mip::solution_origin_t::CPUFJ);
-  ASSERT_TRUE(bridge.snapshot(source));
-  EXPECT_EQ(source, (std::vector<double>{0, 5e-7}));
-  EXPECT_FALSE(bridge.snapshot(source));
-  // Consuming a cache entry for LNS does not alter the population's incumbent.
-  double cached_objective;
-  ASSERT_TRUE(dm.population.best_feasible_incumbent()->adopt(
-    std::numeric_limits<double>::infinity(), source, &cached_objective));
-  EXPECT_EQ(source, (std::vector<double>{-1e-6, 0}));
-  EXPECT_DOUBLE_EQ(cached_objective, -1e-6);
-}
-
-TEST(Lns, PendingSeedQueueRetainsBestUnderWeakerProducerTraffic)
-{
-  raft::handle_t handle;
-  opt::optimization_problem_t<int, double> op(&handle);
-  init_early_lns_test_problem(op);
-  opt::mip_solver_settings_t<int, double> settings;
-  mip::problem_t<int, double> problem(op, settings.get_tolerances());
-  problem.preprocess_problem();
-  mip::mip_solver_context_t<int, double> context(&handle, &problem, settings);
-  mip::diversity_manager_t<int, double> dm(context);
-  dm.population.initialize_population();
-  dm.population.allocate_solutions();
-  mip::persistent_lns_bridge_t<int, double> bridge(problem, dm.population);
-  dm.population.add_external_solution({0.1, 0}, 0.1, mip::solution_origin_t::CPUFJ);
-  for (int i = 0; i < 10; ++i) {
-    const double x = 0.2 + 0.05 * i;
-    dm.population.add_external_solution({x, 0}, x, mip::solution_origin_t::CPUFJ);
-  }
-  std::vector<double> source;
-  ASSERT_TRUE(bridge.snapshot(source));
-  EXPECT_EQ(source, (std::vector<double>{0.1, 0}));
-  EXPECT_FALSE(bridge.snapshot(source));
+  std::vector<mip::solution_t<int, double>> solutions;
+  dm.add_user_given_solutions(solutions);
+  EXPECT_TRUE(solutions.empty());
+  context.initial_incumbent_from_papilo_model = true;
+  dm.add_user_given_solutions(solutions);
+  ASSERT_EQ(solutions.size(), 1);
+  EXPECT_TRUE(solutions[0].get_feasible());
+  EXPECT_DOUBLE_EQ(solutions[0].get_user_objective(), 1);
 }
 
 TEST(Lns, BenchmarkApiErrorsAreDistinctFromNoSolution)

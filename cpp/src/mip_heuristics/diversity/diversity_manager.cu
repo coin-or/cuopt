@@ -199,13 +199,11 @@ void diversity_manager_t<i_t, f_t>::add_user_given_solutions(
   std::vector<solution_t<i_t, f_t>>& initial_sol_vector)
 {
   raft::common::nvtx::range fun_scope("add_user_given_solutions");
-  const bool has_papilo   = problem_ptr->has_papilo_presolve_data();
-  const i_t papilo_orig_n = problem_ptr->get_papilo_original_num_variables();
-  for (size_t sol_idx = 0; sol_idx < context.settings.initial_solutions.size(); ++sol_idx) {
-    if (timer.check_time_limit()) { break; }
-    const auto& init_sol = context.settings.initial_solutions[sol_idx];
+  const bool has_papilo            = problem_ptr->has_papilo_presolve_data();
+  const i_t papilo_orig_n          = problem_ptr->get_papilo_original_num_variables();
+  auto add_original_space_solution = [&](rmm::device_uvector<f_t> init_sol_assignment,
+                                         size_t sol_idx) {
     solution_t<i_t, f_t> sol(*problem_ptr);
-    rmm::device_uvector<f_t> init_sol_assignment(*init_sol, sol.handle_ptr->get_stream());
 
     if (has_papilo) {
       if ((i_t)init_sol_assignment.size() != papilo_orig_n) {
@@ -215,7 +213,7 @@ void diversity_manager_t<i_t, f_t>::add_user_given_solutions(
           sol_idx,
           init_sol_assignment.size(),
           papilo_orig_n);
-        continue;
+        return;
       }
       std::vector<f_t> h_original = host_copy(init_sol_assignment, sol.handle_ptr->get_stream());
       std::vector<f_t> h_crushed;
@@ -294,6 +292,16 @@ void diversity_manager_t<i_t, f_t>::add_user_given_solutions(
         sol.assignment.size(),
         init_sol_assignment.size());
     }
+  };
+  const auto stream = problem_ptr->handle_ptr->get_stream();
+  for (size_t sol_idx = 0; sol_idx < context.settings.initial_solutions.size(); ++sol_idx) {
+    if (timer.check_time_limit()) { return; }
+    add_original_space_solution(
+      rmm::device_uvector<f_t>(*context.settings.initial_solutions[sol_idx], stream), sol_idx);
+  }
+  if (context.initial_incumbent_from_papilo_model && !timer.check_time_limit()) {
+    add_original_space_solution(cuopt::device_copy(context.initial_incumbent_assignment, stream),
+                                context.settings.initial_solutions.size());
   }
 }
 

@@ -91,6 +91,9 @@ struct mip_solver_context_t {
 
   // Matching incumbent assignment in original output space from early heuristics.
   std::vector<f_t> initial_incumbent_assignment{};
+  // Set when heuristics on the Papilo model improved the incumbent. Those runs start after
+  // the earlier incumbents were copied into settings.initial_solutions.
+  bool initial_incumbent_from_papilo_model{false};
 
   // Symmetry information for orbital fixing during B&B. Null if no exploitable symmetry.
   std::unique_ptr<mip::mip_symmetry_t<i_t, f_t>> symmetry;

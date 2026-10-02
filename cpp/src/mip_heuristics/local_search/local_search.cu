@@ -39,8 +39,9 @@ namespace cuopt::mathematical_optimization::mip {
 template <typename i_t, typename f_t>
 static int feasibility_team_size(const mip_solver_context_t<i_t, f_t>& context)
 {
-  const int held = context.early_cpufj_ptr ? context.early_cpufj_ptr->improvement_lane_count() : 0;
-  return omp_get_num_threads() - held;
+  const int team = omp_get_num_threads();
+  return team -
+         lns_worker_count(team, context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC);
 }
 
 template <typename i_t, typename f_t>
@@ -142,7 +143,6 @@ template <typename i_t, typename f_t>
 void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
   population_t<i_t, f_t>& population)
 {
-  if (context.early_cpufj_ptr && context.early_cpufj_ptr->improvement_lane_count()) return;
   // Share the solve team and leave capacity for feasibility discovery.
   const int workers = lns_worker_count(
     omp_get_num_threads(), context.settings.determinism_mode == CUOPT_MODE_DETERMINISTIC);

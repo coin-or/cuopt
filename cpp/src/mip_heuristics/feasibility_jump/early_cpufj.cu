@@ -128,12 +128,12 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes, bool low_latency)
 }
 
 template <typename i_t, typename f_t>
-void early_cpufj_t<i_t, f_t>::stop(bool keep_lns)
+void early_cpufj_t<i_t, f_t>::stop()
 {
   if (climbers_.empty() && !lns_) { return; }
 
   preemption_flag_.store(true);
-  if (lns_ && !keep_lns) lns_->request_stop();
+  if (lns_) lns_->request_stop();
 
   // Every lane is told to stop before any wait, otherwise the first wait blocks on a lane that has
   // not been asked to exit yet.
@@ -148,7 +148,7 @@ void early_cpufj_t<i_t, f_t>::stop(bool keep_lns)
     }
   }
 
-  if (lns_ && !keep_lns) {
+  if (lns_) {
     lns_->finish();
     lns_.reset();
   }
@@ -161,29 +161,9 @@ void early_cpufj_t<i_t, f_t>::stop(bool keep_lns)
   CUOPT_LOG_DEBUG("[Early CPUFJ] Stopped after %d iterations over %d climbers, solution_found=%d",
                   total_iterations,
                   (int)climbers_.size(),
-                  !keep_lns && this->solution_found_);
+                  this->solution_found_);
 
   climbers_.clear();
-}
-
-template <typename i_t, typename f_t>
-void early_cpufj_t<i_t, f_t>::set_incumbent_callback(early_incumbent_callback_t<f_t> callback,
-                                                     bool replay_best)
-{
-  std::lock_guard<std::mutex> guard(incumbent_mutex_);
-  this->incumbent_callback_ = std::move(callback);
-  if (replay_best && this->solution_found_ && this->incumbent_callback_) {
-    this->incumbent_callback_(this->best_objective_,
-                              this->get_best_user_objective(),
-                              this->best_assignment_,
-                              "Persistent LNS");
-  }
-}
-
-template <typename i_t, typename f_t>
-void early_cpufj_t<i_t, f_t>::set_lns_source(std::function<bool(std::vector<f_t>&)> source)
-{
-  if (lns_) lns_->set_source(std::move(source));
 }
 
 template <typename i_t, typename f_t>

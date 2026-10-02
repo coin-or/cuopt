@@ -255,8 +255,7 @@ mip_solution_t<i_t, f_t> run_mip_solver(
     }
 
     // Run early CPUFJ on papilo-presolved problem during cuOpt presolve (probing cache).
-    // Feasibility lanes stop after cuOpt presolve; the LNS pair persists until solve end.
-    // Its best objective feeds into
+    // Stopped by run_solver after presolve completes; its best objective feeds into
     // initial_upper_bound. This CPUFJ operates on *problem.original_problem_ptr (papilo-presolved
     // optimization_problem_t). Its solver-space differs from both the first-pass FJ (original
     // problem) and B&B (post-trivial- presolve), so initial_upper_bound (user-space) is converted
@@ -300,8 +299,9 @@ mip_solution_t<i_t, f_t> run_mip_solver(
           std::vector<f_t> user_assignment;
           presolver_ptr->uncrush_primal_solution(assignment, user_assignment);
           cuopt_assert(user_assignment.size() == (size_t)papilo_num_original_vars, "Size mismatch");
-          ctx_ptr->initial_incumbent_assignment = user_assignment;
-          ctx_ptr->initial_upper_bound          = user_obj;
+          ctx_ptr->initial_incumbent_assignment        = user_assignment;
+          ctx_ptr->initial_upper_bound                 = user_obj;
+          ctx_ptr->initial_incumbent_from_papilo_model = true;
           CUOPT_LOG_INFO(
             "New solution from early primal heuristics (%s). Objective %+.6e. Time %.3f",
             heuristic_name,
@@ -364,19 +364,7 @@ mip_solution_t<i_t, f_t> run_mip_solver(
     auto sol = presolved_sol.get_solution(
       is_feasible_on_presolved || is_feasible_on_original, solver.get_solver_stats(), false);
 
-    // The persistent pair may find a candidate that cannot be mapped into cuOpt's
-    // tighter reduced model. Preserve it for the existing original-model validation
-    // and fallback after undoing Papilo. run_solver has joined the workers here.
-    if (early_cpufj && early_cpufj->solution_found() &&
-        (!std::isfinite(solver.context.initial_upper_bound) ||
-         problem.get_solver_obj_from_user_obj(early_cpufj->get_best_user_objective()) <
-           problem.get_solver_obj_from_user_obj(solver.context.initial_upper_bound))) {
-      problem.presolve_data.papilo_presolve_ptr->uncrush_primal_solution(
-        early_cpufj->get_best_assignment(), solver.context.initial_incumbent_assignment);
-      solver.context.initial_upper_bound = early_cpufj->get_best_user_objective();
-    }
-
-    // Write back the incumbent from the Papilo model.
+    // Write back the (possibly updated) incumbent from the papilo-phase callback.
     initial_upper_bound          = solver.context.initial_upper_bound;
     initial_incumbent_assignment = solver.context.initial_incumbent_assignment;
 

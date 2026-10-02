@@ -75,16 +75,10 @@ class early_lns_t {
     }
     // Both tasks have reserved capacity. Do not enter a task scheduling point
     // until they are running on other team members: a taskwait for feasibility
-    // lanes could otherwise execute a queued persistent task on the solve thread,
+    // lanes could otherwise execute a queued long-running task on the solve thread,
     // preventing that thread from ever reaching the LNS stop signal.
     while (workers_started_.load() < 2)
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-
-  void set_source(std::function<bool(std::vector<f_t>&)> source)
-  {
-    std::lock_guard<std::mutex> lock(source_mutex_);
-    source_ = std::move(source);
   }
 
   void request_stop()
@@ -115,16 +109,6 @@ class early_lns_t {
 
   bool snapshot(std::vector<f_t>& assignment, f_t& objective)
   {
-    std::function<bool(std::vector<f_t>&)> source;
-    {
-      std::lock_guard<std::mutex> lock(source_mutex_);
-      source = source_;
-    }
-    std::vector<f_t> external;
-    if (source && source(external) && repair_lns_->feasible(external)) {
-      const f_t cost = repair_lns_->cost(external);
-      shared_->publish(cost, cpufj_->get_user_objective(cost), external);
-    }
     assignment.resize(cpufj_->problem->n_variables);
     return shared_->adopt(std::numeric_limits<f_t>::infinity(), assignment, &objective);
   }
@@ -168,8 +152,6 @@ class early_lns_t {
   std::atomic<bool>& preemption_;
   cuopt::lns::task_errors_t& task_errors_;
   report_fn report_;
-  std::mutex source_mutex_;
-  std::function<bool(std::vector<f_t>&)> source_;
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> cpufj_;
   std::unique_ptr<repair_lns_t<i_t, f_t>> repair_lns_;
   std::atomic<bool> stop_{false};

@@ -429,7 +429,7 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
       }
     }
     if (best_known.empty()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
 
