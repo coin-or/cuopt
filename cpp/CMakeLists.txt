@@ -754,8 +754,12 @@ get_filename_component(CUDSS_MT_LIB_FILE_NAME "${CUDSS_MT_LIB_FILE}" NAME)
 option(CUOPT_FIND_CLIENT_EXTERNALLY "Resolve cuopt::client via find_package(cuopt) instead of building it" OFF)
 option(CUOPT_FIND_MATHOPT_EXTERNALLY "Resolve cuopt::mathopt via find_package(cuopt) instead of building it" OFF)
 option(CUOPT_FIND_ROUTING_EXTERNALLY "Resolve cuopt::routing via find_package(cuopt) instead of building it" OFF)
-if((CUOPT_FIND_CLIENT_EXTERNALLY OR CUOPT_FIND_MATHOPT_EXTERNALLY OR CUOPT_FIND_ROUTING_EXTERNALLY)
-   AND NOT TARGET cuopt::client AND NOT TARGET cuopt::mathopt AND NOT TARGET cuopt::routing)
+# A prior find_package(cuopt) call elsewhere in this configure (e.g. python/libcuopt's own
+# early check) may have already resolved some but not all requested targets -- retry whenever
+# any requested component is still missing, not only when none of them have resolved yet.
+if((CUOPT_FIND_CLIENT_EXTERNALLY AND NOT TARGET cuopt::client) OR
+   (CUOPT_FIND_MATHOPT_EXTERNALLY AND NOT TARGET cuopt::mathopt) OR
+   (CUOPT_FIND_ROUTING_EXTERNALLY AND NOT TARGET cuopt::routing))
     find_package(cuopt "${RAPIDS_VERSION}" QUIET)
 endif()
 
