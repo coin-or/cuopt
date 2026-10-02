@@ -74,6 +74,7 @@ extensions = [
     "myst_parser",
     "sphinx.ext.autosectionlabel",
     "swagger_plugin_for_sphinx",
+    # sphinx-llm: generate Markdown pages and llms.txt.
     "sphinx_llm.txt",
 ]
 
