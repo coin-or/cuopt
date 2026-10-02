@@ -589,10 +589,15 @@ if (HOST_LINEINFO)
 endif ()
 
 # Needed for the fast MPS parser, available on all x86-64-v3 compliant x86 CPUs (essentially since Haswell ~2013)
+# x86-64-v3 also implies hardware FMA support
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$" AND
         CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
-    set_property(SOURCE ${MPS_FAST_SRC_FILES} DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-            APPEND PROPERTY COMPILE_OPTIONS "-mbmi2;-mavx2;-msse4.2")
+    list(APPEND CUOPT_CXX_FLAGS -march=x86-64-v3 -fno-math-errno)
+    list(APPEND CUOPT_CUDA_FLAGS -Xcompiler=-march=x86-64-v3 -Xcompiler=-fno-math-errno)
+    if (NOT DEFINE_ASSERT)
+        list(APPEND CUOPT_CXX_FLAGS -fno-trapping-math)
+        list(APPEND CUOPT_CUDA_FLAGS -Xcompiler=-fno-trapping-math)
+    endif ()
 endif ()
 
 # TODO: figure out a set of flags for ARM that fits the range of CPUs we wish to support (neoverse?)
@@ -752,6 +757,17 @@ option(CUOPT_FIND_ROUTING_EXTERNALLY "Resolve cuopt::routing via find_package(cu
 if((CUOPT_FIND_CLIENT_EXTERNALLY OR CUOPT_FIND_MATHOPT_EXTERNALLY OR CUOPT_FIND_ROUTING_EXTERNALLY)
    AND NOT TARGET cuopt::client AND NOT TARGET cuopt::mathopt AND NOT TARGET cuopt::routing)
     find_package(cuopt "${RAPIDS_VERSION}" QUIET)
+endif()
+
+# A requested external component must not silently fall back to a local build.
+if(CUOPT_FIND_CLIENT_EXTERNALLY AND NOT TARGET cuopt::client)
+    message(FATAL_ERROR "CUOPT_FIND_CLIENT_EXTERNALLY=ON but find_package(cuopt) did not provide cuopt::client")
+endif()
+if(CUOPT_FIND_MATHOPT_EXTERNALLY AND NOT TARGET cuopt::mathopt)
+    message(FATAL_ERROR "CUOPT_FIND_MATHOPT_EXTERNALLY=ON but find_package(cuopt) did not provide cuopt::mathopt")
+endif()
+if(CUOPT_FIND_ROUTING_EXTERNALLY AND NOT TARGET cuopt::routing)
+    message(FATAL_ERROR "CUOPT_FIND_ROUTING_EXTERNALLY=ON but find_package(cuopt) did not provide cuopt::routing")
 endif()
 
 # - cuopt_client - CPU-only support library ----------------------------------------------------------
@@ -1104,6 +1120,12 @@ endif ()
 # Built for the internal tests, the MIP benchmarks, and for consumers that embed cuOpt into a
 # single self-contained shared object rather than linking the shared libcuopt (see the Java
 # classifier JARs).
+if ((BUILD_TESTS OR (BUILD_MIP_BENCHMARKS AND NOT BUILD_LP_ONLY) OR CUOPT_BUILD_STATIC_LIB)
+    AND (CUOPT_FIND_CLIENT_EXTERNALLY OR CUOPT_FIND_MATHOPT_EXTERNALLY OR CUOPT_FIND_ROUTING_EXTERNALLY))
+    message(FATAL_ERROR "cuopt_static embeds *_objs directly, which an externally-resolved "
+                         "component doesn't have; it is incompatible with CUOPT_FIND_*_EXTERNALLY")
+endif()
+
 if (BUILD_TESTS OR (BUILD_MIP_BENCHMARKS AND NOT BUILD_LP_ONLY) OR CUOPT_BUILD_STATIC_LIB)
     # Embeds the *_objs directly rather than linking the shared component libraries: internal
     # tests and the Java classifier JAR reach internals the shared libraries don't export.
@@ -1348,6 +1370,14 @@ install(FILES include/cuopt/error.hpp include/cuopt/export.hpp include/cuopt/sta
         COMPONENT client-dev
 )
 
+# constants.h sits under mathematical_optimization/ but error.hpp includes it, so it is
+# shared and follows error.hpp into client-dev. The mathopt directory install below
+# excludes it to keep exactly one component shipping the file.
+install(FILES include/cuopt/mathematical_optimization/constants.h
+        DESTINATION ${_INCLUDE_DEST}/mathematical_optimization
+        COMPONENT client-dev
+)
+
 install(DIRECTORY include/cuopt/utilities/
         DESTINATION ${_INCLUDE_DEST}/utilities
         COMPONENT client-dev
@@ -1362,6 +1392,7 @@ install(DIRECTORY include/cuopt/grpc/
 install(DIRECTORY include/cuopt/mathematical_optimization/
         DESTINATION ${_INCLUDE_DEST}/mathematical_optimization
         COMPONENT mathopt-dev
+        PATTERN "constants.h" EXCLUDE
 )
 
 install(DIRECTORY include/cuopt/linear_programming/
@@ -1589,6 +1620,7 @@ if (BUILD_MIP_BENCHMARKS AND NOT BUILD_LP_ONLY)
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
 
+    # CPU FJ standalone portfolio benchmark
     add_executable(solve_CPUFJ ../benchmarks/linear_programming/cuopt/run_cpufj.cu)
     set_target_properties(solve_CPUFJ PROPERTIES CXX_SCAN_FOR_MODULES OFF)
     target_compile_options(solve_CPUFJ

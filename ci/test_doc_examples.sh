@@ -541,13 +541,29 @@ find_cuopt_libraries() {
         fi
     done
 
-    if [ -z "${include_path}" ] || [ -z "${lib_path}" ]; then
+    local client_include_found=false
+    if [ -n "${client_include_path}" ] || [ -f "${include_path}/cuopt/status_codes.h" ]; then
+        client_include_found=true
+    fi
+    local client_lib_found=false
+    if [ -n "${client_lib_path}" ] || [ -f "${lib_path}/libcuopt_client.so" ]; then
+        client_lib_found=true
+    fi
+
+    if [ -z "${include_path}" ] || [ -z "${lib_path}" ] || \
+       [ "${client_include_found}" = false ] || [ "${client_lib_found}" = false ]; then
         log_failure "Could not find cuOpt headers or libraries"
         if [ -z "${include_path}" ]; then
             log_failure "  Missing: INCLUDE_PATH (searched for cuopt_c.h)"
         fi
         if [ -z "${lib_path}" ]; then
             log_failure "  Missing: LIBCUOPT_LIBRARY_PATH (searched for libcuopt_mathopt.so)"
+        fi
+        if [ "${client_include_found}" = false ]; then
+            log_failure "  Missing: client include path (searched for status_codes.h)"
+        fi
+        if [ "${client_lib_found}" = false ]; then
+            log_failure "  Missing: client library path (searched for libcuopt_client.so)"
         fi
         return 1
     else
