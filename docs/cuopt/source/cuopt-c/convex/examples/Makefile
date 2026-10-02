@@ -46,7 +46,7 @@ CC = gcc
 
 # Compiler flags
 CFLAGS = -I$(INCLUDE_PATH) $(EXTRA_CFLAGS) -Wall -Wextra
-LDFLAGS = -L$(LIBCUOPT_LIBRARY_PATH) -lcuopt_mathopt -Wl,-rpath,$(LIBCUOPT_LIBRARY_PATH)
+LDFLAGS = -L$(LIBCUOPT_LIBRARY_PATH) -lcuopt_mathopt -Wl,-rpath,$(LIBCUOPT_LIBRARY_PATH) $(EXTRA_LDFLAGS)
 
 # Automatically discover all C source files in current directory
 SOURCES = $(wildcard *.c)

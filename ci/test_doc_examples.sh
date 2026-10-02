@@ -33,6 +33,8 @@ GRPC_PID=""
 # C library paths (set by find_cuopt_libraries)
 include_path=""
 lib_path=""
+client_include_path=""
+client_lib_path=""
 
 # Create results directory
 mkdir -p "${RESULTS_DIR}"
@@ -361,13 +363,21 @@ test_c_examples() {
         # Clean and build
         if [ -f "Makefile" ]; then
             log_info "  Building C examples..."
-            local make_vars=""
-            [ -n "${include_path}" ] && make_vars="${make_vars} INCLUDE_PATH=${include_path}"
-            [ -n "${lib_path}" ] && make_vars="${make_vars} LIBCUOPT_LIBRARY_PATH=${lib_path}"
-            [ -n "${client_include_path}" ] && make_vars="${make_vars} EXTRA_CFLAGS=-I${client_include_path}"
+            local make_vars=()
+            [ -n "${include_path}" ] && make_vars+=("INCLUDE_PATH=${include_path}")
+            [ -n "${lib_path}" ] && make_vars+=("LIBCUOPT_LIBRARY_PATH=${lib_path}")
+            [ -n "${client_include_path}" ] && make_vars+=("EXTRA_CFLAGS=-I${client_include_path}")
+            # libcuopt_mathopt.so has real undefined references into libcuopt_client.so (see
+            # find_cuopt_libraries), so link it explicitly; add -L/-rpath only if it lives in a
+            # separate directory from libcuopt_mathopt.so.
+            local extra_ldflags="-lcuopt_client"
+            if [ -n "${client_lib_path}" ] && [ "${client_lib_path}" != "${lib_path}" ]; then
+                extra_ldflags="-L${client_lib_path} -Wl,-rpath,${client_lib_path} ${extra_ldflags}"
+            fi
+            make_vars+=("EXTRA_LDFLAGS=${extra_ldflags}")
 
             if make clean > "${RESULTS_DIR}/c-clean-${relative_path//\//_}.log" 2>&1 && \
-               make ${make_vars} all > "${RESULTS_DIR}/c-build-${relative_path//\//_}.log" 2>&1; then
+               make "${make_vars[@]}" all > "${RESULTS_DIR}/c-build-${relative_path//\//_}.log" 2>&1; then
                 log_success "  C examples built successfully"
             else
                 log_failure "  Failed to build C examples"
@@ -463,6 +473,7 @@ find_cuopt_libraries() {
     include_path=""
     lib_path=""
     client_include_path=""
+    client_lib_path=""
 
     # Get Python site-packages directory
     local site_packages=""
@@ -502,9 +513,10 @@ find_cuopt_libraries() {
         fi
 
         if [ -z "${lib_path}" ]; then
-            # Search for libcuopt.so in both lib and lib64 directories
+            # The C examples link -lcuopt_mathopt directly, not the libcuopt umbrella (which
+            # no longer bundles it -- it's in libcuopt-mathopt's own wheel since the split).
             local found_lib
-            found_lib=$(find "${search_dir}" -name "libcuopt.so" \( -path "*/lib/*" -o -path "*/lib64/*" \) 2>/dev/null | head -1)
+            found_lib=$(find "${search_dir}" -name "libcuopt_mathopt.so" \( -path "*/lib/*" -o -path "*/lib64/*" \) 2>/dev/null | head -1)
             if [ -n "${found_lib}" ]; then
                 lib_path=$(dirname "${found_lib}")
             fi
@@ -523,9 +535,22 @@ find_cuopt_libraries() {
             fi
         fi
 
+        # libcuopt_mathopt.so has real undefined references into libcuopt_client.so (the
+        # host-side problem-representation types) since the client/mathopt split, so the C
+        # examples need to link it too, not just libcuopt_mathopt.
+        if [ -z "${client_lib_path}" ] && [ -n "${lib_path}" ] && \
+           [ ! -f "${lib_path}/libcuopt_client.so" ]; then
+            local found_client_lib
+            found_client_lib=$(find "${search_dir}" -name "libcuopt_client.so" \( -path "*/lib/*" -o -path "*/lib64/*" \) 2>/dev/null | head -1)
+            if [ -n "${found_client_lib}" ]; then
+                client_lib_path=$(dirname "${found_client_lib}")
+            fi
+        fi
+
         # Break early if everything needed is found
         if [ -n "${include_path}" ] && [ -n "${lib_path}" ] && \
-           { [ -n "${client_include_path}" ] || [ -f "${include_path}/cuopt/status_codes.h" ]; }; then
+           { [ -n "${client_include_path}" ] || [ -f "${include_path}/cuopt/status_codes.h" ]; } && \
+           { [ -n "${client_lib_path}" ] || [ -f "${lib_path}/libcuopt_client.so" ]; }; then
             break
         fi
     done
@@ -536,13 +561,14 @@ find_cuopt_libraries() {
             log_failure "  Missing: INCLUDE_PATH (searched for cuopt_c.h)"
         fi
         if [ -z "${lib_path}" ]; then
-            log_failure "  Missing: LIBCUOPT_LIBRARY_PATH (searched for libcuopt.so)"
+            log_failure "  Missing: LIBCUOPT_LIBRARY_PATH (searched for libcuopt_mathopt.so)"
         fi
         return 1
     else
         log_info "Found: INCLUDE_PATH=${include_path}"
         log_info "Found: LIBCUOPT_LIBRARY_PATH=${lib_path}"
         [ -n "${client_include_path}" ] && log_info "Found: client_include_path=${client_include_path}"
+        [ -n "${client_lib_path}" ] && log_info "Found: client_lib_path=${client_lib_path}"
         return 0
     fi
 }
