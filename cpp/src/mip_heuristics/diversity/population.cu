@@ -9,6 +9,7 @@
 #include "population.cuh"
 
 #include <thrust/for_each.h>
+#include <mip_heuristics/feasibility_jump/cpu/state.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <mip_heuristics/presolve/semi_continuous.cuh>
 #include <mip_heuristics/utils.cuh>
@@ -150,18 +151,11 @@ void population_t<i_t, f_t>::add_external_solution(const std::vector<f_t>& solut
   if (!std::isfinite(objective)) return;
   context.solution_publication.publish_if_better(problem_ptr, solution, objective);
   {
-    std::lock_guard<std::mutex> host_lock(best_feasible_host_mutex);
-    if (lns_seed_polling && std::isfinite(objective)) {
-      // Keep this independent of solution_mutex: draining the main queue performs
-      // GPU work and must not block either LNS worker's incumbent polling.
-      pending_lns_seeds.emplace_back(objective, solution);
-      if (pending_lns_seeds.size() > 10) {
-        auto worst = std::max_element(
-          pending_lns_seeds.begin(), pending_lns_seeds.end(), [](const auto& a, const auto& b) {
-            return a.first < b.first;
-          });
-        pending_lns_seeds.erase(worst);
-      }
+    // Independent of solution_mutex: draining the queue performs GPU work and must not block
+    // observers.
+    std::lock_guard<std::mutex> observers_lock(observers_mutex);
+    for (auto* observer : observers) {
+      observer->on_external_solution(solution, objective);
     }
   }
   std::lock_guard<std::mutex> lock(solution_mutex);
@@ -192,53 +186,65 @@ void population_t<i_t, f_t>::add_external_solution(const std::vector<f_t>& solut
 }
 
 template <typename i_t, typename f_t>
-bool population_t<i_t, f_t>::get_best_feasible_snapshot(std::vector<f_t>& out_assignment,
-                                                        f_t& out_objective)
+void population_t<i_t, f_t>::add_observer(population_observer_t<i_t, f_t>* observer)
 {
-  std::lock_guard<std::mutex> host_lock(best_feasible_host_mutex);
-  if (best_feasible_host_assignment.empty()) return false;
-  out_assignment = best_feasible_host_assignment;
-  out_objective  = best_feasible_host_objective;
-  return true;
-}
-
-template <typename i_t, typename f_t>
-void population_t<i_t, f_t>::enable_lns_seed_polling()
-{
-  std::lock_guard<std::mutex> host_lock(best_feasible_host_mutex);
-  lns_seed_polling = true;
-}
-
-template <typename i_t, typename f_t>
-bool population_t<i_t, f_t>::take_lns_seed_candidate(std::vector<f_t>& out_assignment,
-                                                     f_t& out_objective,
-                                                     f_t objective_cutoff)
-{
-  std::lock_guard<std::mutex> host_lock(best_feasible_host_mutex);
-  pending_lns_seeds.erase(
-    std::remove_if(pending_lns_seeds.begin(),
-                   pending_lns_seeds.end(),
-                   [objective_cutoff](const auto& seed) { return seed.first >= objective_cutoff; }),
-    pending_lns_seeds.end());
-  const bool cached = !best_feasible_host_assignment.empty() &&
-                      best_feasible_host_objective < objective_cutoff &&
-                      best_feasible_host_objective < last_lns_cached_objective;
-  auto best = std::min_element(pending_lns_seeds.begin(),
-                               pending_lns_seeds.end(),
-                               [](const auto& a, const auto& b) { return a.first < b.first; });
-  if (best != pending_lns_seeds.end() && (!cached || best->first < best_feasible_host_objective)) {
-    out_objective  = best->first;
-    out_assignment = std::move(best->second);
-    pending_lns_seeds.erase(best);
-    return true;
+  cuopt_assert(observer != nullptr, "population observer must not be null");
+  std::lock_guard<std::recursive_mutex> lock(write_mutex);
+  for (size_t i = 0; i < solutions.size(); ++i) {
+    auto& [stored, sol] = solutions[i];
+    if (stored && sol.get_feasible()) {
+      observer->on_feasible_solution(sol.get_host_assignment(), sol.get_objective(), i == 0);
+    }
   }
-  if (!cached) return false;
-  out_objective  = best_feasible_host_objective;
-  out_assignment = best_feasible_host_assignment;
-  // A cached point can cease to improve after private normalization. Deliver it
-  // once so rejection cannot repeatedly hide usable pending incumbents.
-  last_lns_cached_objective = best_feasible_host_objective;
-  return true;
+  std::lock_guard<std::mutex> observers_lock(observers_mutex);
+  observers.push_back(observer);
+}
+
+template <typename i_t, typename f_t>
+void population_t<i_t, f_t>::remove_observer(population_observer_t<i_t, f_t>* observer)
+{
+  std::lock_guard<std::mutex> observers_lock(observers_mutex);
+  auto it = std::find(observers.begin(), observers.end(), observer);
+  cuopt_assert(it != observers.end(), "population observer was not registered");
+  observers.erase(it);
+}
+
+template <typename i_t, typename f_t>
+bool population_t<i_t, f_t>::has_observers()
+{
+  std::lock_guard<std::mutex> observers_lock(observers_mutex);
+  return !observers.empty();
+}
+
+template <typename i_t, typename f_t>
+std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>>
+population_t<i_t, f_t>::best_feasible_incumbent()
+{
+  std::lock_guard<std::recursive_mutex> lock(write_mutex);
+  if (!shared_best_feasible) {
+    shared_best_feasible = make_fj_cpu_shared_incumbent<i_t, f_t>();
+    if (!solutions.empty() && solutions[0].first) { publish_best_feasible(); }
+  }
+  return shared_best_feasible;
+}
+
+template <typename i_t, typename f_t>
+void population_t<i_t, f_t>::publish_best_feasible()
+{
+  auto& best = solutions[0].second;
+  shared_best_feasible->publish(
+    best.get_objective(), best.get_user_objective(), best.get_host_assignment());
+}
+
+template <typename i_t, typename f_t>
+void population_t<i_t, f_t>::notify_feasible_solution(solution_t<i_t, f_t>& sol, bool is_best)
+{
+  std::lock_guard<std::mutex> observers_lock(observers_mutex);
+  if (observers.empty() || !sol.get_feasible()) return;
+  const auto assignment = sol.get_host_assignment();
+  for (auto* observer : observers) {
+    observer->on_feasible_solution(assignment, sol.get_objective(), is_best);
+  }
 }
 
 template <typename i_t, typename f_t>
@@ -484,15 +490,8 @@ std::pair<i_t, bool> population_t<i_t, f_t>::add_solution(solution_t<i_t, f_t>&&
     solutions[0].second = std::move(temp_sol);
     indices[0].second   = sol_cost;
     best_updated        = true;
-    // Copy from the caller's CUDA stream once for both LNS workers. The CPUFJ
-    // reader only takes the host-cache lock; it never holds the population lock.
-    auto host_assignment = solutions[0].second.get_host_assignment();
-    if (lns_observer) lns_observer(host_assignment);
-    {
-      std::lock_guard<std::mutex> host_lock(best_feasible_host_mutex);
-      best_feasible_host_assignment = std::move(host_assignment);
-      best_feasible_host_objective  = solutions[0].second.get_objective();
-    }
+    if (shared_best_feasible) { publish_best_feasible(); }
+    notify_feasible_solution(solutions[0].second, true);
   }
 
   // Fast reject
@@ -524,7 +523,7 @@ std::pair<i_t, bool> population_t<i_t, f_t>::add_solution(solution_t<i_t, f_t>&&
 
     solutions[hint].first  = true;
     solutions[hint].second = std::move(sol);
-    notify_lns(solutions[hint].second);
+    notify_feasible_solution(solutions[hint].second, false);
 
     int inserted_pos = insert_index(std::pair<size_t, double>((size_t)hint, sol_cost));
     cuopt_assert(test_invariant(), "Population invariant doesn't hold");
@@ -539,7 +538,7 @@ std::pair<i_t, bool> population_t<i_t, f_t>::add_solution(solution_t<i_t, f_t>&&
 
     solutions[free].first  = true;
     solutions[free].second = std::move(sol);
-    notify_lns(solutions[free].second);
+    notify_feasible_solution(solutions[free].second, false);
 
     int inserted_pos = insert_index(std::pair<size_t, double>((size_t)free, sol_cost));
     cuopt_assert(test_invariant(), "Population invariant doesn't hold");

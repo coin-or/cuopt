@@ -127,6 +127,7 @@ class local_search_t {
   // Single persistent climber reused across every ruin-and-repair iteration of the LNS
   // improvement worker, so that only the first iteration pays the O(nnz) climber construction.
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> scratch_cpu_fj_lns;
+  std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> scratch_cpu_fj_lns_best;
   problem_t<i_t, f_t> problem_with_objective_cut;
   bool cutting_plane_added_for_active_run{false};
 

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <mip_heuristics/diversity/population.cuh>
+#include <mip_heuristics/lns/population_feed.cuh>
 #include <mip_heuristics/solution/solution.cuh>
 #include <utilities/copy_helpers.hpp>
 
@@ -19,13 +20,12 @@ template <typename i_t, typename f_t>
 class persistent_lns_bridge_t {
  public:
   persistent_lns_bridge_t(const problem_t<i_t, f_t>& problem, population_t<i_t, f_t>& population)
-    : population_(population)
+    : population_(population), feed_(population)
   {
     RAFT_CUDA_TRY(cudaGetDevice(&device_));
     problem.handle_ptr->sync_stream();
     problem_ = std::make_unique<problem_t<i_t, f_t>>(problem, &handle_);
     handle_.sync_stream();
-    population_.enable_lns_seed_polling();
   }
 
   void submit(const std::vector<f_t>& papilo_assignment)
@@ -59,8 +59,7 @@ class persistent_lns_bridge_t {
     // At most ten queued candidates plus the validated cache. Bound retries even
     // if a malformed cached assignment fails revalidation.
     for (int attempt = 0; attempt < 11; ++attempt) {
-      if (!population_.take_lns_seed_candidate(assignment, objective, last_source_objective_))
-        break;
+      if (!feed_.take_seed_candidate(assignment, objective, last_source_objective_)) break;
       if (assignment.size() != static_cast<size_t>(problem_->n_variables) ||
           !std::all_of(
             assignment.begin(), assignment.end(), [](f_t x) { return std::isfinite(x); }))
@@ -93,6 +92,7 @@ class persistent_lns_bridge_t {
 
  private:
   population_t<i_t, f_t>& population_;
+  lns_population_feed_t<i_t, f_t> feed_;
   raft::handle_t handle_;
   std::unique_ptr<problem_t<i_t, f_t>> problem_;
   std::mutex mutex_;

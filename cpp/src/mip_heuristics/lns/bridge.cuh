@@ -8,6 +8,7 @@
 #include <deque>
 #include <exception>
 #include <mip_heuristics/diversity/population.cuh>
+#include <mip_heuristics/diversity/population_observer.hpp>
 #include <mip_heuristics/lns/improvement.hpp>
 #include <mip_heuristics/lns/repair_tools.cuh>
 #include <mip_heuristics/lns/thread_budget.hpp>
@@ -20,7 +21,7 @@
 namespace cuopt::mathematical_optimization::mip {
 // The LNS worker only receives immutable owning CPU copies of the problem and population.
 template <typename i_t, typename f_t>
-class lns_bridge_t {
+class lns_bridge_t final : public population_observer_t<i_t, f_t> {
  public:
   lns_bridge_t(mip_solver_context_t<i_t, f_t>& context,
                population_t<i_t, f_t>& population,
@@ -41,7 +42,7 @@ class lns_bridge_t {
       CUOPT_LOG_WARN("LNS setup failed with unknown error");
     }
   }
-  ~lns_bridge_t() { finish(); }
+  ~lns_bridge_t() override { finish(); }
   void request_stop() { stop_.store(true); }
   void finish()
   {
@@ -49,10 +50,15 @@ class lns_bridge_t {
     if (!worker_started_) return;
     auto* worker = this;
 #pragma omp taskwait depend(in : *worker)
-    population_.lns_observer = {};
-    worker_started_          = false;
+    population_.remove_observer(this);
+    worker_started_ = false;
   }
   const std::vector<f_t>& best_assignment() const { return best_; }
+
+  void on_feasible_solution(const std::vector<f_t>& assignment, f_t, bool) override
+  {
+    offer(assignment);
+  }
 
  private:
   void start(cuopt::lns::run_lns_fn run)
@@ -88,16 +94,9 @@ class lns_bridge_t {
       model_.integer.push_back(types[j] == var_t::INTEGER);
     }
     cudaGetDevice(&device_);
-    {
-      std::lock_guard<std::recursive_mutex> lock(population_.write_mutex);
-      for (auto& member : population_.solutions) {
-        if (member.first && member.second.get_feasible())
-          offer(member.second.get_host_assignment());
-      }
-    }
-    population_.lns_observer = [this](const std::vector<f_t>& x) { offer(x); };
-    worker_started_          = true;
-    auto* worker             = this;
+    population_.add_observer(this);
+    worker_started_ = true;
+    auto* worker    = this;
 #pragma omp task firstprivate(worker, run) depend(out : *worker) default(none) \
   priority(CUOPT_DEFAULT_TASK_PRIORITY)
     worker->run_worker(run);
