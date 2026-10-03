@@ -155,6 +155,7 @@ files:
       - depends_on_libcuopt_client
       - depends_on_libcuopt_mathopt
       - depends_on_libcuopt_routing
+      - depends_on_libraft_headers
       - depends_on_librmm
       - depends_on_rapids_logger
   # One set of keys per component wheel. The point of the split is in py_run_*:

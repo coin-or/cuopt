@@ -872,10 +872,8 @@ target_link_libraries(cuopt_client
         PUBLIC
         rapids_logger::rapids_logger
         CCCL::CCCL
-        # No rmm::rmm: nothing leaks out of rmm's headers here any more (#1890), and
-        # linking it would put librmm.so back in DT_NEEDED and cost the client its
-        # CUDA-free property. It stays on cuopt_client_objs for the include path.
-        #
+        $<COMPILE_ONLY:rmm::rmm>
+        $<COMPILE_ONLY:raft::raft>
         # dl is PUBLIC because the public headers pull in nvtx, whose inline init calls
         # dlopen/dlsym, so a consumer compiling them needs -ldl on its own link line.
         # rmm::rmm used to supply that transitively; dropping it broke the arm64 link of
