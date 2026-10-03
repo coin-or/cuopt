@@ -17,6 +17,7 @@ namespace cuopt::mathematical_optimization::mip {
 template <typename i_t, typename f_t>
 bool verify_cpufj_lns_feasible(const fj_cpu_problem_t<i_t, f_t>& problem,
                                const std::vector<typename type_2<f_t>::type>& bounds,
+                               const std::vector<var_t>& types,
                                const std::vector<f_t>& assignment)
 {
   if (assignment.size() != static_cast<size_t>(problem.n_variables)) return false;
@@ -25,7 +26,7 @@ bool verify_cpufj_lns_feasible(const fj_cpu_problem_t<i_t, f_t>& problem,
     const f_t x = assignment[v];
     if (!std::isfinite(x) || x < get_lower(bounds[v]) - int_tol ||
         x > get_upper(bounds[v]) + int_tol ||
-        (problem.h_var_types[v] == var_t::INTEGER && !problem.is_integer(x)))
+        (types[v] == var_t::INTEGER && !problem.is_integer(x)))
       return false;
   }
   f_t objective = 0;
@@ -49,18 +50,35 @@ bool verify_cpufj_lns_feasible(const fj_cpu_problem_t<i_t, f_t>& problem,
 }
 
 template <typename i_t, typename f_t>
+bool verify_cpufj_lns_feasible(const fj_cpu_problem_t<i_t, f_t>& problem,
+                               const std::vector<typename type_2<f_t>::type>& bounds,
+                               const std::vector<f_t>& assignment)
+{
+  return verify_cpufj_lns_feasible(problem, bounds, problem.h_var_types, assignment);
+}
+
+template <typename i_t, typename f_t>
 bool normalize_cpufj_lns_seed(const fj_cpu_problem_t<i_t, f_t>& problem,
                               const std::vector<typename type_2<f_t>::type>& bounds,
+                              const std::vector<var_t>& types,
                               std::vector<f_t>& assignment)
 {
-  if (!verify_cpufj_lns_feasible(problem, bounds, assignment)) return false;
+  if (!verify_cpufj_lns_feasible(problem, bounds, types, assignment)) return false;
   for (i_t v = 0; v < problem.n_variables; ++v) {
-    const bool integer = problem.h_var_types[v] == var_t::INTEGER;
+    const bool integer = types[v] == var_t::INTEGER;
     const f_t lo       = integer ? std::ceil(get_lower(bounds[v])) : get_lower(bounds[v]);
     const f_t hi       = integer ? std::floor(get_upper(bounds[v])) : get_upper(bounds[v]);
     if (lo > hi) return false;
     assignment[v] = std::clamp(integer ? std::round(assignment[v]) : assignment[v], lo, hi);
   }
-  return verify_cpufj_lns_feasible(problem, bounds, assignment);
+  return verify_cpufj_lns_feasible(problem, bounds, types, assignment);
+}
+
+template <typename i_t, typename f_t>
+bool normalize_cpufj_lns_seed(const fj_cpu_problem_t<i_t, f_t>& problem,
+                              const std::vector<typename type_2<f_t>::type>& bounds,
+                              std::vector<f_t>& assignment)
+{
+  return normalize_cpufj_lns_seed(problem, bounds, problem.h_var_types, assignment);
 }
 }  // namespace cuopt::mathematical_optimization::mip

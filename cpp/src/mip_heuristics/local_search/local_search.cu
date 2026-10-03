@@ -16,6 +16,7 @@
 #include <mip_heuristics/lns/thread_budget.hpp>
 #include <mip_heuristics/relaxed_lp/relaxed_lp.cuh>
 #include <mip_heuristics/utils.cuh>
+#include <utilities/copy_helpers.hpp>
 #include <utilities/timer.hpp>
 
 #include <mip_heuristics/feasibility_jump/cpu/search/api.hpp>
@@ -176,8 +177,16 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
     };
 
   repair_lns_feed = std::make_unique<lns_population_feed_t<i_t, f_t>>(population);
-  repair_lns      = std::make_unique<repair_lns_t<i_t, f_t>>(
-    *scratch_cpu_fj_lns, context.preempt_heuristic_solver_, context.base_seed, population.timer);
+  auto stream     = context.problem_ptr->handle_ptr->get_stream();
+  auto bounds     = cuopt::host_copy_async(context.problem_ptr->variable_bounds, stream);
+  auto types      = cuopt::host_copy_async(context.problem_ptr->variable_types, stream);
+  context.problem_ptr->handle_ptr->sync_stream();
+  repair_lns = std::make_unique<repair_lns_t<i_t, f_t>>(*scratch_cpu_fj_lns,
+                                                        std::move(bounds),
+                                                        std::move(types),
+                                                        context.preempt_heuristic_solver_,
+                                                        context.base_seed,
+                                                        population.timer);
   int device;
   RAFT_CUDA_TRY(cudaGetDevice(&device));
   CUOPT_LOG_DEBUG("Launching repair LNS improvement task");
@@ -270,17 +279,16 @@ void local_search_t<i_t, f_t>::start_cpufj_lptopt_scratch_threads(
 template <typename i_t, typename f_t>
 void local_search_t<i_t, f_t>::stop_cpufj_scratch_threads()
 {
-  if (feasibility_team_size(context) < CUOPT_MIP_FJ_REQUIRED_THREAD_COUNT) return;
-
   // Signal every persistent worker before reaching any task scheduling point.
+  // LNS can run on teams too small to launch the scratch feasibility lanes.
   if (scratch_cpu_fj_lns) scratch_cpu_fj_lns->halted = true;
   if (repair_lns) repair_lns->halted = true;
   if (scratch_cpu_fj_on_lp_opt) scratch_cpu_fj_on_lp_opt->halted = true;
   for (auto& cpu_fj : scratch_cpu_fj) {
-    cuopt_assert(cpu_fj != nullptr, "scratch climbers must have been created");
-    cpu_fj->halted = true;
+    if (cpu_fj) cpu_fj->halted = true;
   }
   for (size_t i = 0; i < scratch_cpu_fj.size(); ++i) {
+    if (!scratch_cpu_fj[i]) continue;
 #pragma omp taskwait depend(in : *scratch_cpu_fj[i])  // Wait for each scratch CPU FJ task to finish
   }
 

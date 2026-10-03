@@ -33,6 +33,19 @@ namespace cuopt::mathematical_optimization::mip {
 
 enum class lns_repair_backend_t { cpufj, submip };
 
+template <typename f_t>
+std::vector<f_t> lns_integer_values(f_t lower, f_t upper)
+{
+  std::vector<f_t> values;
+  for (f_t value = lower; value <= upper;) {
+    values.push_back(value);
+    // Original model domains can exceed the consecutive-integer range of f_t.
+    // Advance to the next representable integer if adding one rounds back down.
+    value = std::max(value + f_t{1}, std::nextafter(value, std::numeric_limits<f_t>::infinity()));
+  }
+  return values;
+}
+
 // Equal lower and upper bounds fix a variable. Bounds must lie within the model's domains.
 template <typename f_t>
 struct lns_repair_request_t {
@@ -72,13 +85,34 @@ class repair_lns_t {
                std::atomic<bool>& preemption,
                uint64_t seed,
                cuopt::timer_t timer = cuopt::timer_t(std::numeric_limits<double>::infinity()))
+    : repair_lns_t(anchor,
+                   anchor.h_var_bounds.underlying(),
+                   anchor.problem->h_var_types,
+                   preemption,
+                   seed,
+                   timer)
+  {
+  }
+
+  // Population seeds use the solver model's domains. CPUFJ may cap integer bounds or
+  // strengthen continuous variables to integers, excluding otherwise feasible seeds.
+  // Keep those domains separately while sharing the anchor's immutable matrix.
+  repair_lns_t(const fj_cpu_climber_t<i_t, f_t>& anchor,
+               std::vector<typename type_2<f_t>::type> bounds,
+               std::vector<var_t> types,
+               std::atomic<bool>& preemption,
+               uint64_t seed,
+               cuopt::timer_t timer = cuopt::timer_t(std::numeric_limits<double>::infinity()))
     : problem_(anchor.problem),
-      bounds_(anchor.h_var_bounds.underlying()),
+      bounds_(std::move(bounds)),
+      types_(std::move(types)),
       preemption_(preemption),
       seed_(seed),
       timer_(timer)
   {
     const auto& p = *problem_;
+    cuopt_assert(bounds_.size() == (size_t)p.n_variables && types_.size() == bounds_.size(),
+                 "repair domains must cover every variable");
     row_tolerances_.reserve(p.n_constraints);
     for (i_t r = 0; r < p.n_constraints; ++r) {
       row_tolerances_.push_back(get_cstr_tolerance<i_t, f_t>(p.cstr_lb[r],
@@ -92,7 +126,7 @@ class repair_lns_t {
 
   bool feasible(const std::vector<f_t>& x) const
   {
-    return verify_cpufj_lns_feasible(*problem_, bounds_, x);
+    return verify_cpufj_lns_feasible(*problem_, bounds_, types_, x);
   }
 
   f_t cost(const std::vector<f_t>& x) const
@@ -119,12 +153,13 @@ class repair_lns_t {
 
  private:
   bool stopped() const { return halted.load() || preemption_.load() || timer_.check_time_limit(); }
-  bool is_integer_var(i_t j) const { return problem_->h_var_types[j] == var_t::INTEGER; }
+  bool is_integer_var(i_t j) const { return types_[j] == var_t::INTEGER; }
   f_t lower(i_t j) const { return get_lower(bounds_[j]); }
   f_t upper(i_t j) const { return get_upper(bounds_[j]); }
 
   std::shared_ptr<const fj_cpu_problem_t<i_t, f_t>> problem_;
   std::vector<typename type_2<f_t>::type> bounds_;
+  std::vector<var_t> types_;
   std::vector<f_t> row_tolerances_;
   std::atomic<bool>& preemption_;
   uint64_t seed_;
@@ -167,7 +202,7 @@ lns_neighborhood_t<i_t, f_t> repair_lns_t<i_t, f_t>::make_neighborhood(
     nb.free_columns.push_back(j);
     nb.lower.push_back(lo);
     nb.upper.push_back(hi);
-    nb.types.push_back(p.h_var_types[j]);
+    nb.types.push_back(types_[j]);
     nb.objective.push_back(p.h_obj_coeffs[j]);
     f_t value = std::clamp(nb.full[j], lo, hi);
     if (is_integer_var(j)) value = std::clamp(std::round(value), lo, hi);
@@ -441,7 +476,7 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
     } else {
       current = best_known;
     }
-    if (!normalize_cpufj_lns_seed(p, bounds_, current)) continue;
+    if (!normalize_cpufj_lns_seed(p, bounds_, types_, current)) continue;
     f_t current_cost = cost(current);
 
     // Seed-selection scores are O(nnz). Recompute them on improvement or periodically.
@@ -790,8 +825,7 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
 
           std::vector<f_t> values;
           if (is_integer_var(branch)) {
-            for (f_t v = lo[branch]; v <= hi[branch] + f_t{0.5}; v += 1)
-              values.push_back(v);
+            values = lns_integer_values(lo[branch], hi[branch]);
           } else {
             values = {lo[branch], std::clamp(current[branch], lo[branch], hi[branch]), hi[branch]};
             std::sort(values.begin(), values.end());
@@ -819,7 +853,7 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
       if (improvement_found) {
         // A backend can return tolerance-feasible values. Recheck its normalized copy before
         // the next iteration uses it for exact fixings.
-        if (!normalize_cpufj_lns_seed(p, bounds_, current)) break;
+        if (!normalize_cpufj_lns_seed(p, bounds_, types_, current)) break;
         current_cost         = cost(current);
         consecutive_failures = 0;
         refresh_scores();

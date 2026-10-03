@@ -16,6 +16,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <exception>
 #include <limits>
 #include <numeric>
@@ -94,6 +95,117 @@ std::unique_ptr<mip::fj_cpu_climber_t<int, double>> make_anchor(const host_model
                                                        tolerances,
                                                        preemption,
                                                        mip::fj_settings_t{});
+}
+
+TEST(Lns, IntegerNeighborhoodEnumerationAdvancesAtLargeMagnitudes)
+{
+  EXPECT_EQ(mip::lns_integer_values(-1.0, 2.0), (std::vector<double>{-1, 0, 1, 2}));
+  const double large = std::ldexp(1.0, 53);
+  EXPECT_EQ(mip::lns_integer_values(large, large + 4),
+            (std::vector<double>{large, large + 2, large + 4}));
+  EXPECT_EQ(mip::lns_integer_values(-large - 4, -large),
+            (std::vector<double>{-large - 4, -large - 2, -large}));
+  const float large_float = std::ldexp(1.0f, 24);
+  EXPECT_EQ(mip::lns_integer_values(large_float, large_float + 4),
+            (std::vector<float>{large_float, large_float + 2, large_float + 4}));
+}
+
+TEST(Lns, PopulationSeedUsesModelBoundsBeyondCpufjIntegerCap)
+{
+  std::atomic<bool> preemption{false};
+  const auto model = single_variable(true, 0, 4e7, 0, 4e7);
+  auto anchor      = make_anchor(model, preemption, test_tolerances());
+  ASSERT_EQ(get_upper(anchor->h_var_bounds[0].get()), 1e7);
+  mip::repair_lns_t<int, double> lns(*anchor, {make_double2(0, 4e7)}, model.types, preemption, 42);
+  EXPECT_TRUE(lns.feasible({2e7}));
+  EXPECT_FALSE(lns.feasible({4e7 + 1}));
+  EXPECT_FALSE(lns.feasible({2e7 + .5}));
+
+  mip::lns_repair_request_t<double> request;
+  request.start = request.lower = request.upper = {2e7};
+  EXPECT_TRUE(lns.make_neighborhood(request).possible);
+  for (auto backend : {mip::lns_repair_backend_t::cpufj, mip::lns_repair_backend_t::submip}) {
+    const auto result = lns.repair(request, backend, nullptr);
+    ASSERT_TRUE(result.feasible);
+    EXPECT_EQ(result.assignment, request.start);
+  }
+  request.lower = request.upper = {4e7 + 1e-5};
+  EXPECT_FALSE(lns.make_neighborhood(request).possible);
+  // The CPUFJ worker still searches its private restricted domain.
+  EXPECT_EQ(get_upper(anchor->h_var_bounds[0].get()), 1e7);
+}
+
+TEST(Lns, PopulationSeedKeepsOriginalContinuousTypes)
+{
+  std::atomic<bool> preemption{false};
+  // CPUFJ strengthens this pair to integers because an integral optimum exists,
+  // although fractional feasible population seeds are valid for the solver model.
+  const host_model_t model{{1, -1},
+                           {0, 0},
+                           {10, 10},
+                           {1, 1},
+                           {1},
+                           {1},
+                           {0, 1},
+                           {0, 2},
+                           {opt::var_t::CONTINUOUS, opt::var_t::CONTINUOUS}};
+  auto anchor = make_anchor(model, preemption, test_tolerances());
+  ASSERT_EQ(anchor->problem->h_var_types,
+            (std::vector<opt::var_t>{opt::var_t::INTEGER, opt::var_t::INTEGER}));
+  const std::vector<double2> bounds{make_double2(0, 10), make_double2(0, 10)};
+  mip::repair_lns_t<int, double> lns(*anchor, bounds, model.types, preemption, 42);
+  const std::vector<double> source{1.5, .5};
+  ASSERT_TRUE(lns.feasible(source));
+  auto normalized = source;
+  ASSERT_TRUE(mip::normalize_cpufj_lns_seed(*anchor->problem, bounds, model.types, normalized));
+  EXPECT_EQ(normalized, source);
+  EXPECT_FALSE(lns.feasible({1.5, .6}));
+
+  mip::lns_repair_request_t<double> request;
+  request.start           = source;
+  request.lower           = {1.5, 0};
+  request.upper           = {1.5, 10};
+  const auto neighborhood = lns.make_neighborhood(request);
+  ASSERT_TRUE(neighborhood.possible);
+  EXPECT_EQ(neighborhood.types, (std::vector<opt::var_t>{opt::var_t::CONTINUOUS}));
+  EXPECT_EQ(neighborhood.start, (std::vector<double>{.5}));
+  EXPECT_EQ(neighborhood.row_lower, (std::vector<double>{-.5}));
+  request.lower = request.upper = source;
+  const auto fixed              = lns.repair(request, mip::lns_repair_backend_t::cpufj, nullptr);
+  ASSERT_TRUE(fixed.feasible);
+  EXPECT_EQ(fixed.assignment, source);
+}
+
+TEST(Lns, RunImprovesPopulationSeedExcludedByCpufjStrengthening)
+{
+  std::atomic<bool> preemption{false};
+  const host_model_t model{{1, -1},
+                           {0, 0},
+                           {10, 10},
+                           {1, 1},
+                           {1},
+                           {1},
+                           {0, 1},
+                           {0, 2},
+                           {opt::var_t::CONTINUOUS, opt::var_t::CONTINUOUS}};
+  auto anchor = make_anchor(model, preemption, test_tolerances());
+  mip::repair_lns_t<int, double> lns(*anchor,
+                                     {make_double2(0, 10), make_double2(0, 10)},
+                                     model.types,
+                                     preemption,
+                                     42,
+                                     cuopt::timer_t(5));
+  const std::vector<double> source{1.5, .5};
+  int submissions = 0;
+  lns.run([&](auto& seeds) { seeds.push_back(source); },
+          [&](const auto& x, double objective) {
+            ++submissions;
+            EXPECT_TRUE(lns.feasible(x));
+            EXPECT_LT(objective, lns.cost(source));
+            lns.halted = true;
+          });
+  EXPECT_GT(submissions, 0);
+  EXPECT_EQ(source, (std::vector<double>{1.5, .5}));
 }
 
 TEST(Lns, NeighborhoodKeepsStrictDomainsAndRejectsEmptyIntegerDomains)
@@ -510,6 +622,68 @@ TEST(Lns, PresolveBudgetsIncludePapiloAndAuxiliaryWorkers)
   EXPECT_EQ(mip::presolve_early_worker_budget(28, 4, 0, 1), 23);
   EXPECT_FALSE(mip::early_structural_has_capacity(2, 1, 0));
   EXPECT_FALSE(mip::early_structural_has_capacity(3, 1, 1));
+}
+
+TEST(Lns, MainWorkersStopWithoutBranchAndBoundOnSmallTeams)
+{
+  raft::handle_t handle;
+  for (int team_size : {6, 7, 8, 9, 10}) {
+    SCOPED_TRACE(team_size);
+    opt::optimization_problem_t<int, double> op(&handle);
+    init_early_lns_test_problem(op, true);
+    opt::mip_solver_settings_t<int, double> settings;
+    settings.heuristics_only = true;
+    settings.seed            = 42;
+    mip::problem_t<int, double> problem(op, settings.get_tolerances());
+    problem.preprocess_problem();
+    mip::mip_solver_context_t<int, double> context(&handle, &problem, settings);
+    std::exception_ptr task_exception;
+    context.task_exception = &task_exception;
+    mip::diversity_manager_t<int, double> dm(context);
+    dm.population.initialize_population();
+    dm.population.allocate_solutions();
+    dm.population.timer = cuopt::timer_t(10.0);
+
+#pragma omp parallel num_threads(team_size)
+    {
+#pragma omp masked
+      {
+#pragma omp taskgroup
+        {
+          dm.ls.start_cpufj_scratch_threads(dm.population);
+          dm.ls.start_cpufj_lns_improvement_thread(dm.population);
+          EXPECT_EQ(dm.ls.scratch_cpu_fj_lns != nullptr, team_size >= 7);
+          EXPECT_EQ(dm.ls.repair_lns != nullptr, team_size >= 7);
+          // The low-thread configurations retain unconstructed scratch slots.
+          for (const auto& worker : dm.ls.scratch_cpu_fj)
+            EXPECT_EQ(worker != nullptr, team_size >= 10);
+
+          dm.ls.stop_cpufj_scratch_threads();
+          bool stopped = true;
+          if (dm.ls.scratch_cpu_fj_lns) {
+            EXPECT_TRUE(dm.ls.scratch_cpu_fj_lns->halted.load());
+            stopped &= dm.ls.scratch_cpu_fj_lns->halted.load();
+          }
+          if (dm.ls.repair_lns) {
+            EXPECT_TRUE(dm.ls.repair_lns->halted.load());
+            stopped &= dm.ls.repair_lns->halted.load();
+          }
+          for (const auto& worker : dm.ls.scratch_cpu_fj) {
+            if (worker) {
+              EXPECT_TRUE(worker->halted.load());
+              stopped &= worker->halted.load();
+            }
+          }
+          EXPECT_FALSE(context.preempt_heuristic_solver_.load());
+          // Keep a regression from hanging the test itself. Successful cleanup
+          // must not need the preemption signal normally supplied by B&B.
+          if (!stopped) context.preempt_heuristic_solver_ = true;
+          dm.ls.stop_cpufj_scratch_threads();
+        }
+      }
+    }
+    EXPECT_FALSE(task_exception);
+  }
 }
 
 }  // namespace cuopt::lns::test
