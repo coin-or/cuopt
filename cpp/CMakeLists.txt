@@ -1270,7 +1270,7 @@ endif()
 if(NOT SKIP_ROUTING_BUILD)
     list(APPEND CPACK_COMPONENTS_ALL routing routing-dev)
 endif()
-if(NOT SKIP_GRPC_BUILD)
+if(NOT SKIP_GRPC_BUILD AND NOT SKIP_MATHOPT_BUILD)
     list(APPEND CPACK_COMPONENTS_ALL grpc-server)
 endif()
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr/local")
@@ -1674,7 +1674,7 @@ endif ()
 # ##################################################################################################
 # - cuopt_grpc_server - gRPC-based remote server --------------------------------------------------
 
-if (NOT SKIP_GRPC_BUILD)
+if (NOT SKIP_GRPC_BUILD AND NOT SKIP_MATHOPT_BUILD)
     add_executable(cuopt_grpc_server
             src/grpc/server/grpc_server_main.cpp
             src/grpc/server/grpc_server_logger.cpp
@@ -1720,12 +1720,6 @@ if (NOT SKIP_GRPC_BUILD)
 
     find_library(UUID_LIBRARY uuid REQUIRED)
 
-    # grpc_worker.cpp calls into the mathopt engine unconditionally, unlike routing which has
-    # a SKIP_ROUTING_BUILD opt-out. A routing-only wheel should set SKIP_GRPC_BUILD=ON instead.
-    if (SKIP_MATHOPT_BUILD)
-        message(FATAL_ERROR "cuopt_grpc_server requires mathopt; set SKIP_GRPC_BUILD=ON too")
-    endif ()
-
     # Links both engines directly. It used to reach cuopt_routing transitively through
     # cuopt_grpc; that component is gone, and the server is the one artifact that solves
     # both VRP and LP/MIP, so the dependency is now explicit.
@@ -1752,7 +1746,9 @@ if (NOT SKIP_GRPC_BUILD)
     )
 
     message(STATUS "Building cuopt_grpc_server (gRPC-based remote solve server)")
-endif (NOT SKIP_GRPC_BUILD)
+elseif (SKIP_MATHOPT_BUILD)
+    message(STATUS "cuopt_grpc_server disabled (SKIP_MATHOPT_BUILD)")
+endif (NOT SKIP_GRPC_BUILD AND NOT SKIP_MATHOPT_BUILD)
 
 # ##################################################################################################
 # - CPack has to be the last item in the cmake file-------------------------------------------------
