@@ -223,12 +223,8 @@ jobs:
       package-type: cpp
       matrix_filter: group_by([.ARCH, (.CUDA_VER|split(".")|map(tonumber)|.[0])]) | map(max_by(.PY_VER|split(".")|map(tonumber)))
   wheel-publish-libcuopt:
-    # Waits on the other three components' publication and on the whole family building.
-    needs:
-      - wheel-build-libcuopt-suite
-      - wheel-publish-libcuopt-client
-      - wheel-publish-libcuopt-mathopt
-      - wheel-publish-libcuopt-routing
+    # Gated on the whole libcuopt/cuopt family building.
+    needs: [wheel-build-libcuopt-suite]
     permissions:
       actions: read
       contents: read
@@ -313,8 +309,8 @@ jobs:
       package-type: cpp
       matrix_filter: group_by([.ARCH, (.CUDA_VER|split(".")|map(tonumber)|.[0])]) | map(max_by(.PY_VER|split(".")|map(tonumber)))
   wheel-publish-libcuopt-mathopt:
-    # Waits on the client's publication and on the whole family building.
-    needs: [wheel-build-libcuopt-suite, wheel-publish-libcuopt-client]
+    # Gated on the whole libcuopt/cuopt family building.
+    needs: [wheel-build-libcuopt-suite]
     permissions:
       actions: read
       contents: read
@@ -355,8 +351,8 @@ jobs:
       package-type: cpp
       matrix_filter: group_by([.ARCH, (.CUDA_VER|split(".")|map(tonumber)|.[0])]) | map(max_by(.PY_VER|split(".")|map(tonumber)))
   wheel-publish-libcuopt-routing:
-    # Waits on the client's publication and on the whole family building.
-    needs: [wheel-build-libcuopt-suite, wheel-publish-libcuopt-client]
+    # Gated on the whole libcuopt/cuopt family building.
+    needs: [wheel-build-libcuopt-suite]
     permissions:
       actions: read
       contents: read
@@ -410,7 +406,8 @@ jobs:
     steps:
       - run: echo "cuopt, libcuopt, libcuopt-client, libcuopt-mathopt and libcuopt-routing all built successfully"
   wheel-publish-cuopt:
-    needs: [wheel-build-libcuopt-suite, wheel-publish-libcuopt]
+    # Gated on the whole libcuopt/cuopt family building.
+    needs: [wheel-build-libcuopt-suite]
     permissions:
       actions: read
       contents: read
