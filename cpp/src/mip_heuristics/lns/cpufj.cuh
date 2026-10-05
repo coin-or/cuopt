@@ -29,8 +29,8 @@ bool repair_cpufj_lns_neighborhood(fj_cpu_climber_t<i_t, f_t>* ptr,
 {
   auto archived_assignment = ptr->h_best_assignment.underlying();
   const bool have_archive =
-    ptr->feasible_found &&
-    normalize_cpufj_lns_seed(*ptr->problem, ptr->h_var_bounds.underlying(), archived_assignment);
+    ptr->feasible_found && clamp_and_validate_cpufj_lns_seed(
+                             *ptr->problem, ptr->h_var_bounds.underlying(), archived_assignment);
   const f_t archived_objective = have_archive
                                    ? std::inner_product(archived_assignment.begin(),
                                                         archived_assignment.end(),
@@ -63,7 +63,7 @@ bool repair_cpufj_lns_neighborhood(fj_cpu_climber_t<i_t, f_t>* ptr,
   auto candidate = ptr->h_best_assignment.underlying();
   const bool valid =
     ptr->feasible_found &&
-    normalize_cpufj_lns_seed(*ptr->problem, ptr->h_var_bounds.underlying(), candidate);
+    clamp_and_validate_cpufj_lns_seed(*ptr->problem, ptr->h_var_bounds.underlying(), candidate);
   const f_t objective =
     valid ? std::inner_product(
               candidate.begin(), candidate.end(), ptr->problem->h_obj_coeffs.begin(), f_t{0})
@@ -108,6 +108,7 @@ void run_cpufj_lns_ruin_repair(fj_cpu_climber_t<i_t, f_t>* ptr,
   if (integer_vars.empty()) return;
 
   std::mt19937 rng(static_cast<std::mt19937::result_type>(ptr->settings.seed));
+  std::uniform_real_distribution<double> random_unit(0.0, 1.0);
   // Variables where the last adopted population incumbent disagreed with this climber's own
   // best-known point. Ruining preferentially from this pool is a crossover-style, population
   // guided neighborhood rather than uniform-random ruin.
@@ -126,7 +127,8 @@ void run_cpufj_lns_ruin_repair(fj_cpu_climber_t<i_t, f_t>* ptr,
       continue;
     }
 
-    if (!normalize_cpufj_lns_seed(*ptr->problem, ptr->h_var_bounds.underlying(), pop_assignment)) {
+    if (!clamp_and_validate_cpufj_lns_seed(
+          *ptr->problem, ptr->h_var_bounds.underlying(), pop_assignment)) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
@@ -184,12 +186,11 @@ void run_cpufj_lns_ruin_repair(fj_cpu_climber_t<i_t, f_t>* ptr,
     // Ruin: force the chosen variables to re-decide, biased half the time toward the population
     // incumbent's value at that variable (a directed, crossover-like perturbation) and otherwise
     // toward a uniformly random point in-domain.
-    std::bernoulli_distribution coin(0.5);
     for (i_t v : ruin_set) {
       const auto bounds = ptr->h_var_bounds[v].get();
       const f_t lo = std::ceil(get_lower(bounds)), hi = std::floor(get_upper(bounds));
       f_t new_value;
-      if (coin(rng)) {
+      if (random_unit(rng) < 0.5) {
         new_value = pop_assignment[v];
       } else if (std::isfinite(lo) && std::isfinite(hi) &&
                  lo >= static_cast<f_t>(std::numeric_limits<int64_t>::min()) &&
@@ -198,7 +199,7 @@ void run_cpufj_lns_ruin_repair(fj_cpu_climber_t<i_t, f_t>* ptr,
                                                           static_cast<int64_t>(hi));
         new_value = static_cast<f_t>(value_dist(rng));
       } else {
-        new_value = coin(rng) ? lo : hi;
+        new_value = random_unit(rng) < 0.5 ? lo : hi;
         if (!std::isfinite(new_value)) new_value = (f_t)ptr->h_assignment[v];
       }
       ptr->h_assignment[v] = new_value;

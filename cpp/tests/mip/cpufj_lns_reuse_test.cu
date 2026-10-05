@@ -343,6 +343,51 @@ std::unique_ptr<fj_cpu_climber_t<int, double>> geometry_climber(
 }
 }  // namespace
 
+TEST(CpuFjLnsGeometry, PreservesPortfolioBigMRecognition)
+{
+  for (const double big_m : {2.0, 999.0, 1000.0, 2000.0}) {
+    for (const double row_scale : {0.001, 1.0, 1000.0}) {
+      for (const bool upper_rows : {false, true}) {
+        SCOPED_TRACE(big_m);
+        SCOPED_TRACE(row_scale);
+        SCOPED_TRACE(upper_rows);
+        std::atomic<bool> stop{false};
+        lns_geometry_test_options_t options;
+        options.big_m      = big_m;
+        options.row_scale  = row_scale;
+        options.upper_rows = upper_rows;
+        auto climber       = geometry_climber(stop, options);
+        apply_lane_diversification(*climber, 7, climber->settings.seed);
+        // The ordinary portfolio retains its coefficient-ratio gate. Only LNS
+        // may replace that gate with a proof from the current variable bounds.
+        EXPECT_DOUBLE_EQ(climber->continuous_perturb_fraction, big_m >= 1000 ? 0.2 : 0.0);
+        EXPECT_EQ(climber->objective_directed_perturb, big_m >= 1000);
+        EXPECT_TRUE(configure_cpufj_lns_geometry(*climber));
+        EXPECT_DOUBLE_EQ(climber->continuous_perturb_fraction, 0.2);
+        EXPECT_TRUE(climber->objective_directed_perturb);
+      }
+    }
+  }
+}
+
+TEST(CpuFjLnsGeometry, PreservesPortfolioStructureRequirements)
+{
+  std::atomic<bool> stop{false};
+  for (int rejected_case = 0; rejected_case < 3; ++rejected_case) {
+    SCOPED_TRACE(rejected_case);
+    lns_geometry_test_options_t options;
+    options.big_m = 2000;
+    if (rejected_case == 0) options.groups = 7;
+    if (rejected_case == 1) options.scope_size = 3;
+    if (rejected_case == 2) options.integer_objective = true;
+    auto climber = geometry_climber(stop, options);
+    apply_lane_diversification(*climber, 7, climber->settings.seed);
+    EXPECT_DOUBLE_EQ(climber->continuous_perturb_fraction, 0.0);
+    EXPECT_FALSE(climber->objective_directed_perturb);
+    EXPECT_FALSE(configure_cpufj_lns_geometry(*climber));
+  }
+}
+
 TEST(CpuFjLnsGeometry, RecognizesOriginalStrengthenedAndScaledDisjunctions)
 {
   for (const double big_m : {2000.0, 2.0}) {

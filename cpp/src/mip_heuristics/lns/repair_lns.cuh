@@ -476,7 +476,7 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
     } else {
       current = best_known;
     }
-    if (!normalize_cpufj_lns_seed(p, bounds_, types_, current)) continue;
+    if (!clamp_and_validate_cpufj_lns_seed(p, bounds_, types_, current)) continue;
     f_t current_cost = cost(current);
 
     // Seed-selection scores are O(nnz). Recompute them on improvement or periodically.
@@ -853,7 +853,7 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
       if (improvement_found) {
         // A backend can return tolerance-feasible values. Recheck its normalized copy before
         // the next iteration uses it for exact fixings.
-        if (!normalize_cpufj_lns_seed(p, bounds_, types_, current)) break;
+        if (!clamp_and_validate_cpufj_lns_seed(p, bounds_, types_, current)) break;
         current_cost         = cost(current);
         consecutive_failures = 0;
         refresh_scores();

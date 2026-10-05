@@ -57,11 +57,12 @@ bool verify_cpufj_lns_feasible(const fj_cpu_problem_t<i_t, f_t>& problem,
   return verify_cpufj_lns_feasible(problem, bounds, problem.h_var_types, assignment);
 }
 
+// Round integer values and clamp to strict domains, validating before and after adjustment.
 template <typename i_t, typename f_t>
-bool normalize_cpufj_lns_seed(const fj_cpu_problem_t<i_t, f_t>& problem,
-                              const std::vector<typename type_2<f_t>::type>& bounds,
-                              const std::vector<var_t>& types,
-                              std::vector<f_t>& assignment)
+bool clamp_and_validate_cpufj_lns_seed(const fj_cpu_problem_t<i_t, f_t>& problem,
+                                       const std::vector<typename type_2<f_t>::type>& bounds,
+                                       const std::vector<var_t>& types,
+                                       std::vector<f_t>& assignment)
 {
   if (!verify_cpufj_lns_feasible(problem, bounds, types, assignment)) return false;
   for (i_t v = 0; v < problem.n_variables; ++v) {
@@ -75,10 +76,10 @@ bool normalize_cpufj_lns_seed(const fj_cpu_problem_t<i_t, f_t>& problem,
 }
 
 template <typename i_t, typename f_t>
-bool normalize_cpufj_lns_seed(const fj_cpu_problem_t<i_t, f_t>& problem,
-                              const std::vector<typename type_2<f_t>::type>& bounds,
-                              std::vector<f_t>& assignment)
+bool clamp_and_validate_cpufj_lns_seed(const fj_cpu_problem_t<i_t, f_t>& problem,
+                                       const std::vector<typename type_2<f_t>::type>& bounds,
+                                       std::vector<f_t>& assignment)
 {
-  return normalize_cpufj_lns_seed(problem, bounds, problem.h_var_types, assignment);
+  return clamp_and_validate_cpufj_lns_seed(problem, bounds, problem.h_var_types, assignment);
 }
 }  // namespace cuopt::mathematical_optimization::mip

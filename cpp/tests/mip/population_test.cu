@@ -4,6 +4,7 @@
  */
 
 #include <mip_heuristics/diversity/diversity_manager.cuh>
+#include <mip_heuristics/lns/population_feed.cuh>
 #include <mip_heuristics/utils.cuh>
 
 #include <gtest/gtest.h>
@@ -208,6 +209,104 @@ TEST(Population, ExternalQueueDrainAllowsReentrantProducerAndLeavesNewHeapPendin
   EXPECT_EQ(dm.population.get_external_solution_size(), 0);
   EXPECT_FALSE(dm.population.solutions_in_external_queue_.load());
   EXPECT_EQ(dm.population.best_feasible().get_objective(), 1.0 / 128);
+}
+
+TEST(Population, FeasibleCallbackReplaysStoredMembersAndExcludesUnvalidatedCandidates)
+{
+  raft::handle_t handle;
+  opt::optimization_problem_t<int, double> op(&handle);
+  init_population_test_problem(op);
+  const double row_lower = 1;
+  op.set_constraint_lower_bounds(&row_lower, 1);
+  opt::mip_solver_settings_t<int, double> settings;
+  mip::problem_t<int, double> problem(op, settings.get_tolerances());
+  problem.preprocess_problem();
+  mip::mip_solver_context_t<int, double> context(&handle, &problem, settings);
+  mip::diversity_manager_t<int, double> dm(context);
+  dm.population.initialize_population();
+  dm.population.allocate_solutions();
+
+  dm.population.add_external_solution({1, 1}, 3, mip::solution_origin_t::EXTERNAL);
+  dm.population.add_external_solutions_to_population();
+  std::vector<std::vector<double>> expected, received;
+  for (auto& [stored, solution] : dm.population.solutions) {
+    if (stored && solution.get_feasible()) expected.push_back(solution.get_host_assignment());
+  }
+  ASSERT_FALSE(expected.empty());
+  dm.population.set_feasible_solution_callback(
+    [&received](const auto& assignment) { received.push_back(assignment); });
+  EXPECT_EQ(received, expected);
+  // A second consumer cannot silently replace the callback whose owner will later detach it.
+  EXPECT_THROW(dm.population.set_feasible_solution_callback([](const auto&) {}),
+               cuopt::logic_error);
+  received.clear();
+
+  dm.population.add_external_solution({0, 0}, -100, mip::solution_origin_t::EXTERNAL);
+  dm.population.add_external_solution({0, 1}, 2, mip::solution_origin_t::EXTERNAL);
+  EXPECT_TRUE(received.empty());
+  dm.population.add_external_solutions_to_population();
+  ASSERT_FALSE(received.empty());
+  for (const auto& assignment : received) {
+    EXPECT_EQ(assignment, (std::vector<double>{0, 1}));
+  }
+  EXPECT_EQ(dm.population.best_feasible().get_objective(), 2);
+
+  dm.population.clear_feasible_solution_callback();
+  received.clear();
+  dm.population.add_external_solution({1, 0}, 1, mip::solution_origin_t::EXTERNAL);
+  dm.population.add_external_solutions_to_population();
+  EXPECT_EQ(dm.population.best_feasible().get_objective(), 1);
+  EXPECT_TRUE(received.empty());
+}
+
+TEST(Population, LnsFeedBoundsRecentAcceptedSeedsAndDetachesOnDestruction)
+{
+  raft::handle_t handle;
+  opt::optimization_problem_t<int, double> op(&handle);
+  init_population_test_problem(op);
+  opt::mip_solver_settings_t<int, double> settings;
+  mip::problem_t<int, double> problem(op, settings.get_tolerances());
+  problem.preprocess_problem();
+  mip::mip_solver_context_t<int, double> context(&handle, &problem, settings);
+  mip::diversity_manager_t<int, double> dm(context);
+  dm.population.initialize_population();
+  dm.population.allocate_solutions();
+
+  dm.population.add_external_solution({0.75, 0}, 0.75, mip::solution_origin_t::EXTERNAL);
+  dm.population.add_external_solutions_to_population();
+  {
+    mip::lns_population_feed_t<int, double> feed(dm.population);
+    std::vector<std::vector<double>> seeds;
+    feed.recent_feasible(seeds);
+    ASSERT_FALSE(seeds.empty());
+    for (const auto& seed : seeds)
+      EXPECT_EQ(seed, (std::vector<double>{0.75, 0}));
+
+    for (int i = 10; i > 0; --i) {
+      const double value = i / 16.0;
+      dm.population.add_external_solution({value, 0}, value, mip::solution_origin_t::EXTERNAL);
+      dm.population.add_external_solutions_to_population();
+    }
+    seeds.clear();
+    feed.recent_feasible(seeds);
+    ASSERT_EQ(seeds.size(), 8);
+    EXPECT_EQ(seeds.back(), (std::vector<double>{1.0 / 16, 0}));
+    for (const auto& seed : seeds) {
+      EXPECT_LE(seed[0], 8.0 / 16);
+      EXPECT_EQ(seed[1], 0);
+    }
+  }
+  // Reattaching would fail if the destroyed feed had left its callback installed.
+  std::vector<std::vector<double>> received;
+  dm.population.set_feasible_solution_callback(
+    [&received](const auto& assignment) { received.push_back(assignment); });
+  received.clear();
+  dm.population.add_external_solution({0, 0}, 0, mip::solution_origin_t::EXTERNAL);
+  dm.population.add_external_solutions_to_population();
+  ASSERT_FALSE(received.empty());
+  for (const auto& assignment : received)
+    EXPECT_EQ(assignment, (std::vector<double>{0, 0}));
+  dm.population.clear_feasible_solution_callback();
 }
 
 }  // namespace cuopt::mathematical_optimization::test

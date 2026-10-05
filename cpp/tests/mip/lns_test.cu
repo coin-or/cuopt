@@ -157,7 +157,8 @@ TEST(Lns, PopulationSeedKeepsOriginalContinuousTypes)
   const std::vector<double> source{1.5, .5};
   ASSERT_TRUE(lns.feasible(source));
   auto normalized = source;
-  ASSERT_TRUE(mip::normalize_cpufj_lns_seed(*anchor->problem, bounds, model.types, normalized));
+  ASSERT_TRUE(
+    mip::clamp_and_validate_cpufj_lns_seed(*anchor->problem, bounds, model.types, normalized));
   EXPECT_EQ(normalized, source);
   EXPECT_FALSE(lns.feasible({1.5, .6}));
 
@@ -381,16 +382,16 @@ TEST(Lns, CpufjLnsRevalidatesWithSolverTolerances)
   EXPECT_TRUE(mip::verify_cpufj_lns_feasible(problem, bounds, {1 + 5e-5}));
   EXPECT_FALSE(mip::verify_cpufj_lns_feasible(problem, bounds, {1 + 2e-4}));
   auto seed = std::vector<double>{1 - 5e-5};
-  ASSERT_TRUE(mip::normalize_cpufj_lns_seed(problem, bounds, seed));
+  ASSERT_TRUE(mip::clamp_and_validate_cpufj_lns_seed(problem, bounds, seed));
   EXPECT_EQ(seed[0], 1);
   problem.cstr_lb = problem.cstr_ub = {1 - 5e-5};
   seed                              = {1 - 5e-5};
-  EXPECT_FALSE(mip::normalize_cpufj_lns_seed(problem, bounds, seed));
+  EXPECT_FALSE(mip::clamp_and_validate_cpufj_lns_seed(problem, bounds, seed));
   bounds          = {make_double2(.2, .99999)};
   problem.cstr_lb = {0};
   problem.cstr_ub = {2};
   seed            = {.99999};
-  EXPECT_FALSE(mip::normalize_cpufj_lns_seed(problem, bounds, seed));
+  EXPECT_FALSE(mip::clamp_and_validate_cpufj_lns_seed(problem, bounds, seed));
 }
 
 void init_early_lns_test_problem(opt::optimization_problem_t<int, double>& op, bool integer = false)

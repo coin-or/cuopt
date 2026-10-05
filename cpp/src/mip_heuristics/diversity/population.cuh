@@ -9,13 +9,13 @@
 
 #include "assignment_hash_map.cuh"
 #include "population.cuh"
-#include "population_observer.hpp"
 
 #include <mip_heuristics/feasibility_jump/fj_cpu_worker.cuh>
 #include <mip_heuristics/solution/solution.cuh>
 #include <mip_heuristics/solver.cuh>
 #include <utilities/timer.hpp>
 
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -77,11 +77,12 @@ class population_t {
   bool is_better_than_best_feasible(solution_t<i_t, f_t>& sol);
   void run_all_recombiners(solution_t<i_t, f_t>& sol);
 
-  // The observer first receives the feasible solutions already stored. It must be removed
-  // before it is destroyed.
-  void add_observer(population_observer_t<i_t, f_t>* observer);
-  void remove_observer(population_observer_t<i_t, f_t>* observer);
-  bool has_observers();
+  using feasible_solution_callback_t = std::function<void(const std::vector<f_t>&)>;
+  // One consumer receives existing feasible members, then every accepted feasible solution.
+  // Called under population locks: keep it short and do not call back into the population.
+  void set_feasible_solution_callback(feasible_solution_callback_t callback);
+  // Waits for any in-flight callback before releasing its captured state.
+  void clear_feasible_solution_callback();
   // Host mirror of the best feasible solution for CPU workers, created on first use.
   std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> best_feasible_incumbent();
   void allocate_solutions();
@@ -222,10 +223,10 @@ class population_t {
   assignment_hash_map_t<i_t, f_t> population_hash_map;
   cuopt::timer_t timer;
 
-  void notify_feasible_solution(solution_t<i_t, f_t>& sol, bool is_best);
+  void notify_feasible_solution(solution_t<i_t, f_t>& sol);
   void publish_best_feasible();
-  std::mutex observers_mutex;
-  std::vector<population_observer_t<i_t, f_t>*> observers;
+  std::mutex feasible_solution_callback_mutex;
+  feasible_solution_callback_t feasible_solution_callback;
   std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> shared_best_feasible;
 };
 
