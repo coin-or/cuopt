@@ -1427,15 +1427,15 @@ It pulls both solver engines whether or not you use them, so prefer a component 
 
 # cuopt::client exists in every configuration, but only carries the gRPC client when
 # SKIP_GRPC_BUILD was off, so its presence alone tells a consumer nothing. Export the
-# answer: the Python bindings use it to skip the gRPC extension module, which would
-# otherwise fail to link against a client built without that arm. The VRP arm's
-# client-side marshaling (cython_grpc_client_vrp.cpp) always builds into cuopt_client
-# alongside the rest of gRPC now, regardless of SKIP_ROUTING_BUILD, so
-# CUOPT_HAS_GRPC_ROUTING is no longer a distinct condition from CUOPT_HAS_GRPC.
+# answer: the Python bindings use it to skip the gRPC extension module. CUOPT_HAS_GRPC_ROUTING
+# stays distinct from CUOPT_HAS_GRPC because grpc_client.pyx cimports cuopt::routing headers
+# unconditionally, and that target only exists when SKIP_ROUTING_BUILD is off.
 if(SKIP_GRPC_BUILD)
     set(cuopt_code_string "set(CUOPT_HAS_GRPC OFF)\nset(CUOPT_HAS_GRPC_ROUTING OFF)")
-else()
+elseif(NOT SKIP_ROUTING_BUILD)
     set(cuopt_code_string "set(CUOPT_HAS_GRPC ON)\nset(CUOPT_HAS_GRPC_ROUTING ON)")
+else()
+    set(cuopt_code_string "set(CUOPT_HAS_GRPC ON)\nset(CUOPT_HAS_GRPC_ROUTING OFF)")
 endif()
 
 # Each component installs its own targets file, so the umbrella has to pull them in. They
