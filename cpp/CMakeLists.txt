@@ -650,21 +650,13 @@ if (NOT SKIP_GRPC_BUILD)
 
     # GRPC_INFRA_FILES exists only to carry the -DNDEBUG property below; it is not a target
     # source list.
-    set(GRPC_INFRA_FILES ${GRPC_PROTO_GENERATED_FILES} ${GRPC_MATHOPT_FILES})
-    if (CUOPT_ENABLE_GRPC_ROUTING)
-        list(APPEND GRPC_INFRA_FILES ${GRPC_ROUTING_FILES})
-    endif ()
+    set(GRPC_INFRA_FILES ${GRPC_PROTO_GENERATED_FILES} ${GRPC_MATHOPT_FILES} ${GRPC_ROUTING_FILES})
 
     # The protocol and the LP/MIP arm are CUDA-free, so they build into cuopt_client. The
-    # routing arm calls routing accessors that live in CUDA translation units, so it builds
-    # into cuopt_client alongside the LP/MIP arm.
-    list(APPEND CUOPT_CLIENT_SRC_FILES ${GRPC_PROTO_GENERATED_FILES} ${GRPC_MATHOPT_FILES})
-    # The routing arm now builds into cuopt_client alongside the LP/MIP arm. Its mappers only
-    # touch routing::solver_settings_t and assignment_t accessors, which are host-only and
-    # build there too, so this no longer drags in the routing engine.
-    if (CUOPT_ENABLE_GRPC_ROUTING)
-        list(APPEND CUOPT_CLIENT_SRC_FILES ${GRPC_ROUTING_FILES})
-    endif ()
+    # routing arm's mappers only touch routing::solver_settings_t and assignment_t accessors,
+    # which are host-only and build there too, so this doesn't drag in the routing engine --
+    # it builds into cuopt_client regardless of SKIP_ROUTING_BUILD, same as the LP/MIP arm.
+    list(APPEND CUOPT_CLIENT_SRC_FILES ${GRPC_PROTO_GENERATED_FILES} ${GRPC_MATHOPT_FILES} ${GRPC_ROUTING_FILES})
 
 
     # Always keep NDEBUG defined for gRPC infrastructure files so that abseil
