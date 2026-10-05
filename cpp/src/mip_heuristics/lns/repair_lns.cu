@@ -8,7 +8,6 @@
 #include <dual_simplex/simplex_solver_settings.hpp>
 #include <dual_simplex/user_problem.hpp>
 #include <linear_algebra/sparse_matrix.hpp>
-#include <math_optimization/tic_toc.hpp>
 #include <mip_heuristics/feasibility_jump/cpu/climber.hpp>
 #include <mip_heuristics/lns/cpufj_validation.cuh>
 #include <mip_heuristics/mip_constants.hpp>
@@ -298,7 +297,10 @@ lns_repair_result_t<f_t> repair_lns_t<i_t, f_t>::repair(const lns_repair_request
   settings.solution_callback = [&](std::vector<f_t>& x, f_t) { consider(x); };
   if (!stopped() && !timer.check_time_limit()) {
     probing_implied_bound_t<i_t, f_t> probing(sub_problem.num_cols);
-    branch_and_bound_t<i_t, f_t> solver(sub_problem, settings, tic(), probing);
+    // The sub-MIP's remaining-time budget starts here, after neighborhood setup.
+    const cuopt::timer_t submip_timer(settings.time_limit);
+    branch_and_bound_t<i_t, f_t> solver(
+      sub_problem, settings, submip_timer.get_tic_start(), probing);
     solver.set_initial_guess(nb.start);
     solver.set_submip_halt_callback(
       [&](f_t, f_t) { return stopped() || timer.check_time_limit(); });
@@ -427,10 +429,9 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
     // Bound each restart by wall clock as well, so dense instances still refresh seeds and
     // respond to stop requests.
     const int max_inner_iterations = 400;
-    const auto inner_loop_deadline =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
-    for (int iteration = 0; iteration < max_inner_iterations && !stopped() &&
-                            std::chrono::steady_clock::now() < inner_loop_deadline;
+    const cuopt::timer_t inner_loop_timer(2.0);
+    for (int iteration = 0;
+         iteration < max_inner_iterations && !stopped() && !inner_loop_timer.check_time_limit();
          ++iteration) {
       size_t current_ruin_size = calibrated_ruin_size;
       if (consecutive_failures >= failure_threshold) {
@@ -691,13 +692,12 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
           }
         };
 
-        const auto search_deadline =
-          std::chrono::steady_clock::now() + std::chrono::milliseconds(30);
+        const cuopt::timer_t search_timer(0.03);
         std::function<void()> search;
         search = [&]() {
           const size_t node_mark = trail.size();
-          if (nodes++ >= node_budget || stopped() ||
-              std::chrono::steady_clock::now() >= search_deadline || !propagate(lo, hi, trail)) {
+          if (nodes++ >= node_budget || stopped() || search_timer.check_time_limit() ||
+              !propagate(lo, hi, trail)) {
             rollback(node_mark);
             return;
           }
