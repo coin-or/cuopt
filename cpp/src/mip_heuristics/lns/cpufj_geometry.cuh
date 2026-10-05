@@ -46,26 +46,29 @@ bool cpufj_lns_inactive_row_redundant(const fj_cpu_climber_t<i_t, f_t>& climber,
          (lower_row ? activity >= lower - tolerance : activity <= upper + tolerance);
 }
 
-// The CPUFJ geometric portfolio certificate, extended only for this private LNS
-// worker to accept bound-strengthened inactive rows. The shared model is read-only.
+// LNS accepts any positive number of exact-one groups, arbitrary continuous scopes,
+// and additional side constraints. Every group must select a recognized continuous
+// region; inactive rows may be certified using bounds and the solver's tolerances.
+// The shared model is read-only.
 template <typename i_t, typename f_t>
 bool has_cpufj_lns_geometry(const fj_cpu_climber_t<i_t, f_t>& climber)
 {
+  if (climber.problem == nullptr) return false;
   const auto& problem = *climber.problem;
   const i_t groups    = static_cast<i_t>(problem.card_cardinalities.size());
-  if (climber.n_binary_vars <= 0 || climber.n_integer_vars != 0 || groups < 8 ||
+  if (climber.n_binary_vars <= 0 || climber.n_integer_vars != 0 || groups == 0 ||
       problem.h_objective_vars.empty())
     return false;
-  i_t covered = 0;
-  for (i_t group : problem.card_group_of_variable)
-    covered += group >= 0;
-  if (covered < static_cast<i_t>(0.9 * climber.n_binary_vars)) return false;
   for (i_t variable : problem.h_objective_vars)
     if (problem.h_var_types[variable] != var_t::CONTINUOUS) return false;
   std::vector<f_t> coefficients, endpoints;
-  return has_cpufj_disjunctive_geometry(climber, [&](i_t row, i_t gate, bool lower_row) {
-    return cpufj_lns_inactive_row_redundant(climber, row, gate, lower_row, coefficients, endpoints);
-  });
+  return has_cpufj_disjunctive_geometry(
+    climber,
+    [&](i_t row, i_t gate, bool lower_row) {
+      return cpufj_lns_inactive_row_redundant(
+        climber, row, gate, lower_row, coefficients, endpoints);
+    },
+    cpufj_geometry_mode_t::lns);
 }
 
 template <typename i_t, typename f_t>

@@ -274,47 +274,81 @@ struct lns_geometry_test_options_t {
   bool integer_objective{false};
   int groups{8};
   int scope_size{4};
+  int ungated_group{-1};
+  int extra_continuous_rows{0};
+  bool extra_equality{false};
+  bool binary_side_row{false};
+  double cardinality{1};
   mip_solver_settings_t<int, double>::tolerances_t tolerances;
 };
 
 std::unique_ptr<fj_cpu_climber_t<int, double>> geometry_climber(
   std::atomic<bool>& stop, const lns_geometry_test_options_t& options = {})
 {
-  const int variables = 4 + 2 * options.groups;
+  const int variables = options.scope_size + 2 * options.groups;
   std::vector<double> coefficients, row_lower, row_upper;
   std::vector<int> columns, offsets{0};
   for (int group = 0; group < options.groups; ++group) {
-    for (int selector = 0; selector < 2; ++selector) {
+    for (int selector = 0; group != options.ungated_group && selector < 2; ++selector) {
       const double direction = (selector == 0 ? 1.0 : -1.0) * options.row_scale;
       const double sense     = options.upper_rows ? -1.0 : 1.0;
-      for (int pair = 0; pair < 2; ++pair) {
-        columns.insert(columns.end(),
-                       {2 * pair,
-                        pair == 1 && options.scope_size == 3 ? 0 : 2 * pair + 1,
-                        4 + 2 * group + selector});
-        coefficients.insert(
-          coefficients.end(),
-          {sense * direction, -sense * direction, -sense * options.big_m * options.row_scale});
-        const double rhs = (1.0 - options.big_m) * options.row_scale + options.inactive_row_shift;
+      for (int pair = 0; 2 * pair < options.scope_size; ++pair) {
+        columns.push_back(2 * pair);
+        coefficients.push_back(sense * direction);
+        if (options.scope_size > 1) {
+          // Pair a final odd coordinate with the preceding coordinate so the
+          // alternating assignment (1, 0, 1, ...) remains feasible in every dimension.
+          columns.push_back(2 * pair + 1 < options.scope_size ? 2 * pair + 1 : 2 * pair - 1);
+          coefficients.push_back(-sense * direction);
+        }
+        columns.push_back(options.scope_size + 2 * group + selector);
+        coefficients.push_back(-sense * options.big_m * options.row_scale);
+        const double active_rhs = options.scope_size == 1 && selector == 1 ? 0.0 : 1.0;
+        const double rhs =
+          (active_rhs - options.big_m) * options.row_scale + options.inactive_row_shift;
         row_lower.push_back(options.upper_rows ? -std::numeric_limits<double>::infinity() : rhs);
         row_upper.push_back(options.upper_rows ? -rhs : std::numeric_limits<double>::infinity());
         offsets.push_back(columns.size());
       }
     }
-    columns.insert(columns.end(), {4 + 2 * group, 5 + 2 * group});
+    columns.insert(columns.end(),
+                   {options.scope_size + 2 * group, options.scope_size + 2 * group + 1});
+    coefficients.insert(coefficients.end(), {1.0, 1.0});
+    row_lower.push_back(options.cardinality);
+    row_upper.push_back(options.cardinality);
+    offsets.push_back(columns.size());
+  }
+  if (options.extra_equality) {
+    columns.insert(columns.end(), {0, 1});
     coefficients.insert(coefficients.end(), {1.0, 1.0});
     row_lower.push_back(1.0);
     row_upper.push_back(1.0);
     offsets.push_back(columns.size());
   }
+  for (int row = 0; row < options.extra_continuous_rows; ++row) {
+    columns.push_back(0);
+    coefficients.push_back(1.0);
+    row_lower.push_back(-std::numeric_limits<double>::infinity());
+    row_upper.push_back(0.5);
+    offsets.push_back(columns.size());
+  }
+  if (options.binary_side_row) {
+    columns.insert(columns.end(), {0, options.scope_size, options.scope_size + 1});
+    coefficients.insert(coefficients.end(), {1.0, 1.0, 1.0});
+    row_lower.push_back(-std::numeric_limits<double>::infinity());
+    row_upper.push_back(2.0);
+    offsets.push_back(columns.size());
+  }
   std::vector<double> objective(variables, 0.0), lower(variables, 0.0), upper(variables, 1.0);
   std::vector<var_t> types(variables, var_t::INTEGER);
-  for (int variable = 0; variable < 4; ++variable) {
+  for (int variable = 0; variable < options.scope_size; ++variable) {
     objective[variable] = 1.0;
     types[variable]     = var_t::CONTINUOUS;
   }
-  if (options.integer_objective) objective[4] = 1.0;
-  if (options.unbounded) upper[1] = std::numeric_limits<double>::infinity();
+  if (options.integer_objective) objective[options.scope_size] = 1.0;
+  if (options.unbounded)
+    for (int variable = 0; variable < options.scope_size; ++variable)
+      upper[variable] = std::numeric_limits<double>::infinity();
   fj_settings_t settings;
   settings.seed = 42;
   auto climber  = init_fj_cpu_from_host_model<int, double>(variables,
@@ -384,8 +418,72 @@ TEST(CpuFjLnsGeometry, PreservesPortfolioStructureRequirements)
     apply_lane_diversification(*climber, 7, climber->settings.seed);
     EXPECT_DOUBLE_EQ(climber->continuous_perturb_fraction, 0.0);
     EXPECT_FALSE(climber->objective_directed_perturb);
-    EXPECT_FALSE(configure_cpufj_lns_geometry(*climber));
+    EXPECT_EQ(configure_cpufj_lns_geometry(*climber), rejected_case != 2);
   }
+}
+
+TEST(CpuFjLnsGeometry, AcceptsDifferentDimensionsAndGroupCounts)
+{
+  std::atomic<bool> stop{false};
+  for (int groups : {1, 3, 8}) {
+    for (int dimensions : {1, 2, 3, 4, 6, 12}) {
+      SCOPED_TRACE(groups);
+      SCOPED_TRACE(dimensions);
+      lns_geometry_test_options_t options;
+      options.groups     = groups;
+      options.scope_size = dimensions;
+      auto climber       = geometry_climber(stop, options);
+      EXPECT_TRUE(configure_cpufj_lns_geometry(*climber));
+      EXPECT_TRUE(climber->use_cardinality_exchange);
+      EXPECT_TRUE(climber->objective_directed_perturb);
+      EXPECT_DOUBLE_EQ(climber->continuous_perturb_fraction, 0.2);
+      std::vector<double> feasible_assignment(climber->problem->n_variables, 0.0);
+      for (int variable = 0; variable < dimensions; ++variable)
+        feasible_assignment[variable] = variable % 2 == 0 ? 1.0 : 0.0;
+      for (int group = 0; group < groups; ++group)
+        feasible_assignment[dimensions + 2 * group] = 1.0;
+      EXPECT_TRUE(verify_cpufj_lns_feasible(
+        *climber->problem, climber->h_var_bounds.underlying(), feasible_assignment));
+    }
+  }
+}
+
+TEST(CpuFjLnsGeometry, AcceptsSideConstraintsWithoutChangingPortfolioEligibility)
+{
+  std::atomic<bool> stop{false};
+  for (int side_constraint = 0; side_constraint < 3; ++side_constraint) {
+    SCOPED_TRACE(side_constraint);
+    lns_geometry_test_options_t options;
+    options.big_m                 = 2000;
+    options.extra_equality        = side_constraint == 0;
+    options.extra_continuous_rows = side_constraint == 1 ? 8 : 0;
+    options.binary_side_row       = side_constraint == 2;
+    auto climber                  = geometry_climber(stop, options);
+    apply_lane_diversification(*climber, 7, climber->settings.seed);
+    EXPECT_DOUBLE_EQ(climber->continuous_perturb_fraction, 0.0);
+    EXPECT_TRUE(configure_cpufj_lns_geometry(*climber));
+    EXPECT_DOUBLE_EQ(climber->continuous_perturb_fraction, 0.2);
+  }
+}
+
+TEST(CpuFjLnsGeometry, SideConstraintsRemainInCandidateValidation)
+{
+  std::atomic<bool> stop{false};
+  lns_geometry_test_options_t options;
+  options.groups                = 1;
+  options.scope_size            = 2;
+  options.extra_equality        = true;
+  options.extra_continuous_rows = 1;
+  options.binary_side_row       = true;
+  auto climber                  = geometry_climber(stop, options);
+  const auto problem            = climber->problem;
+  EXPECT_TRUE(configure_cpufj_lns_geometry(*climber));
+  EXPECT_EQ(climber->problem, problem);
+  const auto& bounds = climber->h_var_bounds.underlying();
+  // Both points satisfy the disjunction and exact-one equality, but the second
+  // violates the additional x[0] <= 0.5 row and must not become an incumbent.
+  EXPECT_TRUE(verify_cpufj_lns_feasible(*problem, bounds, std::vector<double>{0, 1, 0, 1}));
+  EXPECT_FALSE(verify_cpufj_lns_feasible(*problem, bounds, std::vector<double>{1, 0, 1, 0}));
 }
 
 TEST(CpuFjLnsGeometry, RecognizesOriginalStrengthenedAndScaledDisjunctions)
@@ -468,13 +566,14 @@ TEST(CpuFjLnsGeometry, InactiveRowProofUsesConfiguredTolerances)
 TEST(CpuFjLnsGeometry, RejectsIncompleteStructureAndUnprovedInactiveRows)
 {
   std::atomic<bool> stop{false};
-  for (int rejected_case = 0; rejected_case < 4; ++rejected_case) {
+  for (int rejected_case = 0; rejected_case < 5; ++rejected_case) {
     SCOPED_TRACE(rejected_case);
     lns_geometry_test_options_t options;
-    if (rejected_case == 0) options.groups = 7;
-    if (rejected_case == 1) options.scope_size = 3;
+    if (rejected_case == 0) options.groups = 0;
+    if (rejected_case == 1) options.ungated_group = 0;
     if (rejected_case == 2) options.integer_objective = true;
     if (rejected_case == 3) options.unbounded = true;
+    if (rejected_case == 4) options.cardinality = 2;
     auto climber = geometry_climber(stop, options);
     EXPECT_FALSE(configure_cpufj_lns_geometry(*climber));
     EXPECT_DOUBLE_EQ(climber->continuous_perturb_fraction, 0.0);
