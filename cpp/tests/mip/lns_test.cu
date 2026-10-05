@@ -110,6 +110,23 @@ TEST(Lns, IntegerNeighborhoodEnumerationAdvancesAtLargeMagnitudes)
             (std::vector<float>{large_float, large_float + 2, large_float + 4}));
 }
 
+TEST(Lns, CostPreservesProductRoundingUnderCancellation)
+{
+  std::atomic<bool> preemption{false};
+  auto model         = covering_pair();
+  const double scale = std::ldexp(1.0, 54);
+  model.objective    = {scale + std::ldexp(1.0, 27), -scale};
+  model.types        = {opt::var_t::CONTINUOUS, opt::var_t::CONTINUOUS};
+  auto anchor        = make_anchor(model, preemption, test_tolerances());
+  mip::repair_lns_t<int, double> lns(
+    *anchor, {make_double2(0, 1), make_double2(0, 1)}, model.types, preemption, 42);
+  const std::vector<double> x{1.0 - std::ldexp(1.0, -27), 1.0};
+  ASSERT_TRUE(lns.feasible(x));
+  // The exact dot product is 2^54 * ((1 + 2^-27) * (1 - 2^-27) - 1) = -1.
+  // Rounding the products before summation would lose that unit and return zero.
+  EXPECT_EQ(lns.cost(x), -1.0);
+}
+
 TEST(Lns, PopulationSeedUsesModelBoundsBeyondCpufjIntegerCap)
 {
   std::atomic<bool> preemption{false};
