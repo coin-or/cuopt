@@ -223,7 +223,15 @@ jobs:
       package-type: cpp
       matrix_filter: group_by([.ARCH, (.CUDA_VER|split(".")|map(tonumber)|.[0])]) | map(max_by(.PY_VER|split(".")|map(tonumber)))
   wheel-publish-libcuopt:
-    needs: wheel-build-libcuopt
+    # Waits on the other three components' publication too: this wheel's install pulls in
+    # libcuopt-client/-mathopt/-routing, so publishing first would leave a clean install
+    # unable to resolve them. wheel-build-libcuopt-suite gates on the whole family building.
+    needs:
+      - wheel-build-libcuopt
+      - wheel-build-libcuopt-suite
+      - wheel-publish-libcuopt-client
+      - wheel-publish-libcuopt-mathopt
+      - wheel-publish-libcuopt-routing
     permissions:
       actions: read
       contents: read
@@ -266,7 +274,8 @@ jobs:
       # One build per arch: the client has no CUDA dimension.
       matrix_filter: group_by(.ARCH) | map(max_by([(.CUDA_VER|split(".")|map(tonumber)), (.PY_VER|split(".")|map(tonumber))]))
   wheel-publish-libcuopt-client:
-    needs: wheel-build-libcuopt-client
+    # wheel-build-libcuopt-suite gates on the whole libcuopt/cuopt family building.
+    needs: [wheel-build-libcuopt-client, wheel-build-libcuopt-suite]
     permissions:
       actions: read
       contents: read
@@ -309,8 +318,9 @@ jobs:
   wheel-publish-libcuopt-mathopt:
     # Waits on the client's publication as well: this wheel declares
     # libcuopt-client as a dependency, so publishing first would leave a clean
-    # install unable to resolve it.
-    needs: [wheel-build-libcuopt-mathopt, wheel-publish-libcuopt-client]
+    # install unable to resolve it. wheel-build-libcuopt-suite gates on the whole family
+    # building.
+    needs: [wheel-build-libcuopt-mathopt, wheel-build-libcuopt-suite, wheel-publish-libcuopt-client]
     permissions:
       actions: read
       contents: read
@@ -353,8 +363,9 @@ jobs:
   wheel-publish-libcuopt-routing:
     # Waits on the client's publication as well: this wheel declares
     # libcuopt-client as a dependency, so publishing first would leave a clean
-    # install unable to resolve it.
-    needs: [wheel-build-libcuopt-routing, wheel-publish-libcuopt-client]
+    # install unable to resolve it. wheel-build-libcuopt-suite gates on the whole family
+    # building.
+    needs: [wheel-build-libcuopt-routing, wheel-build-libcuopt-suite, wheel-publish-libcuopt-client]
     permissions:
       actions: read
       contents: read
@@ -399,8 +410,21 @@ jobs:
       package-type: python
       # Build a wheel for each CUDA x ARCH x minimum supported Python version
       matrix_filter: group_by({CUDA_VER, ARCH}) | map(min_by(.PY_VER | split(".") | map(tonumber)))
-  wheel-publish-cuopt:
+  # Gate for every wheel-publish-* job below: cuopt's own needs: already requires libcuopt,
+  # libcuopt-client, libcuopt-mathopt and libcuopt-routing to have built successfully, so
+  # depending on this one job is enough to block publishing any of them unless the whole
+  # family built from the same commit. Without this, one component's build failing (the
+  # amd64 sccache-dist stalls we hit repeatedly) could leave its last-published wheel stale
+  # while its siblings publish fresh -- the mismatch behind #2045.
+  wheel-build-libcuopt-suite:
     needs: wheel-build-cuopt
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "cuopt, libcuopt, libcuopt-client, libcuopt-mathopt and libcuopt-routing all built successfully"
+  wheel-publish-cuopt:
+    needs: [wheel-build-cuopt, wheel-build-libcuopt-suite, wheel-publish-libcuopt]
     permissions:
       actions: read
       contents: read
