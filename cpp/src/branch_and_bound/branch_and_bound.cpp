@@ -18,6 +18,7 @@
 #include <mip_heuristics/mip_constants.hpp>
 #include <mip_heuristics/presolve/conflict_graph/clique_table.cuh>
 #include <mip_heuristics/presolve/third_party_presolve.hpp>
+#include <mip_heuristics/root_heuristics.hpp>
 
 #include <dual_simplex/basis_solves.hpp>
 #include <dual_simplex/bounds_strengthening.hpp>
@@ -365,14 +366,15 @@ void branch_and_bound_t<i_t, f_t>::set_initial_pseudocost(
 }
 
 template <typename i_t, typename f_t>
-void branch_and_bound_t<i_t, f_t>::halt_solver()
+bool branch_and_bound_t<i_t, f_t>::halt_solver()
 {
   std::lock_guard lock(active_submip_solvers_mutex_);
-  node_concurrent_halt_.store(true, std::memory_order::release);
+  const bool was_halted = node_concurrent_halt_.exchange(true, std::memory_order::acq_rel);
 
   for (i_t i = 0; i < active_submip_solvers_.size(); ++i) {
     if (active_submip_solvers_[i]) { active_submip_solvers_[i]->halt_solver(); }
   }
+  return was_halted;
 }
 
 template <typename i_t, typename f_t>
@@ -1700,6 +1702,9 @@ dual_status_t branch_and_bound_t<i_t, f_t>::solve_node_lp(
     feasible = apply_symmetry_reductions(node_ptr, worker, stats);
 
     if (feasible) {
+      lp_settings.time_limit = settings_.time_limit - toc(exploration_stats_.start_time);
+      if (lp_settings.time_limit <= 0.0) { return dual_status_t::TIME_LIMIT; }
+
       i_t node_iter     = 0;
       f_t lp_start_time = tic();
 
@@ -2479,6 +2484,12 @@ void branch_and_bound_t<i_t, f_t>::solve_submip(diving_worker_t<i_t, f_t>* worke
                submip_problem.A.nnz());
 
   probing_implied_bound_t<i_t, f_t> empty_probing(submip_problem.num_cols);
+  submip_settings.time_limit = settings_.time_limit - toc(exploration_stats_.start_time);
+  if (submip_settings.time_limit <= 0.0) {
+    solver_status_ = mip_status_t::TIME_LIMIT;
+    return;
+  }
+
   branch_and_bound_t submip_bnb(submip_problem, submip_settings, tic(), empty_probing);
   mip_solution_t<i_t, f_t> submip_solution(submip_problem.num_cols);
 
@@ -3999,7 +4010,7 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
 
   // Started here so the lanes run through the root LP and every cut pass. No relaxation exists
   // yet, so they seed from the anchor.
-  root_heuristics_t<i_t, f_t> root_heuristics(settings_.num_threads, settings_.random_seed);
+  root_heuristics_t<i_t, f_t> root_heuristics(*this, settings_.num_threads, settings_.random_seed);
   const f_t root_fj_time_limit = settings_.time_limit - toc(exploration_stats_.start_time);
   if (!settings_.deterministic && omp_in_parallel() && root_fj_time_limit > 0) {
     root_heuristics.start_persistent_lanes(
@@ -4298,6 +4309,20 @@ mip_status_t branch_and_bound_t<i_t, f_t>::solve(mip_solution_t<i_t, f_t>& solut
 
   // Stops the root heuristics and clear the associated data
   root_heuristics.stop_and_sync();
+
+  // handle halt signals for sub-MIP B&Bs
+  if (received_halt_signal()) {
+    solver_status_ = mip_status_t::HALT;
+    set_final_solution(solution, root_objective_);
+    return solver_status_;
+  }
+
+  if (toc(exploration_stats_.start_time) > settings_.time_limit) {
+    solver_status_ = mip_status_t::TIME_LIMIT;
+    set_final_solution(solution, root_objective_);
+    return solver_status_;
+  }
+
   set_uninitialized_steepest_edge_norms(original_lp_, basic_list, edge_norms_);
 
   pc_.resize(original_lp_.num_cols);

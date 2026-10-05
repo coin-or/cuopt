@@ -7,8 +7,10 @@
 
 #pragma once
 
+#include <branch_and_bound/branch_and_bound.hpp>
 #include <branch_and_bound/worker.hpp>
 #include <dual_simplex/user_problem.hpp>
+#include <math_optimization/tic_toc.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <utilities/macros.cuh>
 #include <utilities/splitmix64.hpp>
@@ -168,6 +170,8 @@ struct cut_pass_heuristics_t {
 /// \brief Object Representing the heuristics run on the root node.
 template <typename i_t, typename f_t>
 struct root_heuristics_t {
+  branch_and_bound_t<i_t, f_t>& branch_and_bound_;
+
   // List of the heuristics that run alongside a single cut pass.
   // It holds the workers and all the necessary information.
   //
@@ -192,8 +196,11 @@ struct root_heuristics_t {
   // Shared by every CPU FJ lane of the root phase, persistent and per-cut-pass alike.
   std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> shared_incumbent_;
 
-  root_heuristics_t(i_t num_threads, int64_t base_seed)
-    : worker_count_(std::make_shared<omp_atomic_t<i_t>>(0)),
+  root_heuristics_t(branch_and_bound_t<i_t, f_t>& branch_and_bound,
+                    i_t num_threads,
+                    int64_t base_seed)
+    : branch_and_bound_(branch_and_bound),
+      worker_count_(std::make_shared<omp_atomic_t<i_t>>(0)),
 
       max_workers_(std::max(num_threads - 1, 0)),
       persistent_lane_count_(std::clamp<i_t>(num_threads / 4, 0, CUOPT_MIP_ROOT_CPUFJ_MAX_LANES)),
@@ -244,6 +251,8 @@ struct root_heuristics_t {
       heuristic->send_stop_signal();
     }
 
+    const bool node_halt_was_set = branch_and_bound_.halt_solver();
+
     for (auto& lane : persistent_lanes_) {
       lane->stop();
     }
@@ -253,6 +262,13 @@ struct root_heuristics_t {
     }
 
     cut_passes_heuristics_.clear();
+
+    if (!node_halt_was_set && branch_and_bound_.solver_status_ == mip_status_t::UNSET &&
+        !branch_and_bound_.received_halt_signal() &&
+        toc(branch_and_bound_.exploration_stats_.start_time) <=
+          branch_and_bound_.settings_.time_limit) {
+      branch_and_bound_.node_concurrent_halt_.store(false, std::memory_order_release);
+    }
   }
 
   i_t stop_old_workers(i_t cut_pass, i_t new_workers)

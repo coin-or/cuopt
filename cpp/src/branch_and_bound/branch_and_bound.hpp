@@ -34,7 +34,6 @@
 #include <cuopt/mathematical_optimization/pdlp/solver_settings.hpp>
 
 #include <mip_heuristics/presolve/third_party_presolve.hpp>
-#include <mip_heuristics/root_heuristics.hpp>
 
 #include <omp.h>
 
@@ -82,6 +81,9 @@ struct clique_table_t;
 
 template <typename i_t, typename f_t>
 struct mip_symmetry_t;
+
+template <typename i_t, typename f_t>
+struct root_heuristics_t;
 
 template <typename i_t, typename f_t>
 struct nondeterministic_policy_t;
@@ -307,7 +309,7 @@ class branch_and_bound_t {
                                      : false;
   }
 
-  void halt_solver();
+  bool halt_solver();
 
   enum class cut_pass_action_t { CONTINUE, BREAK, RETURN };
 
@@ -498,6 +500,7 @@ class branch_and_bound_t {
   friend struct nondeterministic_policy_t<i_t, f_t>;
   friend struct deterministic_bfs_policy_t<i_t, f_t>;
   friend struct deterministic_diving_policy_t<i_t, f_t>;
+  friend struct root_heuristics_t<i_t, f_t>;
 
  private:
   // unique_ptr as we only want to initialize these if we're in the deterministic codepath
