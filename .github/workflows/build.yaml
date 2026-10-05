@@ -225,7 +225,6 @@ jobs:
   wheel-publish-libcuopt:
     # Waits on the other three components' publication and on the whole family building.
     needs:
-      - wheel-build-libcuopt
       - wheel-build-libcuopt-suite
       - wheel-publish-libcuopt-client
       - wheel-publish-libcuopt-mathopt
@@ -273,7 +272,7 @@ jobs:
       matrix_filter: group_by(.ARCH) | map(max_by([(.CUDA_VER|split(".")|map(tonumber)), (.PY_VER|split(".")|map(tonumber))]))
   wheel-publish-libcuopt-client:
     # Gated on the whole libcuopt/cuopt family building.
-    needs: [wheel-build-libcuopt-client, wheel-build-libcuopt-suite]
+    needs: [wheel-build-libcuopt-suite]
     permissions:
       actions: read
       contents: read
@@ -315,7 +314,7 @@ jobs:
       matrix_filter: group_by([.ARCH, (.CUDA_VER|split(".")|map(tonumber)|.[0])]) | map(max_by(.PY_VER|split(".")|map(tonumber)))
   wheel-publish-libcuopt-mathopt:
     # Waits on the client's publication and on the whole family building.
-    needs: [wheel-build-libcuopt-mathopt, wheel-build-libcuopt-suite, wheel-publish-libcuopt-client]
+    needs: [wheel-build-libcuopt-suite, wheel-publish-libcuopt-client]
     permissions:
       actions: read
       contents: read
@@ -357,7 +356,7 @@ jobs:
       matrix_filter: group_by([.ARCH, (.CUDA_VER|split(".")|map(tonumber)|.[0])]) | map(max_by(.PY_VER|split(".")|map(tonumber)))
   wheel-publish-libcuopt-routing:
     # Waits on the client's publication and on the whole family building.
-    needs: [wheel-build-libcuopt-routing, wheel-build-libcuopt-suite, wheel-publish-libcuopt-client]
+    needs: [wheel-build-libcuopt-suite, wheel-publish-libcuopt-client]
     permissions:
       actions: read
       contents: read
@@ -411,7 +410,7 @@ jobs:
     steps:
       - run: echo "cuopt, libcuopt, libcuopt-client, libcuopt-mathopt and libcuopt-routing all built successfully"
   wheel-publish-cuopt:
-    needs: [wheel-build-cuopt, wheel-build-libcuopt-suite, wheel-publish-libcuopt]
+    needs: [wheel-build-libcuopt-suite, wheel-publish-libcuopt]
     permissions:
       actions: read
       contents: read
