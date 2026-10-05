@@ -214,9 +214,9 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     try {
-      run_cpufj_lns_ruin_repair<i_t, f_t>(ptr, [best_ptr, n](auto& assignment, auto& objective) {
+      run_cpufj_lns_ruin_repair<i_t, f_t>(ptr, [best_ptr, n](auto& assignment) {
         assignment.resize(n);
-        return best_ptr->adopt(std::numeric_limits<f_t>::infinity(), assignment, &objective);
+        return best_ptr->adopt(std::numeric_limits<f_t>::infinity(), assignment);
       });
     } catch (...) {
 #pragma omp critical(cuopt_mip_task_exception)

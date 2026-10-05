@@ -423,45 +423,29 @@ void repair_lns_t<i_t, f_t>::run_backend(search_state_t& state,
                                          const std::vector<f_t>& hi_bounds,
                                          const backend_config_t& config)
 {
-  auto& [current,
-         current_cost,
-         best_known,
-         best_known_cost,
-         bandit_arms,
-         rng,
-         repair_handle,
-         submit,
-         improvement_found] = state;
-  const auto& [backend,
-               arm,
-               time_limit,
-               max_iterations,
-               max_nodes,
-               new_best_reward,
-               improve_reward,
-               penalty]     = config;
   lns_repair_request_t<f_t> request;
-  request.start              = current;
+  request.start              = state.current;
   request.lower              = lo_bounds;
   request.upper              = hi_bounds;
-  request.time_limit_seconds = time_limit;
-  request.seed               = rng();
-  request.max_iterations     = max_iterations;
-  request.max_nodes          = max_nodes;
-  auto result                = repair(request, backend, &repair_handle);
-  bandit_arms[arm].pulls++;
-  if (result.feasible && result.objective < current_cost) {
-    current           = result.assignment;
-    current_cost      = result.objective;
-    improvement_found = true;
-    bandit_arms[arm].reward += current_cost < best_known_cost ? new_best_reward : improve_reward;
-    if (result.objective < best_known_cost) {
-      submit(result.assignment, result.objective);
-      best_known      = result.assignment;
-      best_known_cost = result.objective;
+  request.time_limit_seconds = config.time_limit;
+  request.seed               = state.rng();
+  request.max_iterations     = config.max_iterations;
+  request.max_nodes          = config.max_nodes;
+  auto result                = repair(request, config.backend, &state.repair_handle);
+  state.bandit_arms[config.arm].pulls++;
+  if (result.feasible && result.objective < state.current_cost) {
+    state.current           = result.assignment;
+    state.current_cost      = result.objective;
+    state.improvement_found = true;
+    state.bandit_arms[config.arm].reward +=
+      state.current_cost < state.best_known_cost ? config.new_best_reward : config.improve_reward;
+    if (result.objective < state.best_known_cost) {
+      state.submit(result.assignment, result.objective);
+      state.best_known      = result.assignment;
+      state.best_known_cost = result.objective;
     }
   } else {
-    bandit_arms[arm].reward -= penalty;
+    state.bandit_arms[config.arm].reward -= config.penalty;
   }
 }
 
@@ -470,19 +454,16 @@ void repair_lns_t<i_t, f_t>::run_backend(search_state_t& state,
 template <typename i_t, typename f_t>
 bool repair_lns_t<i_t, f_t>::propagate(branch_state_t& episode) const
 {
-  const auto& p                  = *problem_;
-  const f_t int_tol              = p.tolerances.integrality_tolerance;
-  const auto& rows               = episode.rows;
-  const auto& chosen             = episode.chosen;
-  const int max_propagate_passes = episode.max_propagate_passes;
-  auto& lo                       = episode.lo;
-  auto& hi                       = episode.hi;
-  auto& trail                    = episode.trail;
-  bool changed                   = true;
-  int passes                     = 0;
-  while (changed && passes++ < max_propagate_passes) {
+  const auto& p     = *problem_;
+  const f_t int_tol = p.tolerances.integrality_tolerance;
+  auto& lo          = episode.lo;
+  auto& hi          = episode.hi;
+  auto& trail       = episode.trail;
+  bool changed      = true;
+  int passes        = 0;
+  while (changed && passes++ < episode.max_propagate_passes) {
     changed = false;
-    for (i_t r : rows) {
+    for (i_t r : episode.rows) {
       f_t min_activity = 0, max_activity = 0;
       for (i_t k = p.offsets[r]; k < p.offsets[r + 1]; ++k) {
         const i_t v = p.variables[k];
@@ -496,7 +477,7 @@ bool repair_lns_t<i_t, f_t>::propagate(branch_state_t& episode) const
       for (i_t k = p.offsets[r]; k < p.offsets[r + 1]; ++k) {
         const i_t v = p.variables[k];
         const f_t a = p.coefficients[k];
-        if (!chosen[v] || a == 0 || lo[v] == hi[v]) continue;
+        if (!episode.chosen[v] || a == 0 || lo[v] == hi[v]) continue;
         const f_t other_min = min_activity - a * (a >= 0 ? lo[v] : hi[v]);
         const f_t other_max = max_activity - a * (a >= 0 ? hi[v] : lo[v]);
         f_t new_lo          = (p.cstr_lb[r] - other_max) / a;
@@ -524,48 +505,32 @@ bool repair_lns_t<i_t, f_t>::propagate(branch_state_t& episode) const
 template <typename i_t, typename f_t>
 void repair_lns_t<i_t, f_t>::rollback(branch_state_t& episode, size_t mark) const
 {
-  auto& lo    = episode.lo;
-  auto& hi    = episode.hi;
-  auto& trail = episode.trail;
-  while (trail.size() > mark) {
-    const bound_change_t change = trail.back();
-    trail.pop_back();
-    lo[change.variable] = change.old_lo;
-    hi[change.variable] = change.old_hi;
+  while (episode.trail.size() > mark) {
+    const bound_change_t change = episode.trail.back();
+    episode.trail.pop_back();
+    episode.lo[change.variable] = change.old_lo;
+    episode.hi[change.variable] = change.old_hi;
   }
 }
 
 template <typename i_t, typename f_t>
 void repair_lns_t<i_t, f_t>::search(search_state_t& state, branch_state_t& episode)
 {
-  const auto& p             = *problem_;
-  auto& [current,
-         current_cost,
-         best_known,
-         best_known_cost,
-         bandit_arms,
-         rng,
-         repair_handle,
-         submit,
-         improvement_found] = state;
-  const auto& ruined        = episode.ruined;
-  const int node_budget     = episode.node_budget;
-  const f_t fixed_objective = episode.fixed_objective;
-  auto& lo                  = episode.lo;
-  auto& hi                  = episode.hi;
-  auto& trail               = episode.trail;
-  auto& nodes               = episode.nodes;
-  const auto& search_timer  = episode.search_timer;
-  const size_t node_mark    = trail.size();
-  if (nodes++ >= node_budget || stopped() || search_timer.check_time_limit() ||
-      !propagate(episode)) {
+  const auto& p          = *problem_;
+  const auto& ruined     = episode.ruined;
+  auto& lo               = episode.lo;
+  auto& hi               = episode.hi;
+  auto& trail            = episode.trail;
+  const size_t node_mark = trail.size();
+  if (episode.nodes++ >= episode.node_budget || stopped() ||
+      episode.search_timer.check_time_limit() || !propagate(episode)) {
     rollback(episode, node_mark);
     return;
   }
-  f_t objective_bound = fixed_objective;
+  f_t objective_bound = episode.fixed_objective;
   for (i_t j : ruined)
     objective_bound += p.h_obj_coeffs[j] * (p.h_obj_coeffs[j] >= 0 ? lo[j] : hi[j]);
-  if (objective_bound >= current_cost - f_t{1e-9}) {
+  if (objective_bound >= state.current_cost - f_t{1e-9}) {
     rollback(episode, node_mark);
     return;
   }
@@ -582,19 +547,19 @@ void repair_lns_t<i_t, f_t>::search(search_state_t& state, branch_state_t& episo
   }
   if (branch < 0) {
     // Propagation arithmetic alone does not certify the full assignment.
-    f_t leaf_cost = fixed_objective;
+    f_t leaf_cost = episode.fixed_objective;
     for (i_t j : ruined)
       leaf_cost += p.h_obj_coeffs[j] * lo[j];
-    if (leaf_cost < current_cost - f_t{1e-9} && feasible(lo)) {
-      current           = lo;
-      current_cost      = leaf_cost;
-      improvement_found = true;
-      bandit_arms[2].pulls++;
-      bandit_arms[2].reward += current_cost < best_known_cost ? 1.5 : 0.5;
-      if (leaf_cost < best_known_cost) {
-        submit(lo, leaf_cost);
-        best_known      = lo;
-        best_known_cost = leaf_cost;
+    if (leaf_cost < state.current_cost - f_t{1e-9} && feasible(lo)) {
+      state.current           = lo;
+      state.current_cost      = leaf_cost;
+      state.improvement_found = true;
+      state.bandit_arms[2].pulls++;
+      state.bandit_arms[2].reward += state.current_cost < state.best_known_cost ? 1.5 : 0.5;
+      if (leaf_cost < state.best_known_cost) {
+        state.submit(lo, leaf_cost);
+        state.best_known      = lo;
+        state.best_known_cost = leaf_cost;
       }
     }
     rollback(episode, node_mark);
@@ -605,13 +570,13 @@ void repair_lns_t<i_t, f_t>::search(search_state_t& state, branch_state_t& episo
   if (is_integer_var(branch)) {
     values = lns_integer_values(lo[branch], hi[branch]);
   } else {
-    values = {lo[branch], std::clamp(current[branch], lo[branch], hi[branch]), hi[branch]};
+    values = {lo[branch], std::clamp(state.current[branch], lo[branch], hi[branch]), hi[branch]};
     std::sort(values.begin(), values.end());
     values.erase(std::unique(values.begin(), values.end()), values.end());
   }
   if (p.h_obj_coeffs[branch] < 0) std::reverse(values.begin(), values.end());
   for (f_t value : values) {
-    if (nodes >= node_budget || stopped()) break;
+    if (episode.nodes >= episode.node_budget || stopped()) break;
     const size_t child_mark = trail.size();
     trail.push_back({branch, lo[branch], hi[branch]});
     lo[branch] = hi[branch] = value;

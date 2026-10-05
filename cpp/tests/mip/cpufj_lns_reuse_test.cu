@@ -114,13 +114,12 @@ TEST(CpuFjLnsWrapper, RuinRepairImprovesAndSurvivesSeveralEqualityBursts)
       ++reports;
     }
   };
-  run_cpufj_lns_ruin_repair<int, double>(climber.get(), [&](auto& assignment, auto& objective) {
+  run_cpufj_lns_ruin_repair<int, double>(climber.get(), [&](auto& assignment) {
     if (++polls > 3) {
       stop = true;
       return false;
     }
     assignment = incumbent;
-    objective  = incumbent_objective;
     return true;
   });
   EXPECT_EQ(polls, 4);

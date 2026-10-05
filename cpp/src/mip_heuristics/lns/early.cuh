@@ -107,10 +107,10 @@ class early_lns_t {
     if (!task_exception_) task_exception_ = std::move(error);
   }
 
-  bool snapshot(std::vector<f_t>& assignment, f_t& objective)
+  bool snapshot(std::vector<f_t>& assignment)
   {
     assignment.resize(cpufj_->problem->n_variables);
-    return shared_->adopt(std::numeric_limits<f_t>::infinity(), assignment, &objective);
+    return shared_->adopt(std::numeric_limits<f_t>::infinity(), assignment);
   }
 
   void submit(const std::vector<f_t>& assignment, const char* origin)
@@ -128,8 +128,7 @@ class early_lns_t {
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     cuopt::scope_guard restore([&] { omp_set_num_threads(previous_max_threads); });
-    run_cpufj_lns_ruin_repair<i_t, f_t>(
-      cpufj_.get(), [this](auto& x, auto& objective) { return snapshot(x, objective); });
+    run_cpufj_lns_ruin_repair<i_t, f_t>(cpufj_.get(), [this](auto& x) { return snapshot(x); });
   }
 
   void run_repair_lns()
@@ -142,8 +141,7 @@ class early_lns_t {
     repair_lns_->run(
       [this](auto& seeds) {
         std::vector<f_t> assignment;
-        f_t objective;
-        if (snapshot(assignment, objective)) seeds.push_back(std::move(assignment));
+        if (snapshot(assignment)) seeds.push_back(std::move(assignment));
       },
       [this](const auto& x, f_t) { submit(x, "Repair LNS"); });
   }

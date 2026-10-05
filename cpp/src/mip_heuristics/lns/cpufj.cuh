@@ -89,7 +89,7 @@ bool repair_cpufj_lns_neighborhood(fj_cpu_climber_t<i_t, f_t>* ptr,
 // it cannot race the main solve thread or the feasibility-finding scratch CPUFJ lanes.
 template <typename i_t, typename f_t>
 void run_cpufj_lns_ruin_repair(fj_cpu_climber_t<i_t, f_t>* ptr,
-                               const std::function<bool(std::vector<f_t>&, f_t&)>& snapshot)
+                               const std::function<bool(std::vector<f_t>&)>& snapshot)
 {
   const bool geometric_repair = configure_cpufj_lns_geometry(*ptr);
   if (geometric_repair) { CUOPT_LOG_DEBUG("CPUFJ LNS: enabling bound-aware geometric repair"); }
@@ -116,13 +116,11 @@ void run_cpufj_lns_ruin_repair(fj_cpu_climber_t<i_t, f_t>* ptr,
   std::vector<uint8_t> chosen(n_vars, 0);
   std::vector<i_t> ruin_set;
   std::vector<f_t> pop_assignment;
-  f_t pop_objective{};
   i_t consecutive_no_improve = 0;
 
   while (!ptr->halted.load(std::memory_order_relaxed) &&
          !ptr->preemption_flag.load(std::memory_order_relaxed)) {
-    if (!snapshot(pop_assignment, pop_objective) ||
-        pop_assignment.size() != static_cast<size_t>(n_vars)) {
+    if (!snapshot(pop_assignment) || pop_assignment.size() != static_cast<size_t>(n_vars)) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
@@ -132,7 +130,7 @@ void run_cpufj_lns_ruin_repair(fj_cpu_climber_t<i_t, f_t>* ptr,
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
-    pop_objective = std::inner_product(
+    const f_t pop_objective = std::inner_product(
       pop_assignment.begin(), pop_assignment.end(), ptr->problem->h_obj_coeffs.begin(), f_t{0});
     const bool adopt_population_incumbent =
       !ptr->feasible_found || pop_objective + OBJECTIVE_EPSILON < (f_t)ptr->h_best_objective;
