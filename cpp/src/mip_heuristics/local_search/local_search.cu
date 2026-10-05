@@ -23,15 +23,9 @@
 #include <mip_heuristics/feasibility_jump/fj_cpu.cuh>
 
 #include <algorithm>
-#include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
-
-#include <chrono>
 #include <cmath>
-#include <cstdint>
 #include <limits>
-#include <numeric>
 #include <random>
-#include <thread>
 
 namespace cuopt::mathematical_optimization::mip {
 
@@ -207,8 +201,6 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
     }
     omp_set_num_threads(previous_max_threads);
   }
-  if (workers < 2) return;
-
   scratch_cpu_fj_lns_best = population.best_feasible_incumbent();
 
   CUOPT_LOG_DEBUG("Launching CPUFJ LNS improvement task");

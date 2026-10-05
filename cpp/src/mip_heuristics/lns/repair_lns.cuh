@@ -68,7 +68,7 @@ struct lns_repair_result_t {
 template <typename i_t, typename f_t>
 struct lns_neighborhood_t {
   std::vector<i_t> offsets{0}, columns, free_columns;
-  std::vector<f_t> coefficients, lower, upper, objective, row_lower, row_upper, row_tolerances;
+  std::vector<f_t> coefficients, lower, upper, objective, row_lower, row_upper;
   std::vector<var_t> types;
   std::vector<f_t> full, start;
   bool possible = true;

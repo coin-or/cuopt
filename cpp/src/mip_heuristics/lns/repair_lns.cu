@@ -220,7 +220,6 @@ lns_neighborhood_t<i_t, f_t> repair_lns_t<i_t, f_t>::make_neighborhood(
     }
     nb.row_lower.push_back(lo);
     nb.row_upper.push_back(hi);
-    nb.row_tolerances.push_back(row_tolerances_[r]);
     nb.offsets.push_back(nb.columns.size());
   }
   return nb;
@@ -698,8 +697,7 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
 
     // Seed-selection scores are O(nnz). Recompute them on improvement or periodically.
     std::vector<std::pair<double, i_t>> variable_scores;
-    size_t top_count             = 1;
-    top_count                    = refresh_scores(current, movable, column_rows, variable_scores);
+    size_t top_count             = refresh_scores(current, movable, column_rows, variable_scores);
     int iterations_since_refresh = 0;
     const int refresh_period     = 30;
 
@@ -722,13 +720,8 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
         iterations_since_refresh = 0;
       }
 
-      i_t seed_var;
-      if (!variable_scores.empty()) {
-        const size_t selection_idx = std::min((size_t)rng() % top_count, top_count - 1);
-        seed_var                   = variable_scores[selection_idx].second;
-      } else {
-        seed_var = movable[(size_t)rng() % movable.size()];
-      }
+      const size_t selection_idx = (size_t)rng() % top_count;
+      const i_t seed_var         = variable_scores[selection_idx].second;
 
       std::vector<i_t> ruined{seed_var};
       std::vector<bool> chosen(n, false);
@@ -772,24 +765,13 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
           return a.first > b.first;
         });
 
-        i_t selected_candidate = -1;
+        i_t selected_candidate;
         if ((int)(rng() % 100) < 80 && candidates[0].first > 1e-6) {
           selected_candidate = candidates[0].second;
         } else {
           const size_t selection_range = std::min(size_t{3}, candidates.size());
           selected_candidate           = candidates[(size_t)rng() % selection_range].second;
         }
-        if (selected_candidate < 0) {
-          const size_t offset = (size_t)rng() % movable.size();
-          for (size_t k = 0; k < movable.size(); ++k) {
-            const i_t j = movable[(offset + k) % movable.size()];
-            if (!chosen[j]) {
-              selected_candidate = j;
-              break;
-            }
-          }
-        }
-        if (selected_candidate < 0) break;
         ruined.push_back(selected_candidate);
         chosen[selected_candidate] = true;
       }
@@ -849,14 +831,10 @@ void repair_lns_t<i_t, f_t>::run(const seed_fn& seeds, const submit_fn& submit)
                            improvement_found};
 
       if (selected_operator == repair_operator_t::CPUFJ) {
-        if (ruined.size() <= 30) {
-          run_backend(state,
-                      lo_bounds,
-                      hi_bounds,
-                      {lns_repair_backend_t::cpufj, 0, f_t{0.15}, 3000, 200, 2.0, 1.0, 0.1});
-        } else {
-          selected_operator = repair_operator_t::BP;
-        }
+        run_backend(state,
+                    lo_bounds,
+                    hi_bounds,
+                    {lns_repair_backend_t::cpufj, 0, f_t{0.15}, 3000, 200, 2.0, 1.0, 0.1});
       }
       if (selected_operator == repair_operator_t::SUBMIP) {
         if (ruined.size() <= 20) {
