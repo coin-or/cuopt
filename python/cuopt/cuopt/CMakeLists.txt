@@ -8,10 +8,12 @@ add_subdirectory(linear_programming/io)
 add_subdirectory(linear_programming/solver)
 add_subdirectory(linear_programming/solver_settings)
 # The gRPC extension wraps cython_grpc_client, which is only compiled into cuopt::client
-# when SKIP_GRPC_BUILD is off. The target exists either way, so ask the exported flags.
-# It needs the VRP arm too: one module covers both, and it calls submit_vrp/result_vrp,
-# which live in cython_grpc_client_vrp.cpp and are dropped with the routing engine.
-if(CUOPT_HAS_GRPC AND CUOPT_HAS_GRPC_ROUTING)
+# when SKIP_GRPC_BUILD is off. The target exists either way, so ask the exported flag. It
+# needs the VRP arm too: one module cimports cuopt::routing headers unconditionally (see
+# grpc/client/CMakeLists.txt), so test the resolved target rather than CUOPT_HAS_GRPC_ROUTING
+# -- that flag reflects whichever sibling wheel's cuopt-config.cmake happened to resolve
+# find_package(cuopt), which is not necessarily the one this install actually has.
+if(CUOPT_HAS_GRPC AND TARGET cuopt::routing)
     add_subdirectory(grpc)
 else()
     message(STATUS "cuOpt built without gRPC or without its VRP arm -- skipping the gRPC client extension module")
