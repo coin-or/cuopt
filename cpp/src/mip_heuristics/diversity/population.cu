@@ -9,7 +9,6 @@
 #include "population.cuh"
 
 #include <thrust/for_each.h>
-#include <mip_heuristics/feasibility_jump/cpu/state.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <mip_heuristics/presolve/semi_continuous.cuh>
 #include <mip_heuristics/utils.cuh>
@@ -188,8 +187,11 @@ void population_t<i_t, f_t>::set_feasible_solution_callback(feasible_solution_ca
   cuopt_expects(!feasible_solution_callback,
                 error_type_t::RuntimeError,
                 "Population feasible-solution callback is already registered");
-  for (auto& [stored, sol] : solutions) {
-    if (stored && sol.get_feasible()) { callback(sol.get_host_assignment()); }
+  for (size_t i = 0; i < solutions.size(); ++i) {
+    auto& [stored, sol] = solutions[i];
+    if (stored && sol.get_feasible()) {
+      callback(sol.get_host_assignment(), sol.get_objective(), sol.get_user_objective(), i == 0);
+    }
   }
   feasible_solution_callback = std::move(callback);
 }
@@ -202,31 +204,12 @@ void population_t<i_t, f_t>::clear_feasible_solution_callback()
 }
 
 template <typename i_t, typename f_t>
-std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>>
-population_t<i_t, f_t>::best_feasible_incumbent()
-{
-  std::lock_guard<std::recursive_mutex> lock(write_mutex);
-  if (!shared_best_feasible) {
-    shared_best_feasible = make_fj_cpu_shared_incumbent<i_t, f_t>();
-    if (!solutions.empty() && solutions[0].first) { publish_best_feasible(); }
-  }
-  return shared_best_feasible;
-}
-
-template <typename i_t, typename f_t>
-void population_t<i_t, f_t>::publish_best_feasible()
-{
-  auto& best = solutions[0].second;
-  shared_best_feasible->publish(
-    best.get_objective(), best.get_user_objective(), best.get_host_assignment());
-}
-
-template <typename i_t, typename f_t>
-void population_t<i_t, f_t>::notify_feasible_solution(solution_t<i_t, f_t>& sol)
+void population_t<i_t, f_t>::notify_feasible_solution(solution_t<i_t, f_t>& sol, bool is_best)
 {
   std::lock_guard<std::mutex> callback_lock(feasible_solution_callback_mutex);
   if (!feasible_solution_callback || !sol.get_feasible()) return;
-  feasible_solution_callback(sol.get_host_assignment());
+  feasible_solution_callback(
+    sol.get_host_assignment(), sol.get_objective(), sol.get_user_objective(), is_best);
 }
 
 template <typename i_t, typename f_t>
@@ -472,8 +455,7 @@ std::pair<i_t, bool> population_t<i_t, f_t>::add_solution(solution_t<i_t, f_t>&&
     solutions[0].second = std::move(temp_sol);
     indices[0].second   = sol_cost;
     best_updated        = true;
-    if (shared_best_feasible) { publish_best_feasible(); }
-    notify_feasible_solution(solutions[0].second);
+    notify_feasible_solution(solutions[0].second, true);
   }
 
   // Fast reject

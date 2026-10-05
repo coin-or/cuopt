@@ -216,6 +216,8 @@ TEST(Population, LnsFeedBoundsRecentAcceptedSeedsAndDetachesOnDestruction)
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
   init_population_test_problem(op);
+  const double objective[] = {1, -0.5};
+  op.set_objective_coefficients(objective, 2);
   opt::mip_solver_settings_t<int, double> settings;
   mip::problem_t<int, double> problem(op, settings.get_tolerances());
   problem.preprocess_problem();
@@ -228,6 +230,9 @@ TEST(Population, LnsFeedBoundsRecentAcceptedSeedsAndDetachesOnDestruction)
   dm.population.add_external_solutions_to_population();
   {
     mip::lns_population_feed_t<int, double> feed(dm.population);
+    std::vector<double> best(2);
+    ASSERT_TRUE(feed.best_feasible(best));
+    EXPECT_EQ(best, (std::vector<double>{0.75, 0}));
     std::vector<std::vector<double>> seeds;
     feed.recent_feasible(seeds);
     ASSERT_FALSE(seeds.empty());
@@ -247,11 +252,33 @@ TEST(Population, LnsFeedBoundsRecentAcceptedSeedsAndDetachesOnDestruction)
       EXPECT_LE(seed[0], 8.0 / 16);
       EXPECT_EQ(seed[1], 0);
     }
+    ASSERT_TRUE(feed.best_feasible(best));
+    EXPECT_EQ(best, (std::vector<double>{1.0 / 16, 0}));
+
+    // A diverse accepted member can have a slightly lower objective without
+    // passing the population's best-slot improvement margin. Keep that margin.
+    const double value = 1.0 / 16 - mip::OBJECTIVE_EPSILON / 2;
+    const std::vector<double> nearby{value + 0.5, 1};
+    dm.population.add_external_solution(nearby, value, mip::solution_origin_t::EXTERNAL);
+    dm.population.add_external_solutions_to_population();
+    seeds.clear();
+    feed.recent_feasible(seeds);
+    ASSERT_EQ(seeds.size(), 8);
+    EXPECT_EQ(seeds.back(), nearby);
+    EXPECT_EQ(dm.population.best_feasible().get_objective(), 1.0 / 16);
+    ASSERT_TRUE(feed.best_feasible(best));
+    EXPECT_EQ(best, (std::vector<double>{1.0 / 16, 0}));
+  }
+  {
+    mip::lns_population_feed_t<int, double> feed(dm.population);
+    std::vector<double> best(2);
+    ASSERT_TRUE(feed.best_feasible(best));
+    EXPECT_EQ(best, (std::vector<double>{1.0 / 16, 0}));
   }
   // Reattaching would fail if the destroyed feed had left its callback installed.
   std::vector<std::vector<double>> received;
   dm.population.set_feasible_solution_callback(
-    [&received](const auto& assignment) { received.push_back(assignment); });
+    [&received](const auto& assignment, double, double, bool) { received.push_back(assignment); });
   received.clear();
   dm.population.add_external_solution({0, 0}, 0, mip::solution_origin_t::EXTERNAL);
   dm.population.add_external_solutions_to_population();

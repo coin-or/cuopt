@@ -10,13 +10,11 @@
 #include "assignment_hash_map.cuh"
 #include "population.cuh"
 
-#include <mip_heuristics/feasibility_jump/fj_cpu_worker.cuh>
 #include <mip_heuristics/solution/solution.cuh>
 #include <mip_heuristics/solver.cuh>
 #include <utilities/timer.hpp>
 
 #include <functional>
-#include <memory>
 #include <mutex>
 #include <random>
 #include <string>
@@ -77,14 +75,13 @@ class population_t {
   bool is_better_than_best_feasible(solution_t<i_t, f_t>& sol);
   void run_all_recombiners(solution_t<i_t, f_t>& sol);
 
-  using feasible_solution_callback_t = std::function<void(const std::vector<f_t>&)>;
+  using feasible_solution_callback_t = std::function<void(const std::vector<f_t>&, f_t, f_t, bool)>;
   // One consumer receives existing feasible members, then every accepted feasible solution.
+  // Arguments are assignment, solver objective, user objective, and whether this is slot 0.
   // Called under population locks: keep it short and do not call back into the population.
   void set_feasible_solution_callback(feasible_solution_callback_t callback);
   // Waits for any in-flight callback before releasing its captured state.
   void clear_feasible_solution_callback();
-  // Host mirror of the best feasible solution for CPU workers, created on first use.
-  std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> best_feasible_incumbent();
   void allocate_solutions();
 
   void clear()
@@ -223,11 +220,9 @@ class population_t {
   assignment_hash_map_t<i_t, f_t> population_hash_map;
   cuopt::timer_t timer;
 
-  void notify_feasible_solution(solution_t<i_t, f_t>& sol);
-  void publish_best_feasible();
+  void notify_feasible_solution(solution_t<i_t, f_t>& sol, bool is_best = false);
   std::mutex feasible_solution_callback_mutex;
   feasible_solution_callback_t feasible_solution_callback;
-  std::shared_ptr<fj_cpu_shared_incumbent_t<i_t, f_t>> shared_best_feasible;
 };
 
 }  // namespace cuopt::mathematical_optimization::mip
