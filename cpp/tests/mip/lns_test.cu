@@ -4,6 +4,7 @@
  */
 
 #include "../../../benchmarks/linear_programming/cuopt/c_api_check.hpp"
+#include "lns_test_utils.cuh"
 
 #include <mip_heuristics/diversity/diversity_manager.cuh>
 #include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
@@ -28,11 +29,8 @@ namespace opt = cuopt::mathematical_optimization;
 
 using tolerances_t = opt::mip_solver_settings_t<int, double>::tolerances_t;
 
-struct host_model_t {
-  std::vector<double> coefficients, lower, upper, objective, row_lower, row_upper;
-  std::vector<int> columns, offsets;
-  std::vector<opt::var_t> types;
-};
+using mip::test::host_model_t;
+using mip::test::make_anchor;
 
 tolerances_t test_tolerances()
 {
@@ -69,32 +67,6 @@ host_model_t covering_pair()
           {0, 1},
           {0, 2},
           {opt::var_t::INTEGER, opt::var_t::INTEGER}};
-}
-
-std::unique_ptr<mip::fj_cpu_climber_t<int, double>> make_anchor(const host_model_t& m,
-                                                                std::atomic<bool>& preemption,
-                                                                tolerances_t tolerances)
-{
-  return mip::init_fj_cpu_from_host_model<int, double>((int)m.lower.size(),
-                                                       (int)m.row_lower.size(),
-                                                       (int)m.coefficients.size(),
-                                                       false,
-                                                       1.0,
-                                                       0.0,
-                                                       m.coefficients,
-                                                       m.columns,
-                                                       m.offsets,
-                                                       m.objective,
-                                                       m.lower,
-                                                       m.upper,
-                                                       m.row_lower,
-                                                       m.row_upper,
-                                                       {},
-                                                       {},
-                                                       m.types,
-                                                       tolerances,
-                                                       preemption,
-                                                       mip::fj_settings_t{});
 }
 
 TEST(Lns, IntegerNeighborhoodEnumerationAdvancesAtLargeMagnitudes)
@@ -411,10 +383,12 @@ TEST(Lns, CpufjLnsRevalidatesWithSolverTolerances)
   EXPECT_FALSE(mip::clamp_and_validate_cpufj_lns_seed(problem, bounds, seed));
 }
 
-void init_early_lns_test_problem(opt::optimization_problem_t<int, double>& op, bool integer = false)
+void init_early_lns_test_problem(opt::optimization_problem_t<int, double>& op,
+                                 bool integer           = false,
+                                 double row_lower_bound = 0)
 {
   const std::vector<double> coefficients{1, 1}, lower{0, 0}, upper{1, 1}, objective{1, 2};
-  const std::vector<double> row_lower{0}, row_upper{2};
+  const std::vector<double> row_lower{row_lower_bound}, row_upper{2};
   const std::vector<int> columns{0, 1}, offsets{0, 2};
   const std::vector<opt::var_t> types(2, integer ? opt::var_t::INTEGER : opt::var_t::CONTINUOUS);
   op.set_csr_constraint_matrix(coefficients.data(), 2, columns.data(), 2, offsets.data(), 2);
@@ -430,9 +404,7 @@ TEST(Lns, PresolveWorkerFailureIsCapturedAfterPublishingImprovement)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
-  init_early_lns_test_problem(op, true);
-  const double row_lower = 1;
-  op.set_constraint_lower_bounds(&row_lower, 1);
+  init_early_lns_test_problem(op, true, 1);
   opt::mip_solver_settings_t<int, double> settings;
   std::atomic<bool> preemption{false};
   auto anchor =
@@ -478,9 +450,7 @@ TEST(Lns, PresolveSearchImprovesAFeasibleCpuIncumbent)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
-  init_early_lns_test_problem(op, true);
-  const double row_lower = 1;
-  op.set_constraint_lower_bounds(&row_lower, 1);
+  init_early_lns_test_problem(op, true, 1);
   opt::mip_solver_settings_t<int, double> settings;
   std::atomic<bool> preemption{false};
   auto anchor =
@@ -556,9 +526,7 @@ TEST(Lns, PresolveIncumbentIsHandedToMainPopulationOnce)
 {
   raft::handle_t handle;
   opt::optimization_problem_t<int, double> op(&handle);
-  init_early_lns_test_problem(op, true);
-  const double row_lower = 1;
-  op.set_constraint_lower_bounds(&row_lower, 1);
+  init_early_lns_test_problem(op, true, 1);
   opt::mip_solver_settings_t<int, double> settings;
   mip::problem_t<int, double> problem(op, settings.get_tolerances());
   problem.preprocess_problem();

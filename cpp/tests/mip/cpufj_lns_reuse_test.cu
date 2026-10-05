@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <mip_heuristics/feasibility_jump/cpu/climber.hpp>
+#include "lns_test_utils.cuh"
+
 #include <mip_heuristics/lns/cpufj.cuh>
 #include <mip_heuristics/lns/cpufj_geometry.cuh>
 
@@ -21,26 +22,16 @@ std::unique_ptr<fj_cpu_climber_t<int, double>> equality_climber(std::atomic<bool
   settings.seed = 42;
   // The equality creates two search rows from one model row, exposing a stale
   // model-row recomputation when the scalar engine restarts.
-  auto climber = init_fj_cpu_from_host_model<int, double>(2,
-                                                          1,
-                                                          2,
-                                                          false,
-                                                          1.0,
-                                                          0.0,
-                                                          {1.0, 1.0},
-                                                          {0, 1},
-                                                          {0, 2},
-                                                          {2.0, 1.0},
-                                                          {0.0, 0.0},
-                                                          {2.0, 2.0},
-                                                          {2.0},
-                                                          {2.0},
-                                                          {},
-                                                          {},
-                                                          {var_t::INTEGER, var_t::CONTINUOUS},
-                                                          tolerances,
-                                                          stop,
-                                                          settings);
+  const host_model_t model{{1.0, 1.0},
+                           {0.0, 0.0},
+                           {2.0, 2.0},
+                           {2.0, 1.0},
+                           {2.0},
+                           {2.0},
+                           {0, 1},
+                           {0, 2},
+                           {var_t::INTEGER, var_t::CONTINUOUS}};
+  auto climber = make_anchor(model, stop, tolerances, settings);
   // Continuous variables can be eliminated by the binary adapter. Select the
   // scalar engine explicitly so this fixture exercises repeated row conversion.
   climber->low_latency = true;
@@ -198,27 +189,16 @@ TEST(CpuFjLnsWrapper, BinaryBurstsKeepBetterIncumbentsAndAcceptImprovements)
     mip_solver_settings_t<int, double>::tolerances_t tolerances;
     fj_settings_t settings;
     settings.seed = 42;
-    auto climber =
-      init_fj_cpu_from_host_model<int, double>(2,
-                                               1,
-                                               2,
-                                               false,
-                                               1.0,
-                                               0.0,
-                                               {1.0, 1.0},
-                                               {0, 1},
-                                               {0, 2},
-                                               {2.0, 1.0},
-                                               {0.0, 0.0},
-                                               {upper, upper},
-                                               {upper},
-                                               {std::numeric_limits<double>::infinity()},
-                                               {},
-                                               {},
-                                               {var_t::INTEGER, var_t::INTEGER},
-                                               tolerances,
-                                               stop,
-                                               settings);
+    const host_model_t model{{1.0, 1.0},
+                             {0.0, 0.0},
+                             {upper, upper},
+                             {2.0, 1.0},
+                             {upper},
+                             {std::numeric_limits<double>::infinity()},
+                             {0, 1},
+                             {0, 2},
+                             {var_t::INTEGER, var_t::INTEGER}};
+    auto climber                       = make_anchor(model, stop, tolerances, settings);
     climber->settings.iteration_limit  = 0;
     climber->h_best_assignment         = std::vector<double>{0.0, upper};
     climber->h_best_objective          = upper;
@@ -350,26 +330,9 @@ std::unique_ptr<fj_cpu_climber_t<int, double>> geometry_climber(
       upper[variable] = std::numeric_limits<double>::infinity();
   fj_settings_t settings;
   settings.seed = 42;
-  auto climber  = init_fj_cpu_from_host_model<int, double>(variables,
-                                                          row_lower.size(),
-                                                          coefficients.size(),
-                                                          false,
-                                                          1.0,
-                                                          0.0,
-                                                          coefficients,
-                                                          columns,
-                                                          offsets,
-                                                          objective,
-                                                          lower,
-                                                          upper,
-                                                          row_lower,
-                                                          row_upper,
-                                                           {},
-                                                           {},
-                                                          types,
-                                                          options.tolerances,
-                                                          stop,
-                                                          settings);
+  const host_model_t model{
+    coefficients, lower, upper, objective, row_lower, row_upper, columns, offsets, types};
+  auto climber = make_anchor(model, stop, options.tolerances, settings);
   EXPECT_EQ(climber->n_binary_vars, 2 * options.groups);
   EXPECT_EQ(climber->n_integer_vars, 0);
   return climber;
