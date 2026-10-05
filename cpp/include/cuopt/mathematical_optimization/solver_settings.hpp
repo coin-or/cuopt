@@ -128,5 +128,11 @@ class solver_settings_t {
   std::vector<parameter_info_t<std::string>> string_parameters;
 };
 
+// Forces every consumer except solver_settings.cu (the explicit instantiation site) to bind
+// to cuopt_mathopt's ctor/dtor instead of generating its own local copy.
+#ifndef CUOPT_SOLVER_SETTINGS_T_EXPLICIT_INSTANTIATION
+extern template class solver_settings_t<int, double>;
+#endif
+
 }  // namespace CUOPT_EXPORT mathematical_optimization
 }  // namespace cuopt
