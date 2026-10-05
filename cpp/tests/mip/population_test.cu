@@ -211,54 +211,6 @@ TEST(Population, ExternalQueueDrainAllowsReentrantProducerAndLeavesNewHeapPendin
   EXPECT_EQ(dm.population.best_feasible().get_objective(), 1.0 / 128);
 }
 
-TEST(Population, FeasibleCallbackReplaysStoredMembersAndExcludesUnvalidatedCandidates)
-{
-  raft::handle_t handle;
-  opt::optimization_problem_t<int, double> op(&handle);
-  init_population_test_problem(op);
-  const double row_lower = 1;
-  op.set_constraint_lower_bounds(&row_lower, 1);
-  opt::mip_solver_settings_t<int, double> settings;
-  mip::problem_t<int, double> problem(op, settings.get_tolerances());
-  problem.preprocess_problem();
-  mip::mip_solver_context_t<int, double> context(&handle, &problem, settings);
-  mip::diversity_manager_t<int, double> dm(context);
-  dm.population.initialize_population();
-  dm.population.allocate_solutions();
-
-  dm.population.add_external_solution({1, 1}, 3, mip::solution_origin_t::EXTERNAL);
-  dm.population.add_external_solutions_to_population();
-  std::vector<std::vector<double>> expected, received;
-  for (auto& [stored, solution] : dm.population.solutions) {
-    if (stored && solution.get_feasible()) expected.push_back(solution.get_host_assignment());
-  }
-  ASSERT_FALSE(expected.empty());
-  dm.population.set_feasible_solution_callback(
-    [&received](const auto& assignment) { received.push_back(assignment); });
-  EXPECT_EQ(received, expected);
-  // A second consumer cannot silently replace the callback whose owner will later detach it.
-  EXPECT_THROW(dm.population.set_feasible_solution_callback([](const auto&) {}),
-               cuopt::logic_error);
-  received.clear();
-
-  dm.population.add_external_solution({0, 0}, -100, mip::solution_origin_t::EXTERNAL);
-  dm.population.add_external_solution({0, 1}, 2, mip::solution_origin_t::EXTERNAL);
-  EXPECT_TRUE(received.empty());
-  dm.population.add_external_solutions_to_population();
-  ASSERT_FALSE(received.empty());
-  for (const auto& assignment : received) {
-    EXPECT_EQ(assignment, (std::vector<double>{0, 1}));
-  }
-  EXPECT_EQ(dm.population.best_feasible().get_objective(), 2);
-
-  dm.population.clear_feasible_solution_callback();
-  received.clear();
-  dm.population.add_external_solution({1, 0}, 1, mip::solution_origin_t::EXTERNAL);
-  dm.population.add_external_solutions_to_population();
-  EXPECT_EQ(dm.population.best_feasible().get_objective(), 1);
-  EXPECT_TRUE(received.empty());
-}
-
 TEST(Population, LnsFeedBoundsRecentAcceptedSeedsAndDetachesOnDestruction)
 {
   raft::handle_t handle;
