@@ -2160,12 +2160,17 @@ static void clip_initial_primal_to_bounds(const optimization_problem_t<i_t, f_t>
   const auto lb   = op_problem.get_variable_lower_bounds_host();
   const auto ub   = op_problem.get_variable_upper_bounds_host();
   const auto type = op_problem.get_variable_types_host();
-  i_t n_clipped   = 0;
+  // Bound and type vectors of the wrong size are reported by check_problem_representation (and
+  // may reach here unchecked when problem checking is off), so only use ones that match.
+  const bool has_lb   = lb.size() == x.size();
+  const bool has_ub   = ub.size() == x.size();
+  const bool has_type = type.size() == x.size();
+  i_t n_clipped       = 0;
   for (size_t j = 0; j < x.size(); ++j) {
-    if (!type.empty() && type[j] == var_t::SEMI_CONTINUOUS) { continue; }
+    if (has_type && type[j] == var_t::SEMI_CONTINUOUS) { continue; }
     f_t clipped = x[j];
-    if (!lb.empty()) { clipped = std::max(clipped, lb[j]); }
-    if (!ub.empty()) { clipped = std::min(clipped, ub[j]); }
+    if (has_lb) { clipped = std::max(clipped, lb[j]); }
+    if (has_ub) { clipped = std::min(clipped, ub[j]); }
     if (clipped != x[j]) {
       x[j] = clipped;
       ++n_clipped;
@@ -2203,19 +2208,22 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
 
     raft::common::nvtx::range fun_scope("Running solver");
 
-    // Batch initial solutions are per climber and, for strong branching, out of bounds by design.
+    // In batch PDLP for strong branching, the initial solutions will be by design out of bounds.
+    // Batch mode also skips the initial-solution clipping and check: fixed_batch_size > 0 means the
+    // caller has already expanded per-climber fields on the problem, which would fail
+    // single-problem size checks.
     const bool single_problem = settings.new_bounds.size() == 0 && settings.fixed_batch_size == 0;
-    if (single_problem) { clip_initial_primal_to_bounds(op_problem, settings); }
 
     if (problem_checking) {
       raft::common::nvtx::range fun_scope("Check problem representation");
       // This is required as user might forget to set some fields
       problem_checking_t<i_t, f_t>::check_problem_representation(op_problem);
-      // In batch PDLP for strong branching, the initial solutions will be by design out of bounds.
-      // Batch mode also disables this check: fixed_batch_size > 0 means the caller has already
-      // expanded per-climber fields on the problem, which would fail single-problem size checks.
-      if (single_problem)
-        problem_checking_t<i_t, f_t>::check_initial_solution_representation(op_problem, settings);
+    }
+    // Clip after the problem (including its bound sizes) has been validated, and before the
+    // initial solution is checked against the bounds.
+    if (single_problem) { clip_initial_primal_to_bounds(op_problem, settings); }
+    if (problem_checking && single_problem) {
+      problem_checking_t<i_t, f_t>::check_initial_solution_representation(op_problem, settings);
     }
 
     if (!settings_const.inside_mip) {

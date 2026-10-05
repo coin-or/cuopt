@@ -1179,15 +1179,20 @@ TEST_P(presolve_initial_solution, warm_start_from_optimum)
   EXPECT_LT(warm_iters, cold_iters) << " (cold=" << cold_iters << ", warm=" << warm_iters << ")";
 }
 
-// An LP initial primal outside the variable bounds is clipped to them instead of being rejected.
+// An LP initial primal outside the variable bounds is clipped to them instead of being rejected,
+// and the solve still reaches afiro's optimum.
 TEST(presolve_initial_solution, out_of_bounds_primal_is_clipped)
 {
   const raft::handle_t handle_{};
-  auto stream = handle_.get_stream();
+  auto stream                   = handle_.get_stream();
+  constexpr double tolerance    = 1e-4;
+  constexpr double expected_obj = -464.75314;  // Known optimal objective for afiro
 
-  auto path = make_path_absolute("linear_programming/afiro_original.mps");
-  auto mps  = cuopt::mathematical_optimization::io::read_mps<int, double>(path, false);
-  for (double lb : mps.get_variable_lower_bounds()) {
+  auto path          = make_path_absolute("linear_programming/afiro_original.mps");
+  auto mps           = cuopt::mathematical_optimization::io::read_mps<int, double>(path, true);
+  const auto& var_lb = mps.get_variable_lower_bounds();
+  const auto& var_ub = mps.get_variable_upper_bounds();
+  for (double lb : var_lb) {
     ASSERT_EQ(lb, 0.0);
   }
 
@@ -1195,13 +1200,56 @@ TEST(presolve_initial_solution, out_of_bounds_primal_is_clipped)
     auto settings      = pdlp_solver_settings_t<int, double>{};
     settings.presolver = presolver;
     settings.method    = cuopt::mathematical_optimization::method_t::PDLP;
-    std::vector<double> x(mps.get_n_variables(), -1.0);
-    settings.set_initial_primal_solution(x.data(), x.size(), stream);
+    settings.tolerances.relative_primal_tolerance = 1e-8;
+    settings.tolerances.relative_dual_tolerance   = 1e-8;
+    settings.tolerances.absolute_primal_tolerance = 1e-8;
+    settings.tolerances.absolute_dual_tolerance   = 1e-8;
+    settings.tolerances.absolute_gap_tolerance    = 1e-8;
+    settings.tolerances.relative_gap_tolerance    = 1e-8;
+    std::vector<double> x0(mps.get_n_variables(), -1.0);
+    settings.set_initial_primal_solution(x0.data(), x0.size(), stream);
 
     auto solution = solve_lp(&handle_, mps, settings);
-    EXPECT_EQ(solution.get_error_status().get_error_type(), cuopt::error_type_t::Success);
-    EXPECT_EQ(solution.get_termination_status(), pdlp_termination_status_t::Optimal);
+    ASSERT_EQ(solution.get_error_status().get_error_type(), cuopt::error_type_t::Success);
+    ASSERT_EQ(solution.get_termination_status(), pdlp_termination_status_t::Optimal);
+
+    auto x = host_copy(solution.get_primal_solution(), stream);
+    ASSERT_EQ((int)x.size(), mps.get_n_variables());
+    check_variable_bounds(x, var_lb, var_ub, tolerance);
+    std::vector<double> residuals;
+    compute_constraint_residuals(mps.get_constraint_matrix_values(),
+                                 mps.get_constraint_matrix_indices(),
+                                 mps.get_constraint_matrix_offsets(),
+                                 x,
+                                 residuals);
+    ASSERT_EQ((int)residuals.size(), mps.get_n_constraints());
+    check_constraint_satisfaction(
+      residuals, mps.get_constraint_lower_bounds(), mps.get_constraint_upper_bounds(), tolerance);
+    double obj = compute_objective(mps.get_objective_coefficients(), x, mps.get_objective_offset());
+    EXPECT_NEAR(obj, expected_obj, 1e-3 * std::abs(expected_obj));
   }
+}
+
+// Clipping runs after the problem is validated: variable bounds of the wrong size are reported
+// as a validation error instead of being read out of range while clipping the initial primal.
+TEST(presolve_initial_solution, mismatched_bounds_with_initial_primal_is_rejected)
+{
+  const raft::handle_t handle_{};
+  auto stream = handle_.get_stream();
+
+  auto path = make_path_absolute("linear_programming/afiro_original.mps");
+  auto mps  = cuopt::mathematical_optimization::io::read_mps<int, double>(path, true);
+  std::vector<double> short_lb(mps.get_n_variables() - 1, 0.0);
+  mps.set_variable_lower_bounds(short_lb);
+
+  auto settings      = pdlp_solver_settings_t<int, double>{};
+  settings.presolver = presolver_t::None;
+  settings.method    = cuopt::mathematical_optimization::method_t::PDLP;
+  std::vector<double> x0(mps.get_n_variables(), -1.0);
+  settings.set_initial_primal_solution(x0.data(), x0.size(), stream);
+
+  auto solution = solve_lp(&handle_, mps, settings);
+  EXPECT_EQ(solution.get_error_status().get_error_type(), cuopt::error_type_t::ValidationError);
 }
 
 // clang-format off
