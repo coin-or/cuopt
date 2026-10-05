@@ -1425,13 +1425,9 @@ It pulls both solver engines whether or not you use them, so prefer a component 
 
 ]=])
 
-# cuopt::client exists in every configuration, but only carries the gRPC client when
-# SKIP_GRPC_BUILD was off, so its presence alone tells a consumer nothing. Export the
-# answer for third-party consumers of this config. CUOPT_HAS_GRPC_ROUTING stays distinct
-# from CUOPT_HAS_GRPC because grpc_client.pyx cimports cuopt::routing headers unconditionally,
-# and that target only exists when SKIP_ROUTING_BUILD is off -- our own Python bindings test
-# `TARGET cuopt::routing` directly instead, since this flag reflects only the sibling wheel
-# whose cuopt-config.cmake happened to resolve find_package(cuopt), not what is installed.
+# Exported for third-party consumers. CUOPT_HAS_GRPC_ROUTING stays distinct from
+# CUOPT_HAS_GRPC because grpc_client.pyx cimports cuopt::routing headers unconditionally,
+# available only when SKIP_ROUTING_BUILD is off.
 if(SKIP_GRPC_BUILD)
     set(cuopt_code_string "set(CUOPT_HAS_GRPC OFF)\nset(CUOPT_HAS_GRPC_ROUTING OFF)")
 elseif(NOT SKIP_ROUTING_BUILD)
