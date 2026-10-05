@@ -14,6 +14,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace raft {
@@ -112,6 +113,29 @@ class repair_lns_t {
   void run(const seed_fn& seeds, const submit_fn& submit);
 
  private:
+  struct bandit_arm_t;
+  struct bound_change_t;
+  struct search_state_t;
+  struct backend_config_t;
+  struct branch_state_t;
+
+  void consider_repair_candidate(const lns_repair_request_t<f_t>& request,
+                                 const lns_neighborhood_t<i_t, f_t>& nb,
+                                 const std::vector<f_t>& reduced,
+                                 const cuopt::timer_t& timer,
+                                 lns_repair_result_t<f_t>& result) const;
+  size_t refresh_scores(const std::vector<f_t>& current,
+                        const std::vector<i_t>& movable,
+                        const std::vector<std::vector<std::pair<i_t, f_t>>>& column_rows,
+                        std::vector<std::pair<double, i_t>>& variable_scores) const;
+  void run_backend(search_state_t& state,
+                   const std::vector<f_t>& lo_bounds,
+                   const std::vector<f_t>& hi_bounds,
+                   const backend_config_t& config);
+  bool propagate(branch_state_t& episode) const;
+  void rollback(branch_state_t& episode, size_t mark) const;
+  void search(search_state_t& state, branch_state_t& episode);
+
   bool stopped() const { return halted.load() || preemption_.load() || timer_.check_time_limit(); }
   bool is_integer_var(i_t j) const;
   f_t lower(i_t j) const { return get_lower(bounds_[j]); }
