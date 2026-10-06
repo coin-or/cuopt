@@ -26,13 +26,24 @@ export CUOPT_RUNTIME_LIBRARY_DIR="${CUOPT_SITE_PACKAGES}/lib64;${PIP_SITE_PACKAG
 # rmm, rapids_logger, and raft are separate pip packages with their own include dirs (unlike
 # conda, where CUOPT_PREFIX/include/rapids covers all three). raft needs <cuda/std/mdspan>,
 # which ships in nvidia-cuda-cccl: nvidia/cuXY/include/cccl on CUDA 13, nvidia/cuda_cccl/include
-# on CUDA 12.
-CCCL_INCLUDE_DIR="$(compgen -G "${PIP_SITE_PACKAGES}/nvidia/cu*/include/cccl" | head -1 || true)"
+# on CUDA 12. nvidia-cuda-cccl is purelib (installs to Python's "lib" site-packages); libcuopt
+# is platlib ("lib64" on RHEL/UBI, same as "lib" on Debian) -- check both, see Dockerfile.ubi.
+PURELIB_SITE_PACKAGES="${PIP_SITE_PACKAGES/\/lib64\//\/lib\/}"
+CCCL_INCLUDE_DIR="$(compgen -G "${PIP_SITE_PACKAGES}/nvidia/cu*/include/cccl" || true)"
 if [[ -z "${CCCL_INCLUDE_DIR}" ]]; then
-  CCCL_INCLUDE_DIR="${PIP_SITE_PACKAGES}/nvidia/cuda_cccl/include"
+  CCCL_INCLUDE_DIR="$(compgen -G "${PURELIB_SITE_PACKAGES}/nvidia/cu*/include/cccl" || true)"
+fi
+CCCL_INCLUDE_DIR="$(head -1 <<<"${CCCL_INCLUDE_DIR}")"
+if [[ -z "${CCCL_INCLUDE_DIR}" ]]; then
+  for candidate in "${PIP_SITE_PACKAGES}/nvidia/cuda_cccl/include" "${PURELIB_SITE_PACKAGES}/nvidia/cuda_cccl/include"; do
+    if [[ -d "${candidate}" ]]; then
+      CCCL_INCLUDE_DIR="${candidate}"
+      break
+    fi
+  done
 fi
 if [[ ! -d "${CCCL_INCLUDE_DIR}" ]]; then
-  echo "nvidia-cuda-cccl include dir not found under ${PIP_SITE_PACKAGES}/nvidia" >&2
+  echo "nvidia-cuda-cccl include dir not found under ${PIP_SITE_PACKAGES}/nvidia or ${PURELIB_SITE_PACKAGES}/nvidia" >&2
   exit 1
 fi
 export CUOPT_EXTRA_INCLUDE_DIRS="${REPO_ROOT}/cpp/include;${REPO_ROOT}/cpp/src;${PIP_SITE_PACKAGES}/librmm/include;${PIP_SITE_PACKAGES}/rapids_logger/include;${PIP_SITE_PACKAGES}/libraft/include;${CCCL_INCLUDE_DIR}"
