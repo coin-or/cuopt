@@ -8,6 +8,7 @@
 
 #include <mip_heuristics/diversity/diversity_manager.cuh>
 #include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
+#include <mip_heuristics/feasibility_jump/feasibility_jump.cuh>
 #include <mip_heuristics/lns/cpufj_validation.cuh>
 #include <mip_heuristics/lns/early.cuh>
 #include <mip_heuristics/lns/feasibility_bootstrap.cuh>
@@ -24,6 +25,7 @@
 #include <limits>
 #include <numeric>
 #include <thread>
+#include <tuple>
 
 namespace cuopt::lns::test {
 namespace mip = cuopt::mathematical_optimization::mip;
@@ -548,6 +550,67 @@ void init_early_lns_test_problem(opt::optimization_problem_t<int, double>& op,
   op.set_objective_coefficients(objective.data(), 2);
   op.set_constraint_lower_bounds(row_lower.data(), 1);
   op.set_constraint_upper_bounds(row_upper.data(), 1);
+}
+
+TEST(Lns, OptionalClimberDoesNotAdvanceFeasibilityRng)
+{
+  raft::handle_t handle;
+  opt::optimization_problem_t<int, double> op(&handle);
+  init_early_lns_test_problem(op, true, 1);
+  opt::mip_solver_settings_t<int, double> settings;
+  settings.seed = 42;
+  mip::problem_t<int, double> problem(op, settings.get_tolerances());
+  problem.preprocess_problem();
+  mip::mip_solver_context_t<int, double> reference_context(&handle, &problem, settings);
+  mip::mip_solver_context_t<int, double> lns_context(&handle, &problem, settings);
+  mip::fj_t<int, double> reference(reference_context), with_lns(lns_context);
+  mip::solution_t<int, double> solution(problem);
+  solution.copy_new_assignment(std::vector<double>{1, 0});
+  const std::vector<double> weights(problem.n_constraints, 1.0);
+  std::atomic<bool> preemption{false};
+  const auto ordinary = [&](auto& fj, bool randomize) {
+    // Omit preserve_rng to exercise its existing default behavior.
+    return fj.create_cpu_climber(
+      solution, weights, weights, 0.0, preemption, nullptr, mip::fj_settings_t{}, randomize);
+  };
+  const auto configuration = [](const auto& climber) {
+    return std::make_tuple(climber.settings.seed,
+                           climber.mtm_viol_samples,
+                           climber.mtm_sat_samples,
+                           climber.nnz_samples,
+                           climber.perturb_interval);
+  };
+
+  auto expected = ordinary(reference, false);
+  auto actual   = ordinary(with_lns, false);
+  ASSERT_EQ(configuration(*actual), configuration(*expected));
+  auto previous_seed = expected->settings.seed;
+
+  // An optional randomized LNS climber consumes a private copy of the current stream.
+  auto lns = with_lns.create_cpu_climber(solution,
+                                         weights,
+                                         weights,
+                                         0.0,
+                                         preemption,
+                                         nullptr,
+                                         mip::fj_settings_t{},
+                                         /*randomize_params=*/true,
+                                         /*preserve_rng=*/true);
+  expected = ordinary(reference, true);
+  actual   = ordinary(with_lns, true);
+  EXPECT_EQ(configuration(*lns), configuration(*expected));
+  EXPECT_EQ(configuration(*actual), configuration(*expected));
+  EXPECT_NE(expected->settings.seed, previous_seed);
+  previous_seed = expected->settings.seed;
+
+  // Both randomized and ordinary creation must retain the same subsequent stream.
+  for (bool randomize : {false, true}) {
+    expected = ordinary(reference, randomize);
+    actual   = ordinary(with_lns, randomize);
+    EXPECT_EQ(configuration(*actual), configuration(*expected));
+    EXPECT_NE(expected->settings.seed, previous_seed);
+    previous_seed = expected->settings.seed;
+  }
 }
 
 TEST(Lns, PresolveWorkerFailureIsCapturedAfterPublishingImprovement)

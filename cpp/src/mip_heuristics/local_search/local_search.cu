@@ -179,7 +179,8 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
                                              context.preempt_heuristic_solver_,
                                              &constraint_prop.bounds_update.probing_cache,
                                              fj_settings_t{},
-                                             /*randomize=*/true);
+                                             /*randomize=*/true,
+                                             /*preserve_rng=*/true);
   scratch_cpu_fj_lns->log_prefix = "******* lns improvement: ";
   scratch_cpu_fj_lns->improvement_callback =
     [&population](f_t obj, const std::vector<f_t>& h_vec, double /*work_units*/) {
