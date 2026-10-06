@@ -2179,7 +2179,7 @@ static void clip_initial_primal_to_bounds(const optimization_problem_t<i_t, f_t>
   if (n_clipped > 0) {
     CUOPT_LOG_INFO("Clipped %d initial primal values to the variable bounds", n_clipped);
     settings.set_initial_primal_solution(x.data(), x.size(), stream);
-    stream.synchronize();
+    op_problem.get_handle_ptr()->sync_stream();
   }
 }
 
@@ -2367,7 +2367,7 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
         if (!y_presolved.empty()) {
           settings.set_initial_dual_solution(y_presolved.data(), y_presolved.size(), stream);
         }
-        stream.synchronize();
+        op_problem.get_handle_ptr()->sync_stream();
         CUOPT_LOG_INFO("Mapped the initial solution into the presolved space");
       }
 
