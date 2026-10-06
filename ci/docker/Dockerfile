@@ -107,12 +107,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 ENV CXX=/usr/bin/g++-12
 
-# raft needs headers like <cuda/std/mdspan> and <cuda/stream>. libraft's own pip dependency
-# is cuda-toolkit[cublas,curand,cusolver,cusparse], which doesn't request the cccl extra, so
-# they're otherwise absent here -- own step so the package doesn't persist into cuopt-final.
-# Unpinned: these are header-only and not ABI-coupled to the CUDA runtime version, and an
-# old pin can be missing headers raft's current source expects. cu13 dropped the cuXY package
-# suffix other CUDA majors still use (cu12, ...) -- nvidia-cuda-cccl-cu13 is a deprecated stub.
+# raft needs <cuda/std/mdspan> and <cuda/stream>, which ship in nvidia-cuda-cccl rather than
+# libraft itself. Unpinned (header-only). cu13 dropped the cuXY package suffix other majors
+# still use.
 RUN cuda_major=$(echo "${CUDA_VER}" | cut -d'.' -f1) \
     && if [ "${cuda_major}" = "13" ]; then cccl_pkg="nvidia-cuda-cccl"; \
        else cccl_pkg="nvidia-cuda-cccl-cu${cuda_major}"; fi \
