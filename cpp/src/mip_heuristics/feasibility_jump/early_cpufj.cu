@@ -51,6 +51,7 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes, bool low_latency)
   }
 
   this->preemption_flag_.store(false);
+  lns_preemption_flag_.store(false);
   this->start_time_ = std::chrono::steady_clock::now();
 
   // Tasks are not preempted, so a lane posted beyond the team size would sit in the queue for the
@@ -67,6 +68,9 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes, bool low_latency)
   climbers_.resize(n_lanes);
 
   auto report_incumbent = [this](f_t solver_obj, const std::vector<f_t>& assignment, double) {
+    // Scalar CPUFJ may report before publishing to shared_incumbent. Validate the
+    // supplied seed directly; neither reserved LNS task needs to remain a poller.
+    if (lns_) lns_->notify_seed(assignment);
     std::lock_guard<std::mutex> guard(incumbent_mutex_);
     this->try_update_best(solver_obj, assignment);
   };
@@ -105,7 +109,9 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes, bool low_latency)
         std::lock_guard<std::mutex> guard(incumbent_mutex_);
         this->try_update_best(objective, x, origin);
       },
-      seed_);
+      seed_,
+      n_lanes,
+      base_seed);
   }
   if (!threaded)
     CUOPT_LOG_INFO("Early CPUFJ budget: %d feasibility + %d LNS workers within %d OpenMP threads",
@@ -133,6 +139,7 @@ void early_cpufj_t<i_t, f_t>::stop()
   if (climbers_.empty() && !lns_) { return; }
 
   preemption_flag_.store(true);
+  lns_preemption_flag_.store(true);
   if (lns_) lns_->request_stop();
 
   // Every lane is told to stop before any wait, otherwise the first wait blocks on a lane that has

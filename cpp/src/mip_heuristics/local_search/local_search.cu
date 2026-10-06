@@ -120,6 +120,22 @@ void local_search_t<i_t, f_t>::start_cpufj_scratch_threads(population_t<i_t, f_t
   }
 }
 
+template <typename i_t, typename f_t>
+static void run_lns_feasibility_task(lns_feasibility_bootstrap_t<i_t, f_t>* bootstrap,
+                                     int slot,
+                                     lns_population_feed_t<i_t, f_t>& feed,
+                                     population_t<i_t, f_t>& population)
+{
+  if (!bootstrap) return;
+  bootstrap->run(
+    slot,
+    [&feed](auto& x) { return feed.best_feasible(x); },
+    [&population](const auto& x, f_t objective) {
+      population.add_external_solution(x, objective, solution_origin_t::CPUFJ);
+    },
+    population.timer);
+}
+
 // The current device is per thread, and the task may run on any team member.
 template <typename i_t, typename f_t>
 static void run_repair_lns_task(repair_lns_t<i_t, f_t>& repair_lns,
@@ -170,7 +186,15 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
       population.add_external_solution(h_vec, obj, solution_origin_t::CPUFJ);
     };
 
-  repair_lns_feed = std::make_unique<lns_population_feed_t<i_t, f_t>>(population);
+  // Existing seeds keep the production path. Otherwise use the reserved pair to
+  // search for feasibility until a population publication triggers the handoff.
+  if (!population.is_feasible())
+    lns_bootstrap = std::make_unique<lns_feasibility_bootstrap_t<i_t, f_t>>(
+      *scratch_cpu_fj_lns, 18, context.base_seed);
+  auto* bootstrap_ptr = lns_bootstrap.get();
+  repair_lns_feed = std::make_unique<lns_population_feed_t<i_t, f_t>>(population, [bootstrap_ptr] {
+    if (bootstrap_ptr) bootstrap_ptr->request_stop();
+  });
   auto stream     = context.problem_ptr->handle_ptr->get_stream();
   auto bounds     = cuopt::host_copy_async(context.problem_ptr->variable_bounds, stream);
   auto types      = cuopt::host_copy_async(context.problem_ptr->variable_types, stream);
@@ -187,14 +211,16 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
   auto* repair_ptr = repair_lns.get();
   auto* feed_ptr   = repair_lns_feed.get();
   auto* pop        = &population;
-#pragma omp task firstprivate(repair_ptr, feed_ptr, pop, exception_ptr, device) \
+#pragma omp task firstprivate(repair_ptr, feed_ptr, pop, exception_ptr, device, bootstrap_ptr) \
   priority(CUOPT_DEFAULT_TASK_PRIORITY) depend(out : *repair_ptr) default(none)
   {
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     try {
+      run_lns_feasibility_task(bootstrap_ptr, 1, *feed_ptr, *pop);
       run_repair_lns_task(*repair_ptr, *feed_ptr, *pop, device);
     } catch (...) {
+      if (bootstrap_ptr) bootstrap_ptr->request_stop();
       repair_ptr->halted = true;
 #pragma omp critical(cuopt_mip_task_exception)
       if (!*exception_ptr) *exception_ptr = std::current_exception();
@@ -205,17 +231,19 @@ void local_search_t<i_t, f_t>::start_cpufj_lns_improvement_thread(
 
   auto ptr       = scratch_cpu_fj_lns.get();
   const size_t n = context.problem_ptr->n_variables;
-#pragma omp task firstprivate(ptr, feed_ptr, exception_ptr, n) \
+#pragma omp task firstprivate(ptr, feed_ptr, exception_ptr, n, pop, bootstrap_ptr) \
   priority(CUOPT_DEFAULT_TASK_PRIORITY) depend(out : *ptr) default(none)
   {
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     try {
+      run_lns_feasibility_task(bootstrap_ptr, 0, *feed_ptr, *pop);
       run_cpufj_lns_ruin_repair<i_t, f_t>(ptr, [feed_ptr, n](auto& assignment) {
         assignment.resize(n);
         return feed_ptr->best_feasible(assignment);
       });
     } catch (...) {
+      if (bootstrap_ptr) bootstrap_ptr->request_stop();
 #pragma omp critical(cuopt_mip_task_exception)
       if (!*exception_ptr) *exception_ptr = std::current_exception();
     }
@@ -270,6 +298,7 @@ void local_search_t<i_t, f_t>::stop_cpufj_scratch_threads()
 {
   // Signal every persistent worker before reaching any task scheduling point.
   // LNS can run on teams too small to launch the scratch feasibility lanes.
+  if (lns_bootstrap) lns_bootstrap->request_stop();
   if (scratch_cpu_fj_lns) scratch_cpu_fj_lns->halted = true;
   if (repair_lns) repair_lns->halted = true;
   if (scratch_cpu_fj_on_lp_opt) scratch_cpu_fj_on_lp_opt->halted = true;
