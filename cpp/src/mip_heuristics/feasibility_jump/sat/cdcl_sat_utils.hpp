@@ -41,7 +41,7 @@ static constexpr size_t sat_clause_limit             = 2000000;
 static constexpr int bdd_false_terminal              = -1;
 static constexpr int bdd_true_terminal               = -2;
 
-using pb_term_t = std::pair<int, int64_t>;
+using pseudoboolean_term_t = std::pair<int, int64_t>;
 
 // Both encoders use sum_i a_i z_i <= rhs, where a_i = |c_i| and z_i is x_i for c_i > 0
 // and !x_i otherwise.
@@ -54,7 +54,7 @@ using pb_term_t = std::pair<int, int64_t>;
 // For the above example, a simplifed equivalent CNF is:
 // (NOT(x_1) OR NOT(x_3)) AND (NOT(x_2) OR NOT(x_3))
 // Obviously, this becomes inefficient for large numbers of terms.
-static bool try_encode_pb_row_direct(const std::vector<pb_term_t>& terms,
+static bool try_encode_pb_row_direct(const std::vector<pseudoboolean_term_t>& terms,
                                      int64_t rhs,
                                      std::vector<int64_t>& subset_weight,
                                      std::vector<std::vector<int>>& cnf)
@@ -92,7 +92,7 @@ static bool try_encode_pb_row_direct(const std::vector<pb_term_t>& terms,
 // Q(i,r) -> Q(i+1,r) && (!z_i || Q(i+1,r-a_i)).
 // The idea of BDD encoding is inspired by dynamic programming, by encoding a "decision diagram"
 // whose state represents the accumulated weighted sum of the pseudo-boolean constraint.
-static int encode_pb_row_bdd_node(const std::vector<pb_term_t>& terms,
+static int encode_pb_row_bdd_node(const std::vector<pseudoboolean_term_t>& terms,
                                   const std::vector<int64_t>& suffix,
                                   std::map<std::pair<int, int64_t>, int>& memo,
                                   int& variables,
@@ -135,7 +135,7 @@ static int encode_pb_row_bdd_node(const std::vector<pb_term_t>& terms,
   return q;
 }
 
-static sat_result_t encode_pb_row_bdd(const std::vector<pb_term_t>& terms,
+static sat_result_t encode_pb_row_bdd(const std::vector<pseudoboolean_term_t>& terms,
                                       int64_t rhs,
                                       int& variables,
                                       std::vector<std::vector<int>>& cnf)
@@ -161,7 +161,7 @@ static sat_result_t encode_pb_model(const fj_bin_problem_t<coef_t>& pb,
 {
   variables = pb.n_variables;
   cnf.clear();
-  std::vector<pb_term_t> terms;
+  std::vector<pseudoboolean_term_t> terms;
   std::vector<int64_t> subset_weight;
   for (int r = 0; r < pb.n_constraints; ++r) {
     if (r % encoding_stop_poll_period == 0 && stop()) return sat_result_t::stopped;
@@ -339,6 +339,8 @@ struct trail_t {
 
 using clause_ref_t = int;
 
+// a clause is a series of OR operations over one or more literals
+// example: (A ∨ ¬B ∨ C)
 struct clause_t {
  public:
   static constexpr size_t header_words = 4;
