@@ -25,8 +25,16 @@ export CUOPT_LIBRARY="${CUOPT_SITE_PACKAGES}/lib64/libcuopt.so"
 export CUOPT_RUNTIME_LIBRARY_DIR="${CUOPT_SITE_PACKAGES}/lib64;${PIP_SITE_PACKAGES}/libcuopt_client/lib64;${PIP_SITE_PACKAGES}/libcuopt_mathopt/lib64;${PIP_SITE_PACKAGES}/libcuopt_routing/lib64"
 # rmm, rapids_logger, and raft are separate pip packages with their own include dirs (unlike
 # conda, where CUOPT_PREFIX/include/rapids covers all three). raft needs <cuda/std/mdspan>,
-# which ships in nvidia-cuda-cccl's own namespaced directory (nvidia/cuXY/include/cccl).
-CCCL_INCLUDE_DIR="$(compgen -G "${PIP_SITE_PACKAGES}/nvidia/cu*/include/cccl" | head -1)"
+# which ships in nvidia-cuda-cccl: nvidia/cuXY/include/cccl on CUDA 13, nvidia/cuda_cccl/include
+# on CUDA 12.
+CCCL_INCLUDE_DIR="$(compgen -G "${PIP_SITE_PACKAGES}/nvidia/cu*/include/cccl" | head -1 || true)"
+if [[ -z "${CCCL_INCLUDE_DIR}" ]]; then
+  CCCL_INCLUDE_DIR="${PIP_SITE_PACKAGES}/nvidia/cuda_cccl/include"
+fi
+if [[ ! -d "${CCCL_INCLUDE_DIR}" ]]; then
+  echo "nvidia-cuda-cccl include dir not found under ${PIP_SITE_PACKAGES}/nvidia" >&2
+  exit 1
+fi
 export CUOPT_EXTRA_INCLUDE_DIRS="${REPO_ROOT}/cpp/include;${REPO_ROOT}/cpp/src;${PIP_SITE_PACKAGES}/librmm/include;${PIP_SITE_PACKAGES}/rapids_logger/include;${PIP_SITE_PACKAGES}/libraft/include;${CCCL_INCLUDE_DIR}"
 export CUOPT_JAVA_NATIVE_BUILD_DIR="${REPO_ROOT}/java/cuopt/build/native"
 
