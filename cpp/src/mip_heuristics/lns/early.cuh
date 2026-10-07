@@ -5,14 +5,15 @@
 #pragma once
 
 #include <mip_heuristics/lns/cpufj.cuh>
-#include <mip_heuristics/lns/feasibility_bootstrap.cuh>
 #include <mip_heuristics/lns/repair_lns.cuh>
+#include <mip_heuristics/lns/thread_budget.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <utilities/scope_guard.hpp>
 
+#include <chrono>
 #include <exception>
 #include <memory>
-#include <mutex>
+#include <thread>
 
 namespace cuopt::mathematical_optimization::mip {
 
@@ -28,9 +29,7 @@ class early_lns_t {
               std::atomic<bool>& preemption,
               std::exception_ptr& task_exception,
               report_fn report,
-              uint64_t seed,
-              int first_feasibility_lane = 18,
-              int64_t feasibility_seed   = 0)
+              uint64_t seed)
     : shared_(std::move(shared)),
       preemption_(preemption),
       task_exception_(task_exception),
@@ -46,8 +45,6 @@ class early_lns_t {
       submit(x, "CPUFJ LNS");
     };
     repair_lns_ = std::make_unique<repair_lns_t<i_t, f_t>>(anchor, preemption_, seed);
-    bootstrap_  = std::make_unique<lns_feasibility_bootstrap_t<i_t, f_t>>(
-      *cpufj_, first_feasibility_lane, feasibility_seed);
     RAFT_CUDA_TRY(cudaGetDevice(&device_));
   }
 
@@ -59,41 +56,43 @@ class early_lns_t {
     started_     = true;
     auto* worker = this;
     auto* cpu    = cpufj_.get();
+    if (presolve_cpufj_lns_enabled) {
 #pragma omp task firstprivate(worker, cpu) depend(out : *cpu) default(none) \
   priority(CUOPT_DEFAULT_TASK_PRIORITY)
-    {
-      try {
-        worker->run_cpufj();
-      } catch (...) {
-        worker->fail(std::current_exception());
+      {
+        try {
+          worker->run_cpufj();
+        } catch (...) {
+          worker->fail(std::current_exception());
+        }
       }
     }
+    if (presolve_repair_lns_enabled) {
 #pragma omp task firstprivate(worker) depend(out : *worker) default(none) \
   priority(CUOPT_DEFAULT_TASK_PRIORITY)
-    {
-      try {
-        worker->run_repair_lns();
-      } catch (...) {
-        worker->fail(std::current_exception());
+      {
+        try {
+          worker->run_repair_lns();
+        } catch (...) {
+          worker->fail(std::current_exception());
+        }
       }
     }
-    // Both tasks have reserved capacity. Do not enter a task scheduling point
+    // Every posted task has reserved capacity. Do not enter a task scheduling point
     // until they are running on other team members: a taskwait for feasibility
     // lanes could otherwise execute a queued long-running task on the solve thread,
     // preventing that thread from ever reaching the LNS stop signal.
-    while (workers_started_.load() < 2)
+    while (workers_started_.load() <
+           int(presolve_cpufj_lns_enabled) + int(presolve_repair_lns_enabled))
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
   void request_stop()
   {
     stop_.store(true);
-    bootstrap_->request_stop();
     cpufj_->halted      = true;
     repair_lns_->halted = true;
   }
-
-  void notify_seed(const std::vector<f_t>& assignment) { bootstrap_->notify_seed(assignment); }
 
   void finish()
   {
@@ -127,16 +126,7 @@ class early_lns_t {
     const f_t objective = repair_lns_->cost(assignment);
     // Publish before invoking callbacks, so polling only holds the short copy lock.
     shared_->publish(objective, cpufj_->get_user_objective(objective), assignment);
-    bootstrap_->request_stop();
     report_(objective, assignment, origin);
-  }
-
-  void search_for_seed(int slot)
-  {
-    bootstrap_->run(
-      slot,
-      [this](auto& x) { return snapshot(x); },
-      [this](const auto& x, f_t) { submit(x, "LNS feasibility"); });
   }
 
   void run_cpufj()
@@ -145,7 +135,6 @@ class early_lns_t {
     const int previous_max_threads = omp_get_max_threads();
     omp_set_num_threads(1);
     cuopt::scope_guard restore([&] { omp_set_num_threads(previous_max_threads); });
-    search_for_seed(0);
     run_cpufj_lns_ruin_repair<i_t, f_t>(cpufj_.get(), [this](auto& x) { return snapshot(x); });
   }
 
@@ -156,7 +145,6 @@ class early_lns_t {
     omp_set_num_threads(1);
     cuopt::scope_guard restore([&] { omp_set_num_threads(previous_max_threads); });
     RAFT_CUDA_TRY(cudaSetDevice(device_));
-    search_for_seed(1);
     repair_lns_->run(
       [this](auto& seeds) {
         std::vector<f_t> assignment;
@@ -171,7 +159,6 @@ class early_lns_t {
   report_fn report_;
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> cpufj_;
   std::unique_ptr<repair_lns_t<i_t, f_t>> repair_lns_;
-  std::unique_ptr<lns_feasibility_bootstrap_t<i_t, f_t>> bootstrap_;
   std::atomic<bool> stop_{false};
   std::atomic<int> workers_started_{0};
   bool started_{false};

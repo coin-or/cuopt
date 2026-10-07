@@ -68,9 +68,6 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes, bool low_latency)
   climbers_.resize(n_lanes);
 
   auto report_incumbent = [this](f_t solver_obj, const std::vector<f_t>& assignment, double) {
-    // Scalar CPUFJ may report before publishing to shared_incumbent. Validate the
-    // supplied seed directly; neither reserved LNS task needs to remain a poller.
-    if (lns_) lns_->notify_seed(assignment);
     std::lock_guard<std::mutex> guard(incumbent_mutex_);
     this->try_update_best(solver_obj, assignment);
   };
@@ -109,9 +106,8 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes, bool low_latency)
         std::lock_guard<std::mutex> guard(incumbent_mutex_);
         this->try_update_best(objective, x, origin);
       },
-      seed_,
-      n_lanes,
-      base_seed);
+      seed_);
+    improvement_lanes_ = improvement_lanes;
   }
   if (!threaded)
     CUOPT_LOG_INFO("Early CPUFJ budget: %d feasibility + %d LNS workers within %d OpenMP threads",
@@ -158,6 +154,7 @@ void early_cpufj_t<i_t, f_t>::stop()
   if (lns_) {
     lns_->finish();
     lns_.reset();
+    improvement_lanes_ = 0;
   }
 
   [[maybe_unused]] i_t total_iterations = 0;
