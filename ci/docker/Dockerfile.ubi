@@ -72,11 +72,7 @@ RUN dnf install -y java-21-openjdk-devel cmake gcc-c++ make && dnf clean all
 COPY --from=cuda-headers /usr/local/cuda /usr/local/cuda
 ENV PATH="/usr/local/cuda/bin:${PATH}"
 
-# raft needs <cuda/std/mdspan> and <cuda/stream>, which ship in nvidia-cuda-cccl rather than
-# libraft itself. Always the unsuffixed package (CUDA-runtime-version-agnostic, header-only):
-# cuda-toolkit's own transitive deps pull in the older cuXY-suffixed one (e.g.
-# nvidia-cuda-cccl-cu12, whose newest release still predates <cuda/stream>), and --upgrade
-# alone can't fix that since it's already the latest of that line.
+# raft needs headers from nvidia-cuda-cccl; the cuXY-suffixed packages pulled in transitively are too old.
 RUN python -m pip install --no-cache-dir --upgrade nvidia-cuda-cccl
 
 COPY ./repo /build/repo

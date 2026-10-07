@@ -106,11 +106,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 ENV CXX=/usr/bin/g++-12
 
-# raft needs <cuda/std/mdspan> and <cuda/stream>, which ship in nvidia-cuda-cccl rather than
-# libraft itself. Always the unsuffixed package (CUDA-runtime-version-agnostic, header-only):
-# cuda-toolkit's own transitive deps pull in the older cuXY-suffixed one (e.g.
-# nvidia-cuda-cccl-cu12, whose newest release still predates <cuda/stream>), and --upgrade
-# alone can't fix that since it's already the latest of that line.
+# raft needs headers from nvidia-cuda-cccl; the cuXY-suffixed packages pulled in transitively are too old.
 RUN python -m pip install --no-cache-dir --upgrade nvidia-cuda-cccl
 
 # CMake's find_package(CUDAToolkit REQUIRED) needs nvcc on PATH; reuse cuda-headers instead of
