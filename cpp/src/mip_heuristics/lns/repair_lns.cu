@@ -393,8 +393,7 @@ size_t repair_lns_t<i_t, f_t>::refresh_scores(
   const std::vector<std::vector<std::pair<i_t, f_t>>>& column_rows,
   std::vector<std::pair<double, i_t>>& variable_scores) const
 {
-  const auto& p     = *problem_;
-  const f_t int_tol = p.tolerances.integrality_tolerance;
+  const auto& p = *problem_;
   variable_scores.clear();
   variable_scores.reserve(movable.size());
   for (i_t j : movable) {
@@ -403,8 +402,7 @@ size_t repair_lns_t<i_t, f_t>::refresh_scores(
     double activity          = 0.0;
     for (const auto& [r, norm_coeff] : column_rows[j])
       activity += std::abs(norm_coeff * val);
-    double combined_score = 0.5 * obj_contrib + 0.5 * activity;
-    if (is_integer_var(j) && std::abs(val - std::round(val)) > int_tol) combined_score *= 1.5;
+    const double combined_score = 0.5 * obj_contrib + 0.5 * activity;
     variable_scores.emplace_back(combined_score, j);
   }
   const size_t top_count = std::max(size_t{1}, variable_scores.size() / 5);

@@ -9,18 +9,26 @@
 #include <algorithm>
 
 namespace cuopt::mathematical_optimization::mip {
-// The main-solve repair LNS and CPUFJ LNS tasks share the solve's OpenMP team, with the
-// same pair budget as during presolve.
+inline constexpr bool presolve_cpufj_lns_enabled    = false;
+inline constexpr bool presolve_repair_lns_enabled   = false;
+inline constexpr bool persistent_cpufj_lns_enabled  = false;
+inline constexpr bool persistent_repair_lns_enabled = true;
+
+// Benchmark one LNS worker while returning disabled workers to the main solve.
 inline int lns_worker_count(int team_size, bool deterministic)
 {
-  return deterministic || team_size < CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS + 3 ? 0 : 2;
+  return deterministic || team_size < CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS + 3
+           ? 0
+           : int(persistent_cpufj_lns_enabled) + int(persistent_repair_lns_enabled);
 }
 
 // This is a split of the existing early CPUFJ budget, not extra pool capacity.
 // Preserve at least one feasibility lane and the caller's presolve reservation.
 inline int presolve_lns_worker_count(int early_worker_budget)
 {
-  return early_worker_budget >= 3 ? 2 : 0;
+  return early_worker_budget >= 3
+           ? int(presolve_cpufj_lns_enabled) + int(presolve_repair_lns_enabled)
+           : 0;
 }
 
 // Fill the capacity remaining after presolve and the enabled auxiliary workers.
@@ -31,8 +39,7 @@ inline int presolve_early_worker_budget(int team_size,
                                         int gpufj_workers,
                                         int structural_workers)
 {
-  // Preserve the LNS pair once the usual presolve reservation allows it, reducing
-  // Papilo's arena on small teams instead of leaving an LNS worker queued.
+  // Preserve the original small-team eligibility for the presolve LNS workers.
   const int minimum = team_size >= CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS + 3 ? 3 : 1;
   return std::max(minimum, team_size - presolve_workers - gpufj_workers - structural_workers);
 }
