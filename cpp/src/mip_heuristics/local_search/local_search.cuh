@@ -9,7 +9,6 @@
 
 #include <mip_heuristics/diversity/population.cuh>
 #include <mip_heuristics/feasibility_jump/fj_cpu.cuh>
-#include <mip_heuristics/lns/feasibility_bootstrap.cuh>
 #include <mip_heuristics/lns/population_feed.cuh>
 #include <mip_heuristics/lns/repair_lns.cuh>
 #include <mip_heuristics/local_search/feasibility_pump/feasibility_pump.cuh>
@@ -130,8 +129,6 @@ class local_search_t {
   // Single persistent climber reused across every ruin-and-repair iteration of the LNS
   // improvement worker, so that only the first iteration pays the O(nnz) climber construction.
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> scratch_cpu_fj_lns;
-  // The feed's notification must be disconnected before destroying its target.
-  std::unique_ptr<lns_feasibility_bootstrap_t<i_t, f_t>> lns_bootstrap;
   std::unique_ptr<lns_population_feed_t<i_t, f_t>> repair_lns_feed;
   std::unique_ptr<repair_lns_t<i_t, f_t>> repair_lns;
   problem_t<i_t, f_t> problem_with_objective_cut;

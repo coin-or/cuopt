@@ -19,9 +19,7 @@ namespace cuopt::mathematical_optimization::mip {
 template <typename i_t, typename f_t>
 class lns_population_feed_t {
  public:
-  explicit lns_population_feed_t(population_t<i_t, f_t>& population,
-                                 std::function<void()> on_seed = {})
-    : population_(population), on_seed_(std::move(on_seed))
+  explicit lns_population_feed_t(population_t<i_t, f_t>& population) : population_(population)
   {
     population_.set_feasible_solution_callback(
       [this](const std::vector<f_t>& assignment, f_t objective, f_t user_objective, bool is_best) {
@@ -55,16 +53,12 @@ class lns_population_feed_t {
     // Only the population's best slot feeds CPUFJ LNS; accepted members still
     // enter the recent seed queue even when their objective is not an improvement.
     if (is_best) best_.publish(objective, user_objective, assignment);
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (recent_.size() == max_recent) recent_.pop_front();
-      recent_.push_back(assignment);
-    }
-    if (is_best && on_seed_) on_seed_();
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (recent_.size() == max_recent) recent_.pop_front();
+    recent_.push_back(assignment);
   }
 
   population_t<i_t, f_t>& population_;
-  const std::function<void()> on_seed_;
   fj_cpu_shared_incumbent_t<i_t, f_t> best_;
   std::mutex mutex_;
   std::deque<std::vector<f_t>> recent_;

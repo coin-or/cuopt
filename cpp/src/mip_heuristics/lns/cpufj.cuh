@@ -25,7 +25,7 @@ namespace cuopt::mathematical_optimization::mip {
 template <typename i_t, typename f_t>
 bool repair_cpufj_lns_neighborhood(fj_cpu_climber_t<i_t, f_t>* ptr,
                                    f_t time_limit,
-                                   bool reset_local_incumbent = false)
+                                   bool reset_local_incumbent)
 {
   auto archived_assignment = ptr->h_best_assignment.underlying();
   const bool have_archive =
