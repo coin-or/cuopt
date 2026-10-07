@@ -41,7 +41,7 @@ class early_cpufj_t : public early_heuristic_t<i_t, f_t, early_cpufj_t<i_t, f_t>
   void stop();
 
   int lane_count() const { return (int)climbers_.size() + improvement_lane_count(); }
-  int improvement_lane_count() const { return lns_ ? 2 : 0; }
+  int improvement_lane_count() const { return improvement_lanes_; }
 
  private:
   friend class early_heuristic_t<i_t, f_t, early_cpufj_t<i_t, f_t>>;
@@ -52,6 +52,7 @@ class early_cpufj_t : public early_heuristic_t<i_t, f_t, early_cpufj_t<i_t, f_t>
   typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances_;
   std::vector<std::unique_ptr<fj_cpu_climber_t<i_t, f_t>>> climbers_;
   std::unique_ptr<early_lns_t<i_t, f_t>> lns_;
+  int improvement_lanes_{0};
   std::thread worker_;
   std::atomic<bool> preemption_flag_{false};
   std::atomic<bool> lns_preemption_flag_{false};

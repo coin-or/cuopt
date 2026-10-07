@@ -4,28 +4,28 @@
  */
 
 #include "../../../benchmarks/linear_programming/cuopt/c_api_check.hpp"
-#include "lns_test_utils.cuh"
 
 #include <mip_heuristics/diversity/diversity_manager.cuh>
+#include <mip_heuristics/feasibility_jump/cpu/climber.hpp>
 #include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
 #include <mip_heuristics/feasibility_jump/feasibility_jump.cuh>
 #include <mip_heuristics/lns/cpufj_validation.cuh>
 #include <mip_heuristics/lns/early.cuh>
-#include <mip_heuristics/lns/feasibility_bootstrap.cuh>
 #include <mip_heuristics/lns/repair_lns.cuh>
 #include <mip_heuristics/lns/thread_budget.hpp>
 
 #include <gtest/gtest.h>
 
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <thread>
 #include <tuple>
+#include <vector>
 
 namespace cuopt::lns::test {
 namespace mip = cuopt::mathematical_optimization::mip;
@@ -33,8 +33,37 @@ namespace opt = cuopt::mathematical_optimization;
 
 using tolerances_t = opt::mip_solver_settings_t<int, double>::tolerances_t;
 
-using mip::test::host_model_t;
-using mip::test::make_anchor;
+struct host_model_t {
+  std::vector<double> coefficients, lower, upper, objective, row_lower, row_upper;
+  std::vector<int> columns, offsets;
+  std::vector<opt::var_t> types;
+};
+
+std::unique_ptr<mip::fj_cpu_climber_t<int, double>> make_anchor(const host_model_t& m,
+                                                                std::atomic<bool>& preemption,
+                                                                tolerances_t tolerances)
+{
+  return mip::init_fj_cpu_from_host_model<int, double>((int)m.lower.size(),
+                                                       (int)m.row_lower.size(),
+                                                       (int)m.coefficients.size(),
+                                                       false,
+                                                       1.0,
+                                                       0.0,
+                                                       m.coefficients,
+                                                       m.columns,
+                                                       m.offsets,
+                                                       m.objective,
+                                                       m.lower,
+                                                       m.upper,
+                                                       m.row_lower,
+                                                       m.row_upper,
+                                                       {},
+                                                       {},
+                                                       m.types,
+                                                       tolerances,
+                                                       preemption,
+                                                       {});
+}
 
 tolerances_t test_tolerances()
 {
@@ -71,154 +100,6 @@ host_model_t covering_pair()
           {0, 1},
           {0, 2},
           {opt::var_t::INTEGER, opt::var_t::INTEGER}};
-}
-
-bool wait_for_bootstrap_workers(const std::atomic<int>& count, int expected)
-{
-  cuopt::timer_t timer(5);
-  while (count.load() != expected && !timer.check_time_limit())
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  return count.load() == expected;
-}
-
-TEST(Lns, BootstrapPairCancelsConcurrentStartupWithoutChangingAnchor)
-{
-  for (bool external_seed : {false, true}) {
-    SCOPED_TRACE(external_seed);
-    std::atomic<bool> preemption{false};
-    auto anchor                   = make_anchor(covering_pair(), preemption, test_tolerances());
-    anchor->h_assignment          = std::vector<double>{1, 1};
-    anchor->h_best_assignment     = std::vector<double>{1, 0};
-    anchor->h_incumbent_objective = 3;
-    anchor->h_best_objective      = 1;
-    anchor->feasible_found        = true;
-    const auto settings_seed      = anchor->settings.seed;
-    const auto bounds             = anchor->h_var_bounds.underlying();
-    mip::lns_feasibility_bootstrap_t<int, double> bootstrap(*anchor, 18, 42);
-    std::atomic<int> entered{0}, finished{0}, submissions{0};
-    std::atomic<bool> release{false};
-    std::array<std::exception_ptr, 2> errors;
-    std::array<std::thread, 2> workers;
-    for (int slot = 0; slot < 2; ++slot) {
-      workers[slot] = std::thread([&, slot] {
-        omp_set_num_threads(1);
-        try {
-          bootstrap.run(
-            slot,
-            [&](auto&) {
-              ++entered;
-              while (!release.load())
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-              return false;
-            },
-            [&](const auto&, double) { ++submissions; },
-            cuopt::timer_t(30));
-        } catch (...) {
-          errors[slot] = std::current_exception();
-        }
-        ++finished;
-      });
-    }
-    // Both slots have entered run, but neither has consumed the startup snapshot.
-    // Cancel in that window to exercise the startup/stop race deterministically.
-    const bool both_entered = wait_for_bootstrap_workers(entered, 2);
-    EXPECT_TRUE(both_entered);
-    if (external_seed) {
-      // This tolerance-feasible seed must be clamped before it cancels the pair.
-      bootstrap.notify_seed({1 + 5e-5, 0});
-    } else {
-      bootstrap.request_stop();
-    }
-    release                  = true;
-    const bool both_finished = wait_for_bootstrap_workers(finished, 2);
-    EXPECT_TRUE(both_finished);
-    EXPECT_FALSE(preemption.load());
-    if (!both_finished) preemption = true;  // Ensure failed cleanup can still join.
-    for (auto& worker : workers)
-      worker.join();
-    for (const auto& error : errors)
-      EXPECT_FALSE(error);
-    EXPECT_EQ(submissions.load(), 0);
-    EXPECT_FALSE(anchor->halted.load());
-    EXPECT_EQ(anchor->settings.seed, settings_seed);
-    EXPECT_EQ(anchor->h_assignment.underlying(), (std::vector<double>{1, 1}));
-    EXPECT_EQ(anchor->h_best_assignment.underlying(), (std::vector<double>{1, 0}));
-    EXPECT_EQ(anchor->h_incumbent_objective, 3);
-    EXPECT_EQ(anchor->h_best_objective, 1);
-    EXPECT_TRUE(anchor->feasible_found);
-    for (size_t i = 0; i < bounds.size(); ++i) {
-      EXPECT_EQ(get_lower(anchor->h_var_bounds[i].get()), get_lower(bounds[i]));
-      EXPECT_EQ(get_upper(anchor->h_var_bounds[i].get()), get_upper(bounds[i]));
-    }
-  }
-}
-
-TEST(Lns, BootstrapPairSkipsExistingSeedAndRespectsPriorCancellation)
-{
-  // Existing seed, local stop, global preemption, and an expired solve budget.
-  for (int reason = 0; reason < 4; ++reason) {
-    SCOPED_TRACE(reason);
-    std::atomic<bool> preemption{false};
-    auto anchor = make_anchor(covering_pair(), preemption, test_tolerances());
-    mip::lns_feasibility_bootstrap_t<int, double> bootstrap(*anchor, 18, 42);
-    if (reason == 1) bootstrap.request_stop();
-    if (reason == 2) preemption = true;
-    int submissions = 0;
-    const std::vector<double> seed{1, 0};
-    for (int slot = 0; slot < 2; ++slot) {
-      bootstrap.run(
-        slot,
-        [&](auto& x) {
-          if (reason != 0) return false;
-          x = seed;
-          return true;
-        },
-        [&](const auto&, double) { ++submissions; },
-        cuopt::timer_t(reason == 3 ? 0 : 2));
-    }
-    EXPECT_EQ(submissions, 0);
-    EXPECT_FALSE(anchor->halted.load());
-    EXPECT_EQ(preemption.load(), reason == 2);
-    EXPECT_EQ(seed, (std::vector<double>{1, 0}));
-  }
-}
-
-TEST(Lns, BootstrapIgnoresInvalidSeedsAndPublishesValidatedCandidateFromEitherSlot)
-{
-  for (int first_slot = 0; first_slot < 2; ++first_slot) {
-    SCOPED_TRACE(first_slot);
-    std::atomic<bool> preemption{false};
-    auto anchor           = make_anchor(covering_pair(), preemption, test_tolerances());
-    const auto assignment = anchor->h_assignment.underlying();
-    const auto best       = anchor->h_best_assignment.underlying();
-    mip::lns_feasibility_bootstrap_t<int, double> bootstrap(*anchor, 18, 42);
-    bootstrap.notify_seed({std::numeric_limits<double>::quiet_NaN(), 0});
-    bootstrap.notify_seed({0, 0});
-    bootstrap.notify_seed({1 + 2e-4, 0});
-    int submissions     = 0;
-    const auto snapshot = [](auto&) { return false; };
-    const auto submit   = [&](const auto& x, double objective) {
-      ++submissions;
-      ASSERT_EQ(x.size(), 2);
-      EXPECT_TRUE(
-        mip::verify_cpufj_lns_feasible(*anchor->problem, anchor->h_var_bounds.underlying(), x));
-      for (double value : x) {
-        EXPECT_GE(value, 0);
-        EXPECT_LE(value, 1);
-        EXPECT_EQ(value, std::round(value));
-      }
-      EXPECT_DOUBLE_EQ(objective, x[0] + 2 * x[1]);
-    };
-    bootstrap.run(first_slot, snapshot, submit, cuopt::timer_t(2));
-    ASSERT_GT(submissions, 0);
-    const int before_peer = submissions;
-    bootstrap.run(1 - first_slot, snapshot, submit, cuopt::timer_t(2));
-    EXPECT_EQ(submissions, before_peer);
-    EXPECT_FALSE(preemption.load());
-    EXPECT_FALSE(anchor->halted.load());
-    EXPECT_EQ(anchor->h_assignment.underlying(), assignment);
-    EXPECT_EQ(anchor->h_best_assignment.underlying(), best);
-  }
 }
 
 TEST(Lns, IntegerNeighborhoodEnumerationAdvancesAtLargeMagnitudes)
@@ -490,11 +371,14 @@ TEST(Lns, RunImprovesFromToleranceFeasibleSeedWithoutMutatingSource)
   EXPECT_EQ(source, std::vector<double>(n, 1.0 - 5e-5));
 }
 
-TEST(Lns, MainSolveBudgetMatchesPresolvePair)
+TEST(Lns, MainSolveBudgetMatchesEnabledWorkers)
 {
   for (int size = 2; size <= 48; ++size) {
     const int workers = mip::lns_worker_count(size, false);
-    EXPECT_EQ(workers, size >= 7 ? 2 : 0);
+    EXPECT_EQ(workers,
+              size >= 7
+                ? int(mip::persistent_cpufj_lns_enabled) + int(mip::persistent_repair_lns_enabled)
+                : 0);
     EXPECT_EQ(mip::lns_worker_count(size, true), 0);
   }
 }
@@ -646,16 +530,23 @@ TEST(Lns, PresolveWorkerFailureIsCapturedAfterPublishingImprovement)
         42);
       workers.start();
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-      while (!reported.load() && std::chrono::steady_clock::now() < deadline)
+      while ((mip::presolve_cpufj_lns_enabled || mip::presolve_repair_lns_enabled) &&
+             !reported.load() && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       EXPECT_NO_THROW(workers.finish());
       EXPECT_NO_THROW(workers.finish());
     }
   }
-  EXPECT_TRUE(reported.load());
-  ASSERT_TRUE(task_exception);
-  EXPECT_THROW(std::rethrow_exception(task_exception), std::runtime_error);
-  EXPECT_LT(shared->objective.load(), 3);
+  if (mip::presolve_cpufj_lns_enabled || mip::presolve_repair_lns_enabled) {
+    EXPECT_TRUE(reported.load());
+    ASSERT_TRUE(task_exception);
+    EXPECT_THROW(std::rethrow_exception(task_exception), std::runtime_error);
+    EXPECT_LT(shared->objective.load(), 3);
+  } else {
+    EXPECT_FALSE(reported.load());
+    EXPECT_FALSE(task_exception);
+    EXPECT_EQ(shared->objective.load(), 3);
+  }
   EXPECT_FALSE(preemption.load());
 }
 
@@ -689,14 +580,21 @@ TEST(Lns, PresolveSearchImprovesAFeasibleCpuIncumbent)
         42);
       workers.start();
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-      while (shared->objective.load() > 1 && std::chrono::steady_clock::now() < deadline)
+      while ((mip::presolve_cpufj_lns_enabled || mip::presolve_repair_lns_enabled) &&
+             shared->objective.load() > 1 && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       workers.finish();
     }
   }
-  EXPECT_EQ(shared->objective.load(), 1);
-  EXPECT_EQ(shared->assignment, (std::vector<double>{1, 0}));
-  EXPECT_GT(reports.load(), 0);
+  if (mip::presolve_cpufj_lns_enabled || mip::presolve_repair_lns_enabled) {
+    EXPECT_EQ(shared->objective.load(), 1);
+    EXPECT_EQ(shared->assignment, (std::vector<double>{1, 0}));
+    EXPECT_GT(reports.load(), 0);
+  } else {
+    EXPECT_EQ(shared->objective.load(), 3);
+    EXPECT_EQ(shared->assignment, (std::vector<double>{1, 1}));
+    EXPECT_EQ(reports.load(), 0);
+  }
   EXPECT_FALSE(task_exception);
 }
 
@@ -718,7 +616,10 @@ TEST(Lns, PresolvePortfolioBudgetAndLifetime)
           // Even an oversized request must honor the presolve reservation.
           portfolio.start(team_size);
           EXPECT_EQ(portfolio.lane_count(), std::max(1, team_size - 4));
-          EXPECT_EQ(portfolio.improvement_lane_count(), team_size >= 7 ? 2 : 0);
+          EXPECT_EQ(portfolio.improvement_lane_count(),
+                    team_size >= 7
+                      ? int(mip::presolve_cpufj_lns_enabled) + int(mip::presolve_repair_lns_enabled)
+                      : 0);
           EXPECT_NO_THROW(portfolio.stop());
           EXPECT_EQ(portfolio.lane_count(), 0);
           EXPECT_NO_THROW(portfolio.stop());
@@ -781,7 +682,10 @@ TEST(Lns, PresolveBudgetsIncludePapiloAndAuxiliaryWorkers)
         team_size, CUOPT_MIP_PAPILO_THREAD_LIMIT, gpu_workers, structural_workers);
       const int lns_workers = mip::presolve_lns_worker_count(cpu_workers);
       EXPECT_GE(cpu_workers - lns_workers, 1);
-      EXPECT_EQ(lns_workers, team_size >= 7 ? 2 : 0);
+      EXPECT_EQ(lns_workers,
+                cpu_workers >= 3
+                  ? int(mip::presolve_cpufj_lns_enabled) + int(mip::presolve_repair_lns_enabled)
+                  : 0);
       const int papilo_workers =
         mip::papilo_thread_budget(team_size, cpu_workers, gpu_workers, structural_workers);
       EXPECT_GE(papilo_workers, 1);
@@ -802,7 +706,10 @@ TEST(Lns, PresolveBudgetsIncludePapiloAndAuxiliaryWorkers)
         team_size, CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS, 0, reduced_structural_workers);
       const int probing_workers =
         mip::probing_thread_budget(team_size, reduced_workers, reduced_structural_workers);
-      EXPECT_EQ(mip::presolve_lns_worker_count(reduced_workers), team_size >= 7 ? 2 : 0);
+      EXPECT_EQ(mip::presolve_lns_worker_count(reduced_workers),
+                reduced_workers >= 3
+                  ? int(mip::presolve_cpufj_lns_enabled) + int(mip::presolve_repair_lns_enabled)
+                  : 0);
       EXPECT_LE(reduced_workers + reduced_structural_workers + 1, team_size);
       // At tiny team sizes the caller can execute the single probing task itself.
       EXPECT_LE(reduced_workers + reduced_structural_workers + probing_workers, team_size);
