@@ -318,7 +318,7 @@ Users can submit a set of problems which will be solved in a batch. Problems wil
 Sequence Solves
 ---------------
 
-When the same quadratic program is solved repeatedly with small changes, cuOpt can reuse the work from the first solve. Enable ``sequence_solve`` in the solver settings and solve with the barrier method. After the first solve finishes with an optimal solution, cuOpt keeps the converted and presolved problem and the barrier workspace on the data model. You can then change the linear objective with :meth:`~cuopt.linear_programming.data_model.DataModel.update_linear_objective` or the constraint right-hand side with :meth:`~cuopt.linear_programming.data_model.DataModel.update_rhs`, and solve again. The next solve skips conversion, presolve, and scaling.
+When a sequence of convex optimization problems with the same constraint matrix are solved, cuOpt can reuse work from the first solve. To enable this, set the ``sequence_solve`` setting to true and solve with the barrier method. After the first solve you can change the linear objective with :meth:`~cuopt.linear_programming.data_model.DataModel.update_linear_objective` or the constraint right-hand side with :meth:`~cuopt.linear_programming.data_model.DataModel.update_rhs`, and solve again. Subsequent solves skip ordering and symbolic factorization.
 
 The quadratic objective, the constraint matrix, the row senses, and the variable bounds must stay unchanged between solves. See ``CUOPT_SEQUENCE_SOLVE`` in :doc:`convex-settings` for details and limits.
 
