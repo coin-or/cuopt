@@ -7,7 +7,7 @@
 # in a fresh env, build a small gtest against it and run it. Depends only on conda-cpp-build, not
 # on any test job.
 
-set -uo pipefail
+set -euo pipefail
 
 # shellcheck disable=SC1091
 . /opt/conda/etc/profile.d/conda.sh

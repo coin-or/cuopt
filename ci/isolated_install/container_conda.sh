@@ -33,6 +33,18 @@ esac
 TOOLS=(cmake make gtest cxx-compiler)
 [[ "${COMPONENT}" != "client" ]] && TOOLS+=("cuda-nvcc" "cuda-cudart-dev" "cuda-version=${CUDA_MAJOR}")
 
+# Strict channel priority only picks the highest-priority channel that has a given package name,
+# so if the local channel lacked this component conda would quietly take it from rapidsai-nightly
+# and the PR build would go untested. Require the packages under test to be in the local channel.
+if [[ -n "${LOCAL_CHANNEL:-}" ]]; then
+  for pkg in libcuopt-client "${PKG}"; do
+    if ! compgen -G "${LOCAL_CHANNEL}/*/${pkg}-[0-9]*" >/dev/null; then
+      echo "FAIL: ${pkg} not found in local channel ${LOCAL_CHANNEL}" >&2
+      exit 1
+    fi
+  done
+fi
+
 ENV_NAME="isolated_${COMPONENT}_$$"
 CREATE=(conda create)
 command -v rapids-mamba-retry >/dev/null 2>&1 && CREATE=(rapids-mamba-retry create)
@@ -45,7 +57,8 @@ conda activate "${ENV_NAME}"
 set -u
 
 echo "== installed cuopt packages"
-INSTALLED="$(conda list --json | python3 -c 'import json,sys; print(" ".join(sorted(p["name"] for p in json.load(sys.stdin) if p["name"].startswith(("libcuopt","cuopt")))))')"
+# No python here: it would not be in a user's env just because the test needs it.
+INSTALLED="$(conda list | awk '!/^#/ && $1 ~ /^(lib)?cuopt/ {print $1}' | sort | xargs)"
 echo "${INSTALLED}"
 WANT="$(echo "${EXPECTED}" | tr ' ' '\n' | sort | xargs)"
 if [[ "${INSTALLED}" != "${WANT}" ]]; then

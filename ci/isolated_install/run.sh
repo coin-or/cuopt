@@ -19,6 +19,7 @@ esac
 GPU_ARGS=(--gpus all)
 [[ "${COMPONENT}" == "client" ]] && GPU_ARGS=()   # client needs no GPU
 
-docker run --rm "${GPU_ARGS[@]}" -e COMPONENT="${COMPONENT}" \
+# ${arr[@]+...}: an empty array is "unbound" under set -u on bash < 4.4 (e.g. macOS bash 3.2).
+docker run --rm ${GPU_ARGS[@]+"${GPU_ARGS[@]}"} -e COMPONENT="${COMPONENT}" \
   -e CUDA_MAJOR="${CUDA_MAJOR:-13}" \
   -v "${HERE}:/work:ro" "${IMAGE}" bash "/work/container_${SOURCE}.sh"

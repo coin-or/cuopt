@@ -67,7 +67,14 @@ if [[ -n "${WHEEL_DIRS:-}" ]]; then
   FILES+=("$(pick 'libcuopt_client-*.whl')")
   [[ "${COMPONENT}" != "client" ]] && FILES+=("$(pick "libcuopt_${COMPONENT}_*.whl")")
   echo "== installing local wheels: ${FILES[*]}"
-  pip install -q --pre --extra-index-url "${INDEX}" "${FILES[@]}"
+  # Pin each cuopt package to its exact local file, so that pip cannot satisfy it from a public
+  # index instead (--extra-index-url keeps PyPI enabled, which hosts 0.0.0a0 placeholders).
+  : > "${WORK}/constraints.txt"
+  for f in "${FILES[@]}"; do
+    name="$(basename "${f}" | cut -d- -f1 | tr '_' '-')"
+    echo "${name} @ file://$(realpath "${f}")" >> "${WORK}/constraints.txt"
+  done
+  pip install -q --pre --extra-index-url "${INDEX}" --constraint "${WORK}/constraints.txt" "${FILES[@]}"
 else
   pip install -q --pre --extra-index-url "${INDEX}" "${PKG}"
 fi
@@ -78,6 +85,12 @@ echo "${INSTALLED}"
 WANT="$(echo "${EXPECTED}" | tr ' ' '\n' | sort | xargs)"
 if [[ "${INSTALLED}" != "${WANT}" ]]; then
   echo "FAIL: expected exactly [${WANT}] but found [${INSTALLED}]" >&2
+  exit 1
+fi
+
+# The public PyPI placeholders are 0.0.0a0; installing one means no real cuopt wheel was found.
+if pip list --format=freeze | grep -i '^libcuopt' | grep -q '==0\.0\.0'; then
+  echo "FAIL: a 0.0.0 placeholder cuopt package was installed" >&2
   exit 1
 fi
 

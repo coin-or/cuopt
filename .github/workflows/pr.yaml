@@ -800,8 +800,9 @@ jobs:
   # Isolated-install smoke tests: install ONE freshly built component package (client, mathopt or
   # routing) on its own and build + run a small gtest against it. They depend only on the
   # packaging builds, never on a test job, so they finish roughly at build time + smoke time.
-  # NON-BLOCKING for now: intentionally NOT listed in pr-builder's `needs`, because they are
-  # expected to fail until the single-component packaging fixes land; add them to pr-builder then.
+  # NON-BLOCKING for now, because they are expected to fail until the single-component packaging
+  # fixes land: they are NOT in pr-builder's `needs` (listed in checks' ignored_pr_jobs instead) and
+  # pass `continue-on-error: true` to the shared workflows. Undo both once they are green.
   isolated-install-wheels:
     needs:
       - compute-matrix-filters
@@ -821,6 +822,8 @@ jobs:
       build_type: pull-request
       script: ci/test_isolated_install_wheel.sh
       matrix_filter: ${{ needs.compute-matrix-filters.outputs.isolated_install_filter }}
+      # Expected to fail until the packaging fixes land; failures must not fail the workflow.
+      continue-on-error: true
   isolated-install-conda:
     needs:
       - compute-matrix-filters
@@ -838,6 +841,8 @@ jobs:
       build_type: pull-request
       script: ci/test_isolated_install_conda.sh
       matrix_filter: ${{ needs.compute-matrix-filters.outputs.isolated_install_filter }}
+      # Expected to fail until the packaging fixes land; failures must not fail the workflow.
+      continue-on-error: true
   pr-test-summary:
     name: "PR test summary (non-blocking)"
     needs:

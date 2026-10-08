@@ -7,7 +7,7 @@
 # the client wheel it depends on) in a clean venv, build a small gtest against it and run it.
 # Depends only on the libcuopt_{client,mathopt,routing} wheel builds, not on any test job.
 
-set -uo pipefail
+set -euo pipefail
 
 # Download the packages built in the previous step
 CUDA_MAJOR="${RAPIDS_CUDA_VERSION%%.*}"
