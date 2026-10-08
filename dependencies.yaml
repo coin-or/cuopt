@@ -1126,10 +1126,6 @@ dependencies:
       - output_types: conda
         matrices:
           - matrix:
-              py: "3.11"
-            packages:
-              - python=3.11
-          - matrix:
               py: "3.12"
             packages:
               - python=3.12
@@ -1143,7 +1139,7 @@ dependencies:
               - python=3.14
           - matrix:
             packages:
-              - python>=3.11,<3.15
+              - python>=3.12,<3.15
   test_cufile:
     specific:
       # The `cufile` extra was added to the `cuda-toolkit` metapackage in 12.6.3
