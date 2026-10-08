@@ -8,6 +8,7 @@
 #include "cuda_profiler_api.h"
 #include "diversity_manager.cuh"
 
+#include <mip_heuristics/feasibility_jump/early_cpufj.cuh>
 #include <mip_heuristics/mip_constants.hpp>
 #include <mip_heuristics/presolve/third_party_presolve.hpp>
 
@@ -22,6 +23,9 @@
 #include <utilities/copy_helpers.hpp>
 #include <utilities/scope_guard.hpp>
 
+#include <omp.h>
+
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -197,6 +201,7 @@ void diversity_manager_t<i_t, f_t>::add_user_given_solutions(
   const bool has_papilo   = problem_ptr->has_papilo_presolve_data();
   const i_t papilo_orig_n = problem_ptr->get_papilo_original_num_variables();
   for (size_t sol_idx = 0; sol_idx < context.settings.initial_solutions.size(); ++sol_idx) {
+    if (timer.check_time_limit()) { break; }
     const auto& init_sol = context.settings.initial_solutions[sol_idx];
     solution_t<i_t, f_t> sol(*problem_ptr);
     rmm::device_uvector<f_t> init_sol_assignment(*init_sol, sol.handle_ptr->get_stream());
@@ -228,17 +233,18 @@ void diversity_manager_t<i_t, f_t>::add_user_given_solutions(
                    "reduced objective size must match crushed solution dimension");
       // Map each solution to user space with its own problem's scale, so the comparison holds even
       // if the original and reduced objective scales ever diverge.
-      const double input_obj =
+      [[maybe_unused]] const double input_obj =
         (double)presolver_ptr->get_original_objective_scaling_factor() *
         std::inner_product(h_ori_obj.begin(),
                            h_ori_obj.end(),
                            h_original.begin(),
                            (double)presolver_ptr->get_original_objective_offset());
-      const double crushed_obj = (double)reduced_problem.get_objective_scaling_factor() *
-                                 std::inner_product(h_red_obj.begin(),
-                                                    h_red_obj.end(),
-                                                    h_crushed.begin(),
-                                                    (double)reduced_problem.get_objective_offset());
+      [[maybe_unused]] const double crushed_obj =
+        (double)reduced_problem.get_objective_scaling_factor() *
+        std::inner_product(h_red_obj.begin(),
+                           h_red_obj.end(),
+                           h_crushed.begin(),
+                           (double)reduced_problem.get_objective_offset());
       CUOPT_LOG_DEBUG(
         "Crushed initial solution %d through Papilo (%d -> %d vars), objective %g -> %g",
         sol_idx,
@@ -297,6 +303,14 @@ bool diversity_manager_t<i_t, f_t>::run_presolve(f_t time_limit, timer_t global_
   CUOPT_LOG_INFO("\nRunning cuOpt presolve");
   timer_t presolve_timer(time_limit);
 
+  const f_t bounds_time_limit = std::min({ls.constraint_prop.bounds_update.settings.time_limit,
+                                          (f_t)presolve_timer.remaining_time(),
+                                          (f_t)global_timer.remaining_time()});
+  if (bounds_time_limit <= 0.0) {
+    stats.presolve_time = presolve_timer.elapsed_time();
+    return true;
+  }
+  ls.constraint_prop.bounds_update.settings.time_limit = bounds_time_limit;
   auto term_crit = ls.constraint_prop.bounds_update.solve(*problem_ptr);
   if (ls.constraint_prop.bounds_update.infeas_constraints_count > 0) {
     stats.presolve_time = timer.elapsed_time();
@@ -320,6 +334,13 @@ bool diversity_manager_t<i_t, f_t>::run_presolve(f_t time_limit, timer_t global_
 
   if (run_probing_cache && !global_timer.check_time_limit() && !presolve_timer.check_time_limit()) {
     log_presolve_budget("PROBING", probing_features, probing_budget);
+    // The early CPUFJ lanes hold their threads for the whole of presolve, and probing's default
+    // task count assumes the whole team. Its pools are sized per task, so this bounds host memory
+    // as well as concurrency.
+    const i_t held_by_cpufj =
+      context.early_cpufj_ptr != nullptr ? (i_t)context.early_cpufj_ptr->lane_count() : 0;
+    ls.constraint_prop.bounds_update.settings.num_tasks =
+      std::max(1, omp_get_num_threads() - 1 - held_by_cpufj);
     f_t time_for_probing_cache = std::min(time_limit, (f_t)global_timer.remaining_time());
     timer_t probing_timer{time_for_probing_cache};
     [[maybe_unused]] const auto probing_t0 = std::chrono::steady_clock::now();
@@ -577,6 +598,7 @@ solution_t<i_t, f_t> diversity_manager_t<i_t, f_t>::run_solver()
     pdlp_settings.first_primal_feasible   = false;
     pdlp_settings.concurrent_halt         = &global_concurrent_halt;
     pdlp_settings.method                  = context.settings.method;
+    pdlp_settings.concurrent_nnz_cutoff   = context.settings.concurrent_nnz_cutoff;
     pdlp_settings.inside_mip              = true;
     pdlp_settings.pdlp_solver_mode        = pdlp_solver_mode_t::Stable2;
     pdlp_settings.num_gpus                = context.settings.num_gpus;

@@ -27,7 +27,10 @@
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/logical.h>
 #include <thrust/sort.h>
-#include <cub/cub.cuh>
+#include <cub/device/device_scan.cuh>
+#include <cub/device/device_segmented_reduce.cuh>
+#include <cub/device/device_select.cuh>
+#include <cuda/functional>
 #include <cuda/std/functional>
 
 #include <cooperative_groups.h>
@@ -139,7 +142,7 @@ void fj_t<i_t, f_t>::reset_weights(cuda::stream_ref climber_stream, f_t weight)
 template <typename i_t, typename f_t>
 void fj_t<i_t, f_t>::randomize_weights(const raft::handle_t* handle_ptr)
 {
-  std::mt19937 host_rng(rng.next_i64());
+  cuopt::pcgenerator_t host_rng(rng.next_i64());
   constexpr f_t min_weight = 10.;
   constexpr f_t max_weight = 30.;
   // generate a range of weights between 10. and 30.

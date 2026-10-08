@@ -147,6 +147,7 @@ class mip_solver_settings_t {
   i_t strong_branching_simplex_iteration_limit = -1;
   i_t num_gpus                                 = 1;
   method_t method{method_t::Concurrent};
+  i_t concurrent_nnz_cutoff{50'000'000};
   bool log_to_console = true;
 
   std::string log_file;
@@ -175,6 +176,13 @@ class mip_solver_settings_t {
    * no-op when no certified reduction exists.
    */
   bool block_bve{true};
+  /**
+   * @brief Enable the indicator-strengthening step of presolve (MIP only).
+   *
+   * Runs before Papilo and only when the higher-level presolve is enabled. It appends implied
+   * indicator rows and lifts capacity rows by the indicator that bounds all of their members.
+   */
+  bool indicator_strengthening{true};
   /**
    * @brief Determinism mode for MIP solver.
    *

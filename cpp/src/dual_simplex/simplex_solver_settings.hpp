@@ -49,9 +49,11 @@ struct simplex_solver_settings_t {
       barrier_relative_feasibility_tol(1e-8),
       barrier_relative_optimality_tol(1e-8),
       barrier_relative_complementarity_tol(1e-8),
+      barrier_relative_objective_gap_tol(1e-6),
       barrier_relaxed_feasibility_tol(1e-4),
       barrier_relaxed_optimality_tol(1e-4),
       barrier_relaxed_complementarity_tol(1e-4),
+      barrier_relaxed_relative_objective_gap_tol(1e-4),
       cut_off(std::numeric_limits<f_t>::infinity()),
       steepest_edge_ratio(0.5),
       steepest_edge_primal_tol(1e-9),
@@ -81,10 +83,14 @@ struct simplex_solver_settings_t {
       augmented(0),
       dualize(-1),
       ordering(-1),
+      initial_perturbation(-1),
+      remove_perturbation(-1),
+      primal_pricing(1),
       barrier_dual_initial_point(barrier_dual_initial_point_t::Automatic),
       postsolve_info(-1),
       barrier_presolve_bound_free_variables(-1),
       qcqp_ruiz_equilibration(-1),
+      gpu_ruiz_nnz_threshold(500000),
       barrier_initial_point_safeguard(10.0),
       check_Q(false),
       crossover(false),
@@ -146,9 +152,12 @@ struct simplex_solver_settings_t {
   f_t barrier_relative_optimality_tol;   // Relative optimality tolerance for barrier method
   f_t
     barrier_relative_complementarity_tol;   // Relative complementarity tolerance for barrier method
+  f_t barrier_relative_objective_gap_tol;   // Relative objective gap tolerance for barrier method
   f_t barrier_relaxed_feasibility_tol;      // Relative feasibility tolerance for barrier method
   f_t barrier_relaxed_optimality_tol;       // Relative optimality tolerance for barrier method
   f_t barrier_relaxed_complementarity_tol;  // Relative complementarity tolerance for barrier method
+  f_t barrier_relaxed_relative_objective_gap_tol;  // Relative objective gap tolerance for barrier
+                                                   // method
   f_t cut_off;  // If the dual objective is greater than the cutoff we stop
   f_t
     steepest_edge_ratio;  // the ratio of computed steepest edge mismatch from updated steepest edge
@@ -188,12 +197,17 @@ struct simplex_solver_settings_t {
   i_t augmented;  // -1 automatic, 0 to solve with ADAT, 1 to solve with augmented system
   i_t dualize;    // -1 automatic, 0 to not dualize, 1 to dualize
   i_t ordering;   // -1 automatic, 0 to use nested dissection, 1 to use AMD
+  i_t initial_perturbation;  // -1 automatic, 0 to not perturb, 1 to perturb
+  i_t remove_perturbation;   // -1 automatic, 0 disabled, 1 enabled
+  i_t primal_pricing;        // 0 Dantzig (default), 1 Devex
   barrier_dual_initial_point_t
     barrier_dual_initial_point;               // -1 automatic, 0 Lustig-Marsten-Shanno,
                                               // 1 dual least squares, 2 SeDuMi mu-based
   i_t postsolve_info;                         // -1 automatic (disabled), 0 disabled, 1 enabled
   i_t barrier_presolve_bound_free_variables;  // -1 automatic, 0 disabled, 1 enabled
   i_t qcqp_ruiz_equilibration;          // -1 automatic (imbalance heuristic), 0 disabled, 1 enabled
+  i_t gpu_ruiz_nnz_threshold;           // nnz(A)+nnz(Q) at or above which barrier Ruiz runs on
+                                        // GPU instead of CPU
   f_t barrier_initial_point_safeguard;  // margin pushing the barrier initial iterate into
   // the interior of the nonnegative orthant / SOC
   bool check_Q;                    // true to check if Q is positive semidefinite
