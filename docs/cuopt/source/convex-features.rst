@@ -239,17 +239,17 @@ Method
 .. note::
    PDLP solves to 1e-4 relative accuracy by default.
 
-**Barrier**: The barrier method (also known as interior-point method) solves linear and quadratic programs using a primal-dual predictor-corrector algorithm. This method uses GPU-accelerated sparse Cholesky and sparse LDLT solves via cuDSS, and GPU-accelerated sparse matrix-vector and matrix-matrix operations via cuSparse. Barrier is particularly effective for large-scale problems and can automatically apply techniques like folding, dualization, and dense column elimination to improve performance. This method solves the linear systems at each iteration using the augmented system or the normal equations (ADAT). Enable crossover to obtain a highly accurate basic solution from a barrier solution.
+**Barrier**: The barrier method (also known as interior-point) solves linear, quadratic, and second-order cone programs using a primal-dual predictor-corrector algorithm. This method uses GPU-accelerated sparse Cholesky and sparse LDLT solves via cuDSS, and GPU-accelerated sparse matrix-vector and matrix-matrix operations via cuSparse. Barrier is particularly effective for large-scale problems and can automatically apply techniques like folding, dualization, and dense column elimination to improve performance. This method solves the linear systems at each iteration using the augmented system or the normal equations (ADAT). Enable crossover to obtain a highly accurate basic solution from a barrier solution.
 
 .. note::
    Barrier solves to 1e-8 relative accuracy by default.
 
-**Dual Simplex**: Dual simplex is the simplex method applied to the dual of the linear program. Dual simplex requires the basis factorization of linear program fit into memory. Select this method if your LP is small to medium sized, or if you require a high-quality basic solution.
+**Dual Simplex**: Dual simplex begins with a dual feasible point and iterates until primal feasibility and optimality is established. Dual simplex requires the basis factorization of linear program fit into memory. Select this method if your LP is small to medium sized, or if you require a high-quality basic solution.
 
 .. note::
    Dual Simplex solves to 1e-6 absolute accuracy by default.
 
-**Primal Simplex**: Primal simplex is the simplex method applied directly to the primal linear program. It is also used by dual simplex when the cost perturbation cannot be removed. Primal simplex is available as a method, but it is not recommended: it is typically slower than dual simplex (about 2.3x slower on NETLIB in internal testing). Select dual simplex or the default concurrent method unless you have a specific reason to use primal simplex.
+**Primal Simplex**: Primal simplex begins with a primal feasible point and iterates until dual feasibility and optimality is established. Primal simplex is also used by dual simplex to remove cost perturbations. Primal simplex is typically slower than dual simplex (about 2.3x in internal testing). Select dual simplex or the default concurrent method unless you have a specific reason to use primal simplex.
 
 
 Crossover
