@@ -377,7 +377,7 @@ Mutation
 ^^^^^^^^
 
 ``CUOPT_MIP_MUTATION`` controls whether the mutation heuristic is used. Mutation fixes a random subset of the integer variables to their values in the current incumbent
-and solves the resulting sub-MIP. It only runs once an incumbent solution is available, and it is not run inside a sub-MIP.
+and solves the resulting sub-MIP. It only runs once an incumbent solution is available.
 The default value of ``-1`` (automatic) means that the solver will decide whether to use mutation.
 Set this value to 0 to disable mutation.
 Set this value to 1 to enable mutation.
