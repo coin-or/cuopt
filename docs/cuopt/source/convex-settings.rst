@@ -88,12 +88,11 @@ Method
 
 .. note:: The default method is ``Concurrent``.
 
-
 Default accuracy for each method:
 
 * PDLP solves to 1e-4 relative accuracy by default.
 * Barrier solves to 1e-8 relative accuracy by default.
-* Dual Simplex solves to 1e-6 *absolute* accuracy by default.
+* Simplex solves to 1e-6 *absolute* accuracy by default.
 
 C API users should use the constants defined in :ref:`method-constants` for this parameter.
 
@@ -102,10 +101,10 @@ Server Thin client users should use the :class:`cuopt_sh_client.SolverMethod` fo
 Concurrent NNZ Cutoff
 ^^^^^^^^^^^^^^^^^^^^^
 
-``CUOPT_CONCURRENT_NNZ_CUTOFF`` controls when concurrent mode stops running the CPU-based solvers. When the number of
+``CUOPT_CONCURRENT_NNZ_CUTOFF`` controls when concurrent mode stops running barrier and dual simplex. When the number of
 nonzeros in the (presolved) constraint matrix is at or above this value, barrier and dual simplex are skipped and
 only PDLP runs. Set it to ``-1`` to disable the cutoff, so that barrier and dual simplex run regardless of problem size.
-The same setting is also accepted for MIP problems.
+The same setting is also accepted for the root relaxation in MIP.
 
 .. note:: The default value is ``50000000``.
 
@@ -156,11 +155,7 @@ Multi-GPU PDLP Partitioner
 ``CUOPT_MULTIGPU_PDLP_PARTITIONER`` selects how multi-GPU PDLP splits the problem across GPUs:
 ``0`` Auto (default; RoundRobin on 1 GPU, KaMinPar otherwise), ``1`` KaMinPar (multi-threaded
 graph partitioner, better balanced shards at the cost of extra partitioning time), or ``2``
-RoundRobin (no partitioning graph built). This constant was previously named
-``CUOPT_DISTRIBUTED_PDLP_PARTITIONER`` (``distributed_pdlp_partitioner`` as a Server Thin client
-key, now ``multigpu_pdlp_partitioner``); the separate ``CUOPT_USE_DISTRIBUTED_PDLP`` toggle has
-been removed.
-
+RoundRobin (no partitioning graph built).
 
 Infeasibility Detection
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -260,8 +255,7 @@ Primal Simplex Pricing
 Dual Simplex Initial Perturbation
 """""""""""""""""""""""""""""""""
 
-``CUOPT_DUAL_SIMPLEX_INITIAL_PERTURBATION`` controls whether the dual simplex method perturbs the problem costs at the start of the solve
-to reduce dual degeneracy.
+``CUOPT_DUAL_SIMPLEX_INITIAL_PERTURBATION`` controls whether the dual simplex method perturbs the objective at the start of solve.
 
 * ``-1``: Automatic (default) - cuOpt decides whether and how strongly to perturb
 * ``0``: Do not perturb
@@ -272,8 +266,8 @@ to reduce dual degeneracy.
 Dual Simplex Remove Perturbation
 """"""""""""""""""""""""""""""""
 
-``CUOPT_DUAL_SIMPLEX_REMOVE_PERTURBATION`` controls whether the dual simplex method removes the cost perturbation during the solve, when variables leave the basis,
-rather than only at the end. Removing the perturbation earlier helps avoid falling back to the slower primal simplex algorithm at the end of the solve.
+``CUOPT_DUAL_SIMPLEX_REMOVE_PERTURBATION`` controls whether dual simplex removes the cost perturbation during the solve, when variables leave the basis,
+rather than only at the end. Removing perturbations earlier helps avoid clean up at the end of the solve. 
 
 * ``-1``: Automatic (default)
 * ``0``: Disabled
@@ -363,7 +357,7 @@ Dual Initial Point
 * ``-1``: Automatic (default) - cuOpt selects the best method: the Lustig-Marsten-Shanno heuristic for linear and quadratic problems, and the SeDuMi mu-based point for conic problems
 * ``0``: Use an initial point from a heuristic approach based on the paper "On Implementing Mehrotra's Predictor–Corrector Interior-Point Method for Linear Programming" (SIAM J. Optimization, 1992) by Lustig, Martsten, Shanno.
 * ``1``: Use an initial point from solving a least squares problem that minimizes the norms of the dual variables and reduced costs while statisfying the dual equality constraints.
-* ``2``: Use the SeDuMi (Sturm) mu-based primal and dual initial point. This point is computed without a factorization.
+* ``2``: Use an initial point from a heurisitic approach based on SeDuMi by Jos Sturm. 
 
 .. note:: The default value is ``-1`` (automatic).
 
@@ -507,15 +501,14 @@ at least this far from the boundary. The value must be greater than or equal to 
 Sequence Solve
 ^^^^^^^^^^^^^^
 
-``CUOPT_SEQUENCE_SOLVE`` controls whether cuOpt caches the barrier workspace so that a sequence of related solves can reuse it.
-When enabled, and the first solve of a quadratic program with the barrier method finishes with an optimal solution, cuOpt keeps the converted and presolved problem and the
-barrier workspace on the problem's data model. After the linear objective or the constraint right-hand side is changed with :meth:`~cuopt.linear_programming.data_model.DataModel.update_linear_objective` or
-:meth:`~cuopt.linear_programming.data_model.DataModel.update_rhs`, the next solve skips the conversion, presolve, and scaling steps and restarts the barrier method from a new initial point.
+``CUOPT_SEQUENCE_SOLVE`` controls whether cuOpt caches the ordering and symbolic factorization so that a sequence of related barrier solves can reuse it.
+When enabled, and the first solve with the barrier method finishes with an optimal solution, cuOpt stores information about the factorization. In subsequent solves, 
+the linear objective and the right-hand side of the linear equality constraints may be changed with :meth:`~cuopt.linear_programming.data_model.DataModel.update_linear_objective` or
+:meth:`~cuopt.linear_programming.data_model.DataModel.update_rhs` without requiring new ordering or symbolic factorization.
 
-* ``true``: Cache the barrier workspace for later solves
-* ``false``: Do not cache the barrier workspace (default)
+* ``true``: Cache the ordering and symbolic factorization for later solves
+* ``false``: Do not cache (default)
 
 .. note:: The default value is ``false``.
 
-.. note:: Reuse requires that the quadratic objective, the constraint matrix, the row senses, and the variable bounds stay unchanged between solves. Quadratic constraints take a full solve,
-   and models with range rows or folding in the first solve are not supported. When sequence solve is enabled, the automatic value of ``CUOPT_BARRIER_PRESOLVE_BOUND_FREE_VARIABLES`` resolves to disabled.
+.. note:: Reuse requires that the quadratic objective, the constraint matrix, the row senses, and the variable bounds stay unchanged between solves. Problems with range rows or folding in the first solve are not supported. When sequence solve is enabled, the automatic value of ``CUOPT_BARRIER_PRESOLVE_BOUND_FREE_VARIABLES`` resolves to disabled.
