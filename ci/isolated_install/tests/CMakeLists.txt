@@ -47,3 +47,9 @@ target_compile_features(isolated_${COMPONENT}_test PRIVATE cxx_std_20)
 # Only the component under test (plus whatever it pulls in transitively) is linked.
 target_link_libraries(isolated_${COMPONENT}_test PRIVATE cuopt::${COMPONENT}
                                                          GTest::gtest GTest::gtest_main)
+if(COMPONENT STREQUAL "client")
+  # The client exports nothing through its installed headers, so the test dlopen()s the library.
+  target_compile_definitions(isolated_client_test
+                             PRIVATE CUOPT_CLIENT_LIB="$<TARGET_FILE:cuopt::client>")
+  target_link_libraries(isolated_client_test PRIVATE ${CMAKE_DL_LIBS})
+endif()

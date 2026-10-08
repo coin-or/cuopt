@@ -32,7 +32,7 @@ This starts a clean container (`docker run --gpus all`, except for `client`) and
 | `run.sh` | Host-side driver for local use: picks the image and starts the container. |
 | `container_pip.sh` | Installs the wheel into a venv (`WHEEL_DIRS` = prebuilt wheels, else nightly index), asserts that only the expected cuopt wheels are installed, builds and runs the gtest. |
 | `container_conda.sh` | Same with conda (`LOCAL_CHANNEL` = freshly built channel, else `rapidsai-nightly`). |
-| `tests/` | One sample gtest per component, linking only `cuopt::<component>`. |
+| `tests/` | One sample gtest per component, linking only `cuopt::<component>`. `mathopt` solves a tiny LP/MILP and `routing` a tiny CVRP. `client` only checks consumability: the client package ships a very small header set (the parsers are in the mathopt headers), so it includes `constants.h` and `dlopen()`s `libcuopt_client` with `RTLD_NOW` to check every symbol resolves. |
 
 Environment: `CUDA_MAJOR` (default `13`), `CUDA_IMAGE_TAG` (pip base image tag for `run.sh`),
 `NIGHTLY_WHEEL_INDEX` (override the wheel index).
@@ -44,7 +44,8 @@ These were found while writing the tests (local runs against nightlies; only `ro
 1. **mathopt wheel:** `cuopt_mathopt-targets.cmake` hardcodes the build-machine path
    `/usr/lib64/libcudss/13/./libcudss.so.0` in `INTERFACE_LINK_LIBRARIES`, so consumers fail to link.
 2. **client wheel:** its CMake config (from the shared export set) requires `CUDAToolkit`/`nvcc`,
-   `rmm` and `raft`, none of which the wheel declares as dependencies.
+   `rmm` and `raft`, none of which the wheel declares as dependencies. (#2094 makes client-only
+   installs not require them in the config.)
 3. **conda component packages:** none ships `cuopt-config.cmake` (only the `libcuopt` metapackage
    does), so `find_package(cuopt)` fails after installing a single component.
 4. **wheels:** components are split across separate wheel directories, so a consumer has to pass

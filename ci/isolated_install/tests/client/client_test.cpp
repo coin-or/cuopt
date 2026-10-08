@@ -1,37 +1,25 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// libcuopt-client only: host-side parsing and problem representation, no GPU needed.
-#include <cuopt/mathematical_optimization/io/parser.hpp>
+// libcuopt-client only: no GPU, CUDA toolkit, rmm or raft. The client package ships a very small
+// header set (the problem parsers are in the mathopt headers), so there is no exported API to
+// call through them. This checks that the package is consumable: find_package(cuopt) and
+// cuopt::client resolve, the headers compile, and libcuopt_client loads with every symbol
+// resolved (RTLD_NOW) in an environment holding only this package.
+#include <cuopt/mathematical_optimization/constants.h>
 
+#include <dlfcn.h>
 #include <gtest/gtest.h>
 
-namespace io = cuopt::mathematical_optimization::io;
-
-static constexpr const char* kTinyLp = R"(NAME          TINY
-ROWS
- N  obj
- L  c1
-COLUMNS
-    x         obj       -1.0   c1        1.0
-    y         obj       -1.0   c1        1.0
-RHS
-    rhs       c1        4.0
-BOUNDS
- UP bnd       x         3.0
- UP bnd       y         3.0
-ENDATA
-)";
-
-TEST(IsolatedClient, ParsesMpsFromString)
+TEST(IsolatedClient, ConstantsHeaderIsUsable)
 {
-  auto model = io::read_mps_from_string<int, double>(kTinyLp);
-  EXPECT_EQ(model.get_n_variables(), 2);
-  EXPECT_EQ(model.get_n_constraints(), 1);
-  EXPECT_EQ(model.get_nnz(), 2);
+  EXPECT_EQ(CUOPT_MINIMIZE, 1);
+  EXPECT_EQ(CUOPT_MAXIMIZE, -1);
 }
 
-TEST(IsolatedClient, MalformedMpsThrows)
+TEST(IsolatedClient, LibraryLoadsWithAllSymbolsResolved)
 {
-  EXPECT_ANY_THROW((io::read_mps_from_string<int, double>("not an mps file")));
+  void* handle = dlopen(CUOPT_CLIENT_LIB, RTLD_NOW);
+  EXPECT_NE(handle, nullptr) << dlerror();
+  if (handle != nullptr) { dlclose(handle); }
 }
