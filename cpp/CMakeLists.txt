@@ -883,10 +883,11 @@ target_link_libraries(cuopt_client_objs
 target_link_libraries(cuopt_client
         PUBLIC
         rapids_logger::rapids_logger
-        CCCL::CCCL
-        # BUILD_INTERFACE: exported, these would make find_package(cuopt) require rmm and raft
-        # even for a client-only install. The GPU components link them for real, and only
-        # error.hpp (which includes raft/core/error.hpp) needs them from the client headers.
+        # BUILD_INTERFACE: exported, CCCL, rmm and raft would make find_package(cuopt) require
+        # them even for a client-only install. The client's installed headers do not use CCCL;
+        # the GPU components link all three for real, and only error.hpp (which includes
+        # raft/core/error.hpp) needs rmm/raft from the client headers.
+        $<BUILD_INTERFACE:CCCL::CCCL>
         $<BUILD_INTERFACE:$<COMPILE_ONLY:rmm::rmm>>
         $<BUILD_INTERFACE:$<COMPILE_ONLY:raft::raft>>
         # dl is PUBLIC because the public headers pull in nvtx, whose inline init calls
@@ -1486,13 +1487,24 @@ if(_cuopt_have_gpu_component)
   if(NOT TARGET CUDA::cudart)
     find_dependency(CUDAToolkit)
   endif()
+  if(NOT TARGET CCCL::CCCL)
+    # CCCL's CMake files are vendored beside this config (<prefix>/lib*/rapids/cmake/cccl).
+    set(CCCL_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../rapids/cmake/cccl")
+    find_dependency(CCCL @CUOPT_CCCL_VERSION@)
+    # Same definitions rapids_cpm_cccl applies; they must match how the libraries were built.
+    target_compile_definitions(CCCL::CCCL INTERFACE CUB_DISABLE_NAMESPACE_MAGIC)
+    target_compile_definitions(CCCL::CCCL INTERFACE CUB_IGNORE_NAMESPACE_MAGIC_ERROR)
+    target_compile_definitions(CCCL::CCCL INTERFACE THRUST_DISABLE_ABI_NAMESPACE)
+    target_compile_definitions(CCCL::CCCL INTERFACE THRUST_IGNORE_ABI_NAMESPACE_ERROR)
+    target_compile_definitions(CCCL::CCCL INTERFACE CCCL_DISABLE_PDL)
+  endif()
   if(NOT TARGET rmm::rmm)
     find_dependency(rmm @CUOPT_RMM_MIN_VERSION@)
   endif()
   if(NOT TARGET raft::raft)
     find_dependency(raft @CUOPT_RAFT_MIN_VERSION@)
   endif()
-  foreach(_cuopt_global_target rmm::rmm raft::raft)
+  foreach(_cuopt_global_target CCCL CCCL::CCCL CCCL::CUB CCCL::libcudacxx CCCL::cudax rmm::rmm raft::raft)
     if(TARGET ${_cuopt_global_target})
       get_target_property(_cuopt_imported ${_cuopt_global_target} IMPORTED)
       get_target_property(_cuopt_global ${_cuopt_global_target} IMPORTED_GLOBAL)
@@ -1535,6 +1547,14 @@ set_property(TARGET cuopt::cuopt APPEND PROPERTY
 ]=])
 
 # The block above is a literal; fill in the dependency versions this build resolved.
+# CCCL_VERSION is set by the CCCL package found/added above; leave the lookup unversioned if not.
+if(CCCL_VERSION)
+  set(_cuopt_cccl_find_version "${CCCL_VERSION}")
+else()
+  set(_cuopt_cccl_find_version "")
+endif()
+string(REPLACE "@CUOPT_CCCL_VERSION@" "${_cuopt_cccl_find_version}" cuopt_code_string
+       "${cuopt_code_string}")
 string(REPLACE "@CUOPT_RMM_MIN_VERSION@" "${RAPIDS_VERSION_MAJOR_MINOR}" cuopt_code_string
        "${cuopt_code_string}")
 string(REPLACE "@CUOPT_RAFT_MIN_VERSION@" "${CUOPT_MIN_VERSION_raft}" cuopt_code_string
