@@ -37,6 +37,10 @@
 
 ### Improvements (26.10)
 
+- Significant performance improvements in MIP heuristics
+- Significant performance improvements on QP
+- Significant performance improvements on SOCP
+- Significant performance improvements in dual simplex
 - Add iterative refinement to the GPU ADAT solve path (#1680)
 - Add a hyperparameter that controls bounding of free variables (#1713)
 - Barrier: print the cumulative setup time before the barrier solve (#1714)
