@@ -249,6 +249,8 @@ Method
 .. note::
    Dual Simplex solves to 1e-6 absolute accuracy by default.
 
+**Primal Simplex**: Primal simplex is the simplex method applied directly to the primal linear program. It is also used by dual simplex when the cost perturbation cannot be removed. Primal simplex is available as a method, but it is not recommended: it is typically slower than dual simplex (about 2.3x slower on NETLIB in internal testing). Select dual simplex or the default concurrent method unless you have a specific reason to use primal simplex.
+
 
 Crossover
 ---------
@@ -312,6 +314,13 @@ Users can submit a set of problems which will be solved in a batch. Problems wil
    (for example with ``concurrent.futures``). Existing batch APIs still run in
    parallel today; callers may see a ``DeprecationWarning`` or a deprecation
    message in server ``warnings``.
+
+Sequence Solves
+---------------
+
+When the same quadratic program is solved repeatedly with small changes, cuOpt can reuse the work from the first solve. Enable ``sequence_solve`` in the solver settings and solve with the barrier method. After the first solve finishes with an optimal solution, cuOpt keeps the converted and presolved problem and the barrier workspace on the data model. You can then change the linear objective with :meth:`~cuopt.linear_programming.data_model.DataModel.update_linear_objective` or the constraint right-hand side with :meth:`~cuopt.linear_programming.data_model.DataModel.update_rhs`, and solve again. The next solve skips conversion, presolve, and scaling.
+
+The quadratic objective, the constraint matrix, the row senses, and the variable bounds must stay unchanged between solves. See ``CUOPT_SEQUENCE_SOLVE`` in :doc:`convex-settings` for details and limits.
 
 PDLP Precision Modes
 --------------------
