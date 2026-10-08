@@ -1093,7 +1093,10 @@ target_link_libraries(cuopt_mathopt
         raft::raft
         CUDA::cublas
         CUDA::cusparse
-        ${CUDSS_LIB_FILE}
+        # BUILD_INTERFACE only: this is an absolute path on the build machine, and exporting it
+        # makes the installed target unlinkable anywhere else. libcuopt_mathopt.so already records
+        # libcudss.so.0 as DT_NEEDED, so consumers do not need it on their own link line.
+        $<BUILD_INTERFACE:${CUDSS_LIB_FILE}>
         PRIVATE
         ${CUOPT_PRIVATE_CUDA_LIBS}
         OpenMP::OpenMP_CUDA
