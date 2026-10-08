@@ -78,7 +78,7 @@ We now describe the parameter settings used to control cuOpt's Linear Programmin
 Method
 ^^^^^^
 
-``CUOPT_METHOD`` controls the method to solve the linear programming problem. Five methods are available:
+``CUOPT_METHOD`` controls the method to solve the linear program. Five methods are available:
 
 * ``Concurrent``: Use PDLP, dual simplex, and barrier in parallel (default).
 * ``PDLP``: Use the PDLP method.
