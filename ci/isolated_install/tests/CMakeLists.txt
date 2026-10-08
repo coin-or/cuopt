@@ -1,5 +1,7 @@
+# cmake-format: off
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+# cmake-format: on
 
 # Sample gtest that builds against ONE installed cuOpt component only.
 #   cmake -S tests -B build -DCOMPONENT=<client|mathopt|routing> -DCMAKE_PREFIX_PATH=<...>
@@ -17,7 +19,18 @@ else()
 endif()
 
 find_package(cuopt CONFIG REQUIRED)
-find_package(GTest REQUIRED)
+find_package(GTest QUIET)
+if(NOT GTest_FOUND)
+  # CI containers don't ship gtest; fetch a pinned release.
+  include(FetchContent)
+  FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/releases/download/v1.15.2/googletest-1.15.2.tar.gz
+    URL_HASH SHA256=7b42b4d6ed48810c5362c265a17faebe90dc2373c885e5216439d37927f02926
+  )
+  set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(googletest)
+endif()
 
 if(NOT TARGET cuopt::${COMPONENT})
   message(FATAL_ERROR "Target cuopt::${COMPONENT} not provided by the installed package")

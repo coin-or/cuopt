@@ -2,15 +2,24 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Runs INSIDE a conda container (miniforge). Installs a single nightly cuOpt component
-# conda package into a fresh env, builds the sample gtest against it, runs it.
-# Env: COMPONENT (client|mathopt|routing), CUDA_MAJOR (default 13)
+# Runs INSIDE a conda container. Installs a single cuOpt component conda package into a fresh env,
+# builds the sample gtest against it, runs it.
+#
+# Env:
+#   COMPONENT      client|mathopt|routing (required)
+#   CUDA_MAJOR     default 13
+#   LOCAL_CHANNEL  optional, a local conda channel holding the freshly built packages (what PR CI
+#                  uses). When unset, the rapidsai-nightly channel is used.
 set -euo pipefail
 
 : "${COMPONENT:?}"
 CUDA_MAJOR="${CUDA_MAJOR:-13}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHANNELS=(-c rapidsai-nightly -c conda-forge)
+CONDA_ROOT="${CONDA_ROOT:-/opt/conda}"
+
+CHANNELS=()
+[[ -n "${LOCAL_CHANNEL:-}" ]] && CHANNELS+=(-c "${LOCAL_CHANNEL}")
+CHANNELS+=(-c rapidsai-nightly -c rapidsai -c conda-forge)
 
 case "${COMPONENT}" in
   client)  PKG="libcuopt-client";  EXPECTED="libcuopt-client" ;;
@@ -24,11 +33,15 @@ esac
 TOOLS=(cmake make gtest cxx-compiler)
 [[ "${COMPONENT}" != "client" ]] && TOOLS+=("cuda-nvcc" "cuda-cudart-dev" "cuda-version=${CUDA_MAJOR}")
 
-conda create -y -q -n isolated "${CHANNELS[@]}" "${PKG}" "${TOOLS[@]}"
+ENV_NAME="isolated_${COMPONENT}_$$"
+CREATE=(conda create)
+command -v rapids-mamba-retry >/dev/null 2>&1 && CREATE=(rapids-mamba-retry create)
+"${CREATE[@]}" -y -q -n "${ENV_NAME}" --override-channels "${CHANNELS[@]}" "${PKG}" "${TOOLS[@]}"
+
 # shellcheck disable=SC1091
-. /opt/conda/etc/profile.d/conda.sh
+. "${CONDA_ROOT}/etc/profile.d/conda.sh"
 set +u  # conda activate scripts reference unset variables
-conda activate isolated
+conda activate "${ENV_NAME}"
 set -u
 
 echo "== installed cuopt packages"
@@ -40,7 +53,8 @@ if [[ "${INSTALLED}" != "${WANT}" ]]; then
   exit 1
 fi
 
-cmake -S "${HERE}/tests" -B /tmp/build -DCOMPONENT="${COMPONENT}" \
+WORK="$(mktemp -d)"
+cmake -S "${HERE}/tests" -B "${WORK}/build" -DCOMPONENT="${COMPONENT}" \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
-cmake --build /tmp/build -j"$(nproc)"
-"/tmp/build/isolated_${COMPONENT}_test"
+cmake --build "${WORK}/build" -j"$(nproc)"
+"${WORK}/build/isolated_${COMPONENT}_test"

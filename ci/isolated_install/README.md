@@ -1,28 +1,45 @@
 # Isolated-install smoke tests
 
-Install **one** nightly cuOpt component (`client`, `mathopt` or `routing`) by itself in a clean
-container, build a small gtest against only that package, and run it. This mimics a user who
+Install **one** cuOpt component (`client`, `mathopt` or `routing`) by itself in a clean
+environment, build a small gtest against only that package, and run it. This mimics a user who
 installs a single component rather than the `libcuopt` metapackage.
+
+## In PR CI
+
+`.github/workflows/pr.yaml` has two jobs that test the PR's **own freshly built** packages:
+
+| Job | Needs | Script |
+|-----|-------|--------|
+| `isolated-install-wheels` | `wheel-build-libcuopt-{client,mathopt,routing}` | `ci/test_isolated_install_wheel.sh` |
+| `isolated-install-conda` | `conda-cpp-build` | `ci/test_isolated_install_conda.sh` |
+
+They depend only on the packaging builds, not on any test job. Each script loops over the three
+components, installs just that component's package (plus the client it depends on) and runs the
+gtest in `tests/`, then fails if any component failed. They are intentionally **not** in
+`pr-builder`'s `needs` yet (see below).
+
+## Locally
 
 ```bash
 ci/isolated_install/run.sh <client|mathopt|routing> <pip|conda> [image]
 ```
 
-`client` needs no GPU; `mathopt` and `routing` run with `docker run --gpus all`.
+This starts a clean container (`docker run --gpus all`, except for `client`) and installs the
+**published nightly** package (RAPIDS nightly wheel index / `rapidsai-nightly` conda channel).
 
 | File | Purpose |
 |------|---------|
-| `run.sh` | Host-side driver: picks the image and starts the container. |
-| `container_pip.sh` | Inside the container: installs the nightly wheel from the RAPIDS nightly wheel index into a venv, asserts that only the expected cuopt wheels are installed, then builds and runs the gtest. |
-| `container_conda.sh` | Same flow with the `rapidsai-nightly` conda channel in a miniforge container. |
+| `run.sh` | Host-side driver for local use: picks the image and starts the container. |
+| `container_pip.sh` | Installs the wheel into a venv (`WHEEL_DIRS` = prebuilt wheels, else nightly index), asserts that only the expected cuopt wheels are installed, builds and runs the gtest. |
+| `container_conda.sh` | Same with conda (`LOCAL_CHANNEL` = freshly built channel, else `rapidsai-nightly`). |
 | `tests/` | One sample gtest per component, linking only `cuopt::<component>`. |
 
-Environment: `CUDA_MAJOR` (default `13`), `CUDA_IMAGE_TAG` (pip base image tag),
+Environment: `CUDA_MAJOR` (default `13`), `CUDA_IMAGE_TAG` (pip base image tag for `run.sh`),
 `NIGHTLY_WHEEL_INDEX` (override the wheel index).
 
 ## Known problems this is meant to catch
 
-These were found while writing the tests (local runs; only `routing` on pip passed):
+These were found while writing the tests (local runs against nightlies; only `routing` on pip passed):
 
 1. **mathopt wheel:** `cuopt_mathopt-targets.cmake` hardcodes the build-machine path
    `/usr/lib64/libcudss/13/./libcudss.so.0` in `INTERFACE_LINK_LIBRARIES`, so consumers fail to link.
@@ -34,4 +51,5 @@ These were found while writing the tests (local runs; only `routing` on pip pass
    every wheel root and every config directory in `CMAKE_PREFIX_PATH` for `find_package(cuopt)` to
    resolve sibling components.
 
-The workflow `.github/workflows/isolated-install-smoke.yaml` runs the matrix nightly.
+Until the packaging fixes land, expect mathopt/pip, client/pip and all conda cases to fail. Add the
+two jobs to `pr-builder`'s `needs` once they pass.
