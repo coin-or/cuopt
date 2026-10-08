@@ -88,7 +88,6 @@ Method
 
 .. note:: The default method is ``Concurrent``.
 
-.. note:: Primal simplex is available but not recommended. In internal testing on NETLIB it was about 2.3x slower than dual simplex.
 
 Default accuracy for each method:
 
