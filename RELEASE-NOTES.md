@@ -30,7 +30,7 @@
 - Don't install libcuopt into conda env by default (#1650)
 - Presolve work and iteration limits (#1656)
 - Migrate stream APIs from rmm::cuda_stream_view to cuda::stream_ref (#1828)
-- `libcuopt` is split into client, mathopt and routing components, available as separate wheels and conda packages; `libcuopt` is now a thin metapackage (#1622, #1926, #1928, #1929, #1967, #2013)
+- `libcuopt` is split into client, mathopt and routing components, with separate wheels and conda packages (beta); `libcuopt` is now a thin metapackage (#1622, #1926, #1928, #1929, #1967, #2013)
 - Rename CUOPT_DISTRIBUTED_PDLP_PARTITIONER to CUOPT_MULTIGPU_PDLP_PARTITIONER; remove CUOPT_USE_DISTRIBUTED_PDLP (#1984)
 - standardize interface and remote solves on solver_settings_t (#2034)
 - Reject unsupported mixed-integer quadratic problems before solving (#2032)
