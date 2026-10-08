@@ -18,7 +18,7 @@ CFGS=$(find "$SP" \( -name '*-config.cmake' -o -name '*Config.cmake' \) -printf 
 cmake -S . -B build -DCMAKE_PREFIX_PATH="$ROOTS$CFGS"
 ```
 
-The public headers include `rmm` and `raft`, and the config looks for the CUDA Toolkit
-(`nvcc`), so a development environment also needs those installed (for example
-`pip install librmm-cu13 libraft-cu13` and a CUDA toolkit). `libcuopt-client` does not pull them in:
-it only declares its runtime dependencies (the client is a runtime leaf with no GPU stack).
+The client is a runtime and CMake leaf: `find_package(cuopt)` needs no CUDA Toolkit, `rmm` or
+`raft` for a client-only install. The one exception is `cuopt/error.hpp`, which includes
+`raft/core/error.hpp`; if you include it, install `libraft-cu13` and `librmm-cu13` as well.
+Note that the problem parsers and solver headers ship with `libcuopt-mathopt`, not here.

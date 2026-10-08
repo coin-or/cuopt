@@ -85,9 +85,12 @@ message(VERBOSE "cuOpt: fatbin: ${WRITE_FATBIN}")
 # CUDA runtime
 rapids_cuda_init_runtime(USE_STATIC ON)
 
+# Not in the install export set: cuopt-dependencies.cmake is shared by every component, so
+# listing CUDAToolkit/rmm/raft there makes a client-only install (no CUDA) fail
+# find_package(cuopt). The installed config finds them only when a GPU component is present
+# (see the FINAL_CODE_BLOCK below).
 rapids_find_package(CUDAToolkit REQUIRED
         BUILD_EXPORT_SET cuopt-exports
-        INSTALL_EXPORT_SET cuopt-exports
 )
 
 set(CUOPT_CXX_FLAGS "")
@@ -881,8 +884,11 @@ target_link_libraries(cuopt_client
         PUBLIC
         rapids_logger::rapids_logger
         CCCL::CCCL
-        $<COMPILE_ONLY:rmm::rmm>
-        $<COMPILE_ONLY:raft::raft>
+        # BUILD_INTERFACE: exported, these would make find_package(cuopt) require rmm and raft
+        # even for a client-only install. The GPU components link them for real, and only
+        # error.hpp (which includes raft/core/error.hpp) needs them from the client headers.
+        $<BUILD_INTERFACE:$<COMPILE_ONLY:rmm::rmm>>
+        $<BUILD_INTERFACE:$<COMPILE_ONLY:raft::raft>>
         # dl is PUBLIC because the public headers pull in nvtx, whose inline init calls
         # dlopen/dlsym, so a consumer compiling them needs -ldl on its own link line.
         # rmm::rmm used to supply that transitively; dropping it broke the arm64 link of
@@ -1458,6 +1464,45 @@ endif()
 # wheel install resolve them from sibling package directories (#1635).
 string(APPEND cuopt_code_string [=[
 
+# The GPU components link CUDA::*, rmm::rmm and raft::raft, which are not in the shared
+# dependency file (so that a client-only install does not need them). Find them here, and
+# before any targets file is included: those check that the targets they reference exist.
+set(_cuopt_have_gpu_component FALSE)
+foreach(_cuopt_component cuopt_mathopt cuopt_routing)
+  set(_cuopt_targets "${CMAKE_CURRENT_LIST_DIR}/${_cuopt_component}-targets.cmake")
+  if(NOT EXISTS "${_cuopt_targets}")
+    unset(_cuopt_found_targets CACHE)
+    find_file(_cuopt_found_targets "${_cuopt_component}-targets.cmake"
+              PATH_SUFFIXES lib/cmake/cuopt lib64/cmake/cuopt)
+    set(_cuopt_targets "${_cuopt_found_targets}")
+  endif()
+  if(_cuopt_targets AND EXISTS "${_cuopt_targets}")
+    set(_cuopt_have_gpu_component TRUE)
+  endif()
+endforeach()
+if(_cuopt_have_gpu_component)
+  include(CMakeFindDependencyMacro)
+  # Guarded: a build-tree consumer already has these from the build export set.
+  if(NOT TARGET CUDA::cudart)
+    find_dependency(CUDAToolkit)
+  endif()
+  if(NOT TARGET rmm::rmm)
+    find_dependency(rmm @CUOPT_RMM_MIN_VERSION@)
+  endif()
+  if(NOT TARGET raft::raft)
+    find_dependency(raft @CUOPT_RAFT_MIN_VERSION@)
+  endif()
+  foreach(_cuopt_global_target rmm::rmm raft::raft)
+    if(TARGET ${_cuopt_global_target})
+      get_target_property(_cuopt_imported ${_cuopt_global_target} IMPORTED)
+      get_target_property(_cuopt_global ${_cuopt_global_target} IMPORTED_GLOBAL)
+      if(_cuopt_imported AND NOT _cuopt_global)
+        set_target_properties(${_cuopt_global_target} PROPERTIES IMPORTED_GLOBAL TRUE)
+      endif()
+    endif()
+  endforeach()
+endif()
+
 foreach(_cuopt_component cuopt_client cuopt_mathopt cuopt_routing)
   set(_cuopt_targets "${CMAKE_CURRENT_LIST_DIR}/${_cuopt_component}-targets.cmake")
   if(NOT EXISTS "${_cuopt_targets}")
@@ -1488,6 +1533,12 @@ endif()
 set_property(TARGET cuopt::cuopt APPEND PROPERTY
   INTERFACE_LINK_LIBRARIES "${_cuopt_umbrella_links}")
 ]=])
+
+# The block above is a literal; fill in the dependency versions this build resolved.
+string(REPLACE "@CUOPT_RMM_MIN_VERSION@" "${RAPIDS_VERSION_MAJOR_MINOR}" cuopt_code_string
+       "${cuopt_code_string}")
+string(REPLACE "@CUOPT_RAFT_MIN_VERSION@" "${CUOPT_MIN_VERSION_raft}" cuopt_code_string
+       "${cuopt_code_string}")
 
 if(TARGET cuopt)
 rapids_export(INSTALL cuopt
