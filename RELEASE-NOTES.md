@@ -4,26 +4,25 @@
 
 ### New Features (26.10)
 
-- C API: expose solver statistics as scalar solution attributes (#1715)
-- Add a barrier setting to control adaptive regularization (enabled for cone problems by default) (#1743)
-- Add Java bindings for LP, MIP and QP (#1524)
-- Routing: add distance breaks (#1196)
-- gRPC: add cancel and status APIs to the routing client (#1886)
-- Add solver caching to support re-solves for barrier QP (#1821)
-- Add Curtis-Reid scaling (#1934)
-- gRPC: accept solver parameters as a map<string, string> in the server (#2010)
-- C API: add multi-GPU PDLP support (the problem must fit in the memory of a single GPU) (#1958)
-- gRPC: send solver parameters as a map<string, string> from the client (#2022)
-- Add Curtis-Reid scaling to multi-GPU PDLP (#2004)
-- gRPC: add a GPU health check before each job and after idle (#2031)
-- gRPC: add the standard gRPC health-probe endpoints (#2047)
-- New HTTP proxy server on top of gRPC, replacing the deprecated legacy HTTP server (#1892, #1917, #1874, #1876)
-- Add VRP support over gRPC, with a compiled C++/Cython client (#1597)
-- C API: add `cuOptSetLogCallback` to receive solver log lines in a user callback (#1636)
-- Add `DataModel.update_rhs` to update the right-hand side for barrier sequence solves, reusing the cached presolve and scaling (#1941)
-- Add the RENS (Relaxation Enforced Neighborhood Search) heuristic for MIP (#1719)
+- New Java interface for LP, QP, QCQP, SOCP and MIP
+- New Curtis-Reid scaling for PDLP
+- Support for reusing the barrier ordering and symbolic factorization when solving a sequence of problems with different linear objectives and right-hand sides
+- New RENS (Relaxation Enforced Neighboorhood Search) for MIP
+- New Primal Simplex method for LPs
+- New HTTP proxy server on top of gRPC, replacing the deprecated legacy HTTP server
+- VRP is now supported over gRPC, with a compiled C++/Cython client
+- New `cuOptSetLogCallback` for capturing solver logs in C API
+- New barrier setting to control adaptive regularization (enabled for cone problems by default)
 - Add a primal heuristic for arc-flow formulations in MIP (#1833)
 - Add Implied Indicator and Capacity Lifting presolve reductions for fixed-charge MIP models (#1983)
+- The C API now exposes solver statistics as scalar solution attributes
+- Routing: add distance breaks (#1196)
+- gRPC: add cancel and status APIs to the routing client (#1886)
+- gRPC: send solver parameters as a map<string, string> from the client (#2022)
+- gRPC: add a GPU health check before each job and after idle (#2031)
+- gRPC: add the standard gRPC health-probe endpoints (#2047)
+- gRPC: accept solver parameters as a map<string, string> in the server (#2010)
+
 
 ### Breaking Changes (26.10)
 
