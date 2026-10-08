@@ -9,6 +9,7 @@
 - Support for reusing the barrier ordering and symbolic factorization when solving a sequence of problems with different linear objectives and right-hand sides
 - New RENS (Relaxation Enforced Neighboorhood Search) for MIP
 - New Primal Simplex method for LPs
+- New Mod-2 cut separator for zero-half cuts (#1726)
 - New HTTP proxy server on top of gRPC, replacing the deprecated legacy HTTP server
 - VRP is now supported over gRPC, with a compiled C++/Cython client
 - New `cuOptSetLogCallback` for capturing solver logs in C API
@@ -45,7 +46,6 @@
 - Add a hyperparameter that controls bounding of free variables (#1713)
 - Barrier: print the cumulative setup time before the barrier solve (#1714)
 - Release pslp presolve memory (#1735)
-- Mod-2 cut separator for zero-half cuts (#1726)
 - Block Bounded Value Elimination presolving pass for binary problems (#1683)
 - Add a binary 2opt move fed from the probing cache into CPUFJ (#1738)
 - Give each solver its own seed instead of a process-wide counter (#1717)
