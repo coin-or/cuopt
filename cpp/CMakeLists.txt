@@ -85,10 +85,7 @@ message(VERBOSE "cuOpt: fatbin: ${WRITE_FATBIN}")
 # CUDA runtime
 rapids_cuda_init_runtime(USE_STATIC ON)
 
-# Not in the install export set: cuopt-dependencies.cmake is shared by every component, so
-# listing CUDAToolkit/rmm/raft there makes a client-only install (no CUDA) fail
-# find_package(cuopt). The installed config finds them only when a GPU component is present
-# (see the FINAL_CODE_BLOCK below).
+# CUDAToolkit, CCCL, rmm and raft are not exported to the install tree; see FINAL_CODE_BLOCK.
 rapids_find_package(CUDAToolkit REQUIRED
         BUILD_EXPORT_SET cuopt-exports
 )
@@ -883,10 +880,7 @@ target_link_libraries(cuopt_client_objs
 target_link_libraries(cuopt_client
         PUBLIC
         rapids_logger::rapids_logger
-        # BUILD_INTERFACE: exported, CCCL, rmm and raft would make find_package(cuopt) require
-        # them even for a client-only install. The client's installed headers do not use CCCL;
-        # the GPU components link all three for real, and only error.hpp (which includes
-        # raft/core/error.hpp) needs rmm/raft from the client headers.
+        # Build tree only: a client-only install needs none of these (error.hpp needs raft).
         $<BUILD_INTERFACE:CCCL::CCCL>
         $<BUILD_INTERFACE:$<COMPILE_ONLY:rmm::rmm>>
         $<BUILD_INTERFACE:$<COMPILE_ONLY:raft::raft>>
@@ -1100,9 +1094,7 @@ target_link_libraries(cuopt_mathopt
         raft::raft
         CUDA::cublas
         CUDA::cusparse
-        # BUILD_INTERFACE only: this is an absolute path on the build machine, and exporting it
-        # makes the installed target unlinkable anywhere else. libcuopt_mathopt.so already records
-        # libcudss.so.0 as DT_NEEDED, so consumers do not need it on their own link line.
+        # Build tree only: the installed target must not carry this build-machine path.
         $<BUILD_INTERFACE:${CUDSS_LIB_FILE}>
         PRIVATE
         ${CUOPT_PRIVATE_CUDA_LIBS}
@@ -1465,55 +1457,7 @@ endif()
 # wheel install resolve them from sibling package directories (#1635).
 string(APPEND cuopt_code_string [=[
 
-# The GPU components link CUDA::*, rmm::rmm and raft::raft, which are not in the shared
-# dependency file (so that a client-only install does not need them). Find them here, and
-# before any targets file is included: those check that the targets they reference exist.
-set(_cuopt_have_gpu_component FALSE)
-foreach(_cuopt_component cuopt_mathopt cuopt_routing)
-  set(_cuopt_targets "${CMAKE_CURRENT_LIST_DIR}/${_cuopt_component}-targets.cmake")
-  if(NOT EXISTS "${_cuopt_targets}")
-    unset(_cuopt_found_targets CACHE)
-    find_file(_cuopt_found_targets "${_cuopt_component}-targets.cmake"
-              PATH_SUFFIXES lib/cmake/cuopt lib64/cmake/cuopt)
-    set(_cuopt_targets "${_cuopt_found_targets}")
-  endif()
-  if(_cuopt_targets AND EXISTS "${_cuopt_targets}")
-    set(_cuopt_have_gpu_component TRUE)
-  endif()
-endforeach()
-if(_cuopt_have_gpu_component)
-  include(CMakeFindDependencyMacro)
-  # Guarded: a build-tree consumer already has these from the build export set.
-  if(NOT TARGET CUDA::cudart)
-    find_dependency(CUDAToolkit)
-  endif()
-  if(NOT TARGET CCCL::CCCL)
-    # CCCL's CMake files are vendored beside this config (<prefix>/lib*/rapids/cmake/cccl).
-    set(CCCL_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../rapids/cmake/cccl")
-    find_dependency(CCCL @CUOPT_CCCL_VERSION@)
-    # Same definitions rapids_cpm_cccl applies; they must match how the libraries were built.
-    target_compile_definitions(CCCL::CCCL INTERFACE CUB_DISABLE_NAMESPACE_MAGIC)
-    target_compile_definitions(CCCL::CCCL INTERFACE CUB_IGNORE_NAMESPACE_MAGIC_ERROR)
-    target_compile_definitions(CCCL::CCCL INTERFACE THRUST_DISABLE_ABI_NAMESPACE)
-    target_compile_definitions(CCCL::CCCL INTERFACE THRUST_IGNORE_ABI_NAMESPACE_ERROR)
-    target_compile_definitions(CCCL::CCCL INTERFACE CCCL_DISABLE_PDL)
-  endif()
-  if(NOT TARGET rmm::rmm)
-    find_dependency(rmm @CUOPT_RMM_MIN_VERSION@)
-  endif()
-  if(NOT TARGET raft::raft)
-    find_dependency(raft @CUOPT_RAFT_MIN_VERSION@)
-  endif()
-  foreach(_cuopt_global_target CCCL CCCL::CCCL CCCL::CUB CCCL::libcudacxx CCCL::cudax rmm::rmm raft::raft)
-    if(TARGET ${_cuopt_global_target})
-      get_target_property(_cuopt_imported ${_cuopt_global_target} IMPORTED)
-      get_target_property(_cuopt_global ${_cuopt_global_target} IMPORTED_GLOBAL)
-      if(_cuopt_imported AND NOT _cuopt_global)
-        set_target_properties(${_cuopt_global_target} PROPERTIES IMPORTED_GLOBAL TRUE)
-      endif()
-    endif()
-  endforeach()
-endif()
+include(CMakeFindDependencyMacro)
 
 foreach(_cuopt_component cuopt_client cuopt_mathopt cuopt_routing)
   set(_cuopt_targets "${CMAKE_CURRENT_LIST_DIR}/${_cuopt_component}-targets.cmake")
@@ -1524,6 +1468,18 @@ foreach(_cuopt_component cuopt_client cuopt_mathopt cuopt_routing)
     set(_cuopt_targets "${_cuopt_found_targets}")
   endif()
   if(_cuopt_targets AND EXISTS "${_cuopt_targets}")
+    # GPU components only; found before their targets file, which checks they exist.
+    if(NOT _cuopt_component STREQUAL "cuopt_client" AND NOT TARGET raft::raft)
+      find_dependency(CUDAToolkit)
+      set(CCCL_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../rapids/cmake/cccl")
+      find_dependency(CCCL)
+      # Keep in sync with rapids_cpm_cccl.
+      target_compile_definitions(CCCL::CCCL INTERFACE
+        CUB_DISABLE_NAMESPACE_MAGIC CUB_IGNORE_NAMESPACE_MAGIC_ERROR
+        THRUST_DISABLE_ABI_NAMESPACE THRUST_IGNORE_ABI_NAMESPACE_ERROR CCCL_DISABLE_PDL)
+      find_dependency(rmm)
+      find_dependency(raft)
+    endif()
     include("${_cuopt_targets}")
   endif()
 endforeach()
@@ -1545,20 +1501,6 @@ endif()
 set_property(TARGET cuopt::cuopt APPEND PROPERTY
   INTERFACE_LINK_LIBRARIES "${_cuopt_umbrella_links}")
 ]=])
-
-# The block above is a literal; fill in the dependency versions this build resolved.
-# CCCL_VERSION is set by the CCCL package found/added above; leave the lookup unversioned if not.
-if(CCCL_VERSION)
-  set(_cuopt_cccl_find_version "${CCCL_VERSION}")
-else()
-  set(_cuopt_cccl_find_version "")
-endif()
-string(REPLACE "@CUOPT_CCCL_VERSION@" "${_cuopt_cccl_find_version}" cuopt_code_string
-       "${cuopt_code_string}")
-string(REPLACE "@CUOPT_RMM_MIN_VERSION@" "${RAPIDS_VERSION_MAJOR_MINOR}" cuopt_code_string
-       "${cuopt_code_string}")
-string(REPLACE "@CUOPT_RAFT_MIN_VERSION@" "${CUOPT_MIN_VERSION_raft}" cuopt_code_string
-       "${cuopt_code_string}")
 
 if(TARGET cuopt)
 rapids_export(INSTALL cuopt

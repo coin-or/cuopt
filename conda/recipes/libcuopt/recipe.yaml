@@ -111,10 +111,7 @@ outputs:
         content: |
           cmake --install cpp/build --component client
           cmake --install cpp/build --component client-dev
-          # rapids_export puts cuopt-config.cmake and the export set in a component named
-          # after the project, so find_package(cuopt) breaks without this. It lives here,
-          # not in libcuopt, so any single component (client, mathopt, routing) is findable
-          # on its own; mathopt and routing both depend on the client.
+          # cuopt-config.cmake lives here so any single component is findable.
           cmake --install cpp/build --component cuopt
           # --require-leaf: the client must resolve without the GPU stack (#1890).
           ./ci/check_symbols.sh cpp/build/libcuopt_client.so --no-public-api-check --require-leaf
@@ -384,7 +381,6 @@ outputs:
       script:
         content: |
           cmake --install cpp/build --component dev
-          # cuopt-config.cmake ships in libcuopt-client (every component depends on it).
       string: cuda${{ cuda_major }}_${{ datetime_string }}_${{ head_rev }}
     requirements:
       build:
