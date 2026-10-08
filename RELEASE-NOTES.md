@@ -39,8 +39,8 @@
 ### Improvements (26.10)
 
 - Significant performance improvements in MIP heuristics
-- Significant performance improvements on QP
-- Significant performance improvements on SOCP
+- QP/QCQP problems solve 1.33X faster (geomean over QPLIB and Hans Mittelmann test set)
+- SOCP problems solve 1.53X faster (geomean over Hans Mittelmann SOCP test set)
 - Dual simplex is 1.4X faster (geomean over MIPLIB root relaxations)
 - Add iterative refinement to the GPU ADAT solve path (#1680)
 - Add a hyperparameter that controls bounding of free variables (#1713)
