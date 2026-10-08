@@ -166,9 +166,9 @@ class third_party_presolve_t {
                                   const std::vector<i_t>& A_offsets) const;
 
   // PSLP only: map a primal and dual solution in the original space (e.g. a user-provided LP
-  // initial solution) into the presolved space. Pass an empty x_original / y_original to skip that
-  // part. x_presolved is clipped to presolved_problem's variable bounds, which PSLP may have
-  // tightened.
+  // initial solution) into the presolved space. Both x_original and y_original are required and
+  // must match the original problem's dimensions. x_presolved is clipped to presolved_problem's
+  // variable bounds, which PSLP may have tightened.
   void crush_primal_dual_solution_pslp(const optimization_problem_t<i_t, f_t>& presolved_problem,
                                        const std::vector<f_t>& x_original,
                                        const std::vector<f_t>& y_original,

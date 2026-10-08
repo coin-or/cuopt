@@ -1106,14 +1106,14 @@ TEST_P(pslp_crush_warmstart, round_trip)
   }
   EXPECT_NEAR(obj_crushed, cold_obj, 1e-3 * (1.0 + std::abs(cold_obj)));
 
-  // Primal-only and dual-only crushes match the corresponding half of the full crush.
-  std::vector<double> x_only, y_unused, x_unused, y_only;
-  presolver.crush_primal_dual_solution_pslp(result.reduced_problem, x_orig, {}, x_only, y_unused);
-  presolver.crush_primal_dual_solution_pslp(result.reduced_problem, {}, y_orig, x_unused, y_only);
-  EXPECT_EQ(x_only, x_crushed);
-  EXPECT_TRUE(y_unused.empty());
-  EXPECT_TRUE(x_unused.empty());
-  EXPECT_EQ(y_only, y_crushed);
+  // Both the primal and the dual are required.
+  std::vector<double> x_unused, y_unused;
+  EXPECT_THROW(presolver.crush_primal_dual_solution_pslp(
+                 result.reduced_problem, x_orig, {}, x_unused, y_unused),
+               cuopt::logic_error);
+  EXPECT_THROW(presolver.crush_primal_dual_solution_pslp(
+                 result.reduced_problem, {}, y_orig, x_unused, y_unused),
+               cuopt::logic_error);
 
   auto warm_settings = settings;
   warm_settings.set_initial_primal_solution(x_crushed.data(), n_red_vars, stream);
@@ -1196,7 +1196,11 @@ TEST(presolve_initial_solution, out_of_bounds_primal_is_clipped)
     ASSERT_EQ(lb, 0.0);
   }
 
-  for (auto presolver : {presolver_t::None, presolver_t::PSLP}) {
+  // (presolver, with initial dual): PSLP maps the initial solution only when both the primal and
+  // the dual are given; with only a primal it skips presolve.
+  for (auto [presolver, with_dual] : {std::pair{presolver_t::None, false},
+                                      std::pair{presolver_t::PSLP, true},
+                                      std::pair{presolver_t::PSLP, false}}) {
     auto settings      = pdlp_solver_settings_t<int, double>{};
     settings.presolver = presolver;
     settings.method    = cuopt::mathematical_optimization::method_t::PDLP;
@@ -1208,6 +1212,8 @@ TEST(presolve_initial_solution, out_of_bounds_primal_is_clipped)
     settings.tolerances.relative_gap_tolerance    = 1e-8;
     std::vector<double> x0(mps.get_n_variables(), -1.0);
     settings.set_initial_primal_solution(x0.data(), x0.size(), stream);
+    std::vector<double> y0(mps.get_n_constraints(), 0.0);
+    if (with_dual) { settings.set_initial_dual_solution(y0.data(), y0.size(), stream); }
 
     auto solution = solve_lp(&handle_, mps, settings);
     ASSERT_EQ(solution.get_error_status().get_error_type(), cuopt::error_type_t::Success);

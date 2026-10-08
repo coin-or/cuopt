@@ -437,10 +437,10 @@ Linear Programming FAQs
     This is required because presolve transforms the problem, and the warm start data from the original problem
     cannot be applied to the presolved problem.
 
-    An initial primal and/or dual solution (``set_initial_primal_solution`` / ``set_initial_dual_solution``) does not
-    require disabling presolve when PSLP is used (the default for LP): cuOpt maps it into the presolved problem before
-    solving. For LP with Papilo presolve, cuOpt cannot map the initial solution and skips presolve instead
-    (MIP starts are still mapped through Papilo presolve). For LP, cuOpt clips the initial primal solution to the
+    An initial primal and dual solution (``set_initial_primal_solution`` and ``set_initial_dual_solution``) does not
+    require disabling presolve when PSLP is used (the default for LP): cuOpt maps both into the presolved problem before
+    solving. If only one of the two is given, or for LP with Papilo presolve, cuOpt cannot map the initial solution and
+    skips presolve instead (MIP starts are still mapped through Papilo presolve). For LP, cuOpt clips the initial primal solution to the
     problem's variable bounds, so a previous solution can be passed as is, even after changing bounds.
 
 Mixed Integer Programming FAQs

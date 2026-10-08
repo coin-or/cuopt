@@ -2163,7 +2163,9 @@ template <typename i_t, typename f_t>
 static void clip_initial_primal_to_bounds(const optimization_problem_t<i_t, f_t>& op_problem,
                                           pdlp_solver_settings_t<i_t, f_t>& settings)
 {
-  if (!settings.has_initial_primal_solution()) { return; }
+  cuopt_expects(settings.has_initial_primal_solution(),
+                error_type_t::RuntimeError,
+                "clip_initial_primal_to_bounds requires an initial primal solution");
   const auto& d_x = settings.get_initial_primal_solution();
   // A size mismatch is reported by check_initial_solution_representation.
   if (d_x.size() != static_cast<size_t>(op_problem.get_n_variables())) { return; }
@@ -2234,7 +2236,9 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
     }
     // Clip after the problem (including its bound sizes) has been validated, and before the
     // initial solution is checked against the bounds.
-    if (single_problem) { clip_initial_primal_to_bounds(op_problem, settings); }
+    if (single_problem && settings.has_initial_primal_solution()) {
+      clip_initial_primal_to_bounds(op_problem, settings);
+    }
     if (problem_checking && single_problem) {
       problem_checking_t<i_t, f_t>::check_initial_solution_representation(op_problem, settings);
     }
@@ -2282,22 +2286,26 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
     auto run_presolve = settings.presolver != presolver_t::None;
     run_presolve = run_presolve && settings.get_pdlp_warm_start_data().total_pdlp_iterations_ == -1;
 
-    // A user-provided LP initial primal/dual solution lives in the original space. PSLP can map it
-    // into the presolved space; for LP, Papilo (and batch-sized initial solutions) cannot, so
-    // presolve is skipped rather than handing PDLP a starting point of the wrong dimension. MIP
-    // presolve does not go through here and still crushes MIP starts through Papilo.
+    // A user-provided LP initial primal/dual solution lives in the original space. PSLP maps it
+    // into the presolved space when both an initial primal and an initial dual solution of the
+    // original dimensions are given. Otherwise (Papilo, only one of the two, or batch-sized
+    // initial solutions) presolve is skipped rather than handing PDLP a starting point of the
+    // wrong dimension. MIP presolve does not go through here and still crushes MIP starts through
+    // Papilo.
     const bool has_initial_primal = settings.has_initial_primal_solution();
     const bool has_initial_dual   = settings.has_initial_dual_solution();
+    bool map_initial_solution     = false;
     if (run_presolve && (has_initial_primal || has_initial_dual)) {
-      const bool initial_solution_mappable =
-        settings.presolver == presolver_t::PSLP &&
-        (!has_initial_primal || settings.get_initial_primal_solution().size() ==
-                                  static_cast<size_t>(op_problem.get_n_variables())) &&
-        (!has_initial_dual || settings.get_initial_dual_solution().size() ==
-                                static_cast<size_t>(op_problem.get_n_constraints()));
-      if (!initial_solution_mappable) {
+      map_initial_solution = settings.presolver == presolver_t::PSLP && has_initial_primal &&
+                             has_initial_dual &&
+                             settings.get_initial_primal_solution().size() ==
+                               static_cast<size_t>(op_problem.get_n_variables()) &&
+                             settings.get_initial_dual_solution().size() ==
+                               static_cast<size_t>(op_problem.get_n_constraints());
+      if (!map_initial_solution) {
         CUOPT_LOG_INFO(
-          "Skipping LP presolve: the initial solution can only be mapped through PSLP presolve");
+          "Skipping LP presolve: an initial solution can only be mapped through PSLP presolve, "
+          "and only when both an initial primal and an initial dual solution are given");
         run_presolve = false;
       }
     }
@@ -2360,15 +2368,11 @@ optimization_problem_solution_t<i_t, f_t> solve_lp(
           op_problem.get_row_names());
       }
 
-      if (has_initial_primal || has_initial_dual) {
-        auto stream = op_problem.get_handle_ptr()->get_stream();
-        std::vector<f_t> x_original, y_original, x_presolved, y_presolved;
-        if (has_initial_primal) {
-          x_original = cuopt::host_copy(settings.get_initial_primal_solution(), stream);
-        }
-        if (has_initial_dual) {
-          y_original = cuopt::host_copy(settings.get_initial_dual_solution(), stream);
-        }
+      if (map_initial_solution) {
+        auto stream     = op_problem.get_handle_ptr()->get_stream();
+        auto x_original = cuopt::host_copy(settings.get_initial_primal_solution(), stream);
+        auto y_original = cuopt::host_copy(settings.get_initial_dual_solution(), stream);
+        std::vector<f_t> x_presolved, y_presolved;
         presolver->crush_primal_dual_solution_pslp(
           result->reduced_problem, x_original, y_original, x_presolved, y_presolved);
         // If presolve removed every variable (or every constraint), the presolved primal (or dual)
