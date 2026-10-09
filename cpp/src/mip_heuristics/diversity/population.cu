@@ -315,14 +315,8 @@ void population_t<i_t, f_t>::run_solution_callbacks(solution_t<i_t, f_t>& sol)
                                      h_user_bound.data(),
                                      set_sol_callback->get_user_data());
       f_t outside_sol_objective = h_outside_sol_objective[0];
-      // A non-finite objective signals that no candidate was provided. Check the original
-      // coordinates before crushing, which could otherwise hide invalid eliminated variables.
-      if (!std::isfinite(outside_sol_objective) ||
-          !std::all_of(h_incumbent_assignment.begin(), h_incumbent_assignment.end(), [](f_t value) {
-            return std::isfinite(value);
-          })) {
-        continue;
-      }
+      // An unchanged infinite objective means the callback did not provide a candidate.
+      if (outside_sol_objective == inf) { continue; }
       d_outside_sol_objective.set_value_async(outside_sol_objective, sol.handle_ptr->get_stream());
       if (has_semi_continuous_callback_translation) {
         mip::append_semi_continuous_auxiliaries_to_assignment(

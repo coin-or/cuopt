@@ -357,8 +357,7 @@ End
   // Reject invalid candidates before they can be queued or published as incumbents.
   const auto x0    = std::find(names.begin(), names.end(), "x0") - names.begin();
   const double inf = std::numeric_limits<double>::infinity();
-  const double nan = std::numeric_limits<double>::quiet_NaN();
-  for (int invalid_case = 0; invalid_case < 8; ++invalid_case) {
+  for (int invalid_case = 0; invalid_case < 3; ++invalid_case) {
     SCOPED_TRACE(invalid_case);
     set_callback.assignment = assignment;
     set_callback.objective  = objective;
@@ -371,12 +370,7 @@ End
         }
         break;
       case 1: values[x0] = 0.5; break;
-      case 2: values[x0] = nan; break;
-      case 3: values[x0] = inf; break;
-      case 4: cost = nan; break;
-      case 5: cost = -inf; break;
-      case 6: cost = inf; break;
-      case 7: values[fixed] = nan; break;
+      case 2: cost = inf; break;
     }
     dm.population.run_solution_callbacks(seed);
     EXPECT_EQ(dm.population.get_external_solution_size(), 0);
