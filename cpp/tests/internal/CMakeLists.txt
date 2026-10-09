@@ -15,10 +15,12 @@ ConfigureTest(NUMOPT_INTERNAL_TEST
     ${CUOPT_TEST_DIR}/dual_simplex/unit_tests/right_looking_ldlt.cpp
     # linear_programming
     ${CUOPT_TEST_DIR}/linear_programming/pdlp_test.cu
+    ${CUOPT_TEST_DIR}/linear_programming/unit_tests/pdlp_memory_test.cu
     ${CUOPT_TEST_DIR}/linear_programming/unit_tests/optimization_problem_test.cu
     ${CUOPT_TEST_DIR}/linear_programming/unit_tests/presolve_test.cu
     ${CUOPT_TEST_DIR}/linear_programming/parser_test.cpp
     # mip
+    ${CUOPT_TEST_DIR}/mip/lns_test.cu
     ${CUOPT_TEST_DIR}/mip/miplib_test.cu
     ${CUOPT_TEST_DIR}/mip/mip_node_test.cpp
     ${CUOPT_TEST_DIR}/mip/problem_test.cu
