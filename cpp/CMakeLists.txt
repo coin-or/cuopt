@@ -1473,14 +1473,7 @@ foreach(_cuopt_component cuopt_client cuopt_mathopt cuopt_routing)
       if(NOT TARGET CUDA::cudart)
         find_dependency(CUDAToolkit)
       endif()
-      if(NOT TARGET CCCL::CCCL)
-        set(CCCL_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../rapids/cmake/cccl")
-        find_dependency(CCCL)
-        # Keep in sync with rapids_cpm_cccl.
-        target_compile_definitions(CCCL::CCCL INTERFACE
-          CUB_DISABLE_NAMESPACE_MAGIC CUB_IGNORE_NAMESPACE_MAGIC_ERROR
-          THRUST_DISABLE_ABI_NAMESPACE THRUST_IGNORE_ABI_NAMESPACE_ERROR CCCL_DISABLE_PDL)
-      endif()
+      # CCCL comes in through rmm, which ships its own copy.
       if(NOT TARGET rmm::rmm)
         find_dependency(rmm)
       endif()
