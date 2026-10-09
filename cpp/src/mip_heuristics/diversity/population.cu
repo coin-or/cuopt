@@ -363,8 +363,17 @@ void population_t<i_t, f_t>::run_solution_callbacks(solution_t<i_t, f_t>& sol)
           context.settings.get_tolerances());
       }
       if (has_papilo) {
+        const auto* presolver = problem_ptr->presolve_data.papilo_presolve_ptr;
+        // Crushing can discard invalid values in eliminated columns or clamp them to bounds.
+        const auto& tolerances = problem_ptr->tolerances;
+        if (!presolver->is_original_primal_solution_feasible(h_incumbent_assignment,
+                                                             tolerances.absolute_tolerance,
+                                                             tolerances.relative_tolerance,
+                                                             tolerances.integrality_tolerance)) {
+          continue;
+        }
         std::vector<f_t> h_crushed_assignment;
-        problem_ptr->presolve_data.papilo_presolve_ptr->crush_primal_solution(
+        presolver->crush_primal_solution(
           *problem_ptr->original_problem_ptr, h_incumbent_assignment, h_crushed_assignment);
         h_incumbent_assignment = std::move(h_crushed_assignment);
       }
