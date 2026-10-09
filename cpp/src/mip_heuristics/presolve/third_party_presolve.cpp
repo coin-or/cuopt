@@ -5,14 +5,7 @@
  */
 /* clang-format on */
 
-// Papilo's ProbingView::reset() guards bounds restoration with #ifndef NDEBUG.
-// This causes invalid (-1) column indices due to bugs in the Probing presolver.
-// Force-include ProbingView.hpp with NDEBUG undefined so the restoration is compiled in.
-#ifdef NDEBUG
-#undef NDEBUG
 #include <papilo/core/ProbingView.hpp>
-#define NDEBUG
-#endif
 
 #include <PSLP/PSLP_sol.h>
 #include <PSLP/PSLP_stats.h>
@@ -42,6 +35,7 @@
 #include <mip_heuristics/mip_constants.hpp>
 #include <mip_heuristics/presolve/bhw_coeff_reduce.hpp>
 #include <mip_heuristics/presolve/gf2_presolve.hpp>
+#include <mip_heuristics/presolve/indicator_strengthening.hpp>
 #include <mip_heuristics/presolve/single_lock_dual_aggregation.hpp>
 #include <mip_heuristics/presolve/third_party_presolve.hpp>
 #include <utilities/logger.hpp>
@@ -59,8 +53,6 @@
 #include <unordered_map>
 
 namespace cuopt::mathematical_optimization::mip {
-
-static constexpr int papilo_thread_limit = 4;
 
 // Backend-agnostic normalisation of the mutable presolve fields:
 //   * sign-flip `obj_coeffs` / `objective_offset` when maximise,
@@ -84,23 +76,7 @@ void normalize_for_presolve(io::mps_data_model_t<i_t, f_t> const& mps,
     }
     objective_offset = -objective_offset;
   }
-
-  if (constr_lb.empty() && constr_ub.empty()) {
-    const auto& row_types         = mps.get_row_types();
-    const auto& constraint_bounds = mps.get_constraint_bounds();
-    for (size_t i = 0; i < row_types.size(); ++i) {
-      if (row_types[i] == 'L') {
-        constr_lb.push_back(-std::numeric_limits<f_t>::infinity());
-        constr_ub.push_back(constraint_bounds[i]);
-      } else if (row_types[i] == 'G') {
-        constr_lb.push_back(constraint_bounds[i]);
-        constr_ub.push_back(std::numeric_limits<f_t>::infinity());
-      } else if (row_types[i] == 'E') {
-        constr_lb.push_back(constraint_bounds[i]);
-        constr_ub.push_back(constraint_bounds[i]);
-      }
-    }
-  }
+  expand_rhs(mps, constr_lb, constr_ub);
 }
 
 // Build a papilo::Problem
@@ -747,8 +723,8 @@ void set_presolve_methods(
 
   if (category == problem_category_t::MIP) {
     // cuOpt custom GF2 presolver
-    maybe_add(uptr(new cuopt::mathematical_optimization::mip::GF2Presolve<f_t>()));
-    maybe_add(uptr(new cuopt::mathematical_optimization::mip::BHWCoeffReduce<f_t>()));
+    maybe_add(uptr(new GF2Presolve<f_t>()));
+    maybe_add(uptr(new BHWCoeffReduce<f_t>()));
   }
   // fast presolvers
   maybe_add(uptr(new papilo::SingletonCols<f_t>()));
@@ -797,7 +773,8 @@ void set_presolve_options(papilo::Presolve<f_t>& presolver,
 {
   presolver.getPresolveOptions().tlim = time_limit;
   presolver.getPresolveOptions().threads =
-    num_cpu_threads > 0 ? std::min<i_t>(num_cpu_threads, papilo_thread_limit) : papilo_thread_limit;
+    num_cpu_threads > 0 ? std::min<i_t>(num_cpu_threads, CUOPT_MIP_PAPILO_THREAD_LIMIT)
+                        : CUOPT_MIP_PAPILO_THREAD_LIMIT;
   presolver.getPresolveOptions().feastol = 1e-5;
   if (max_rounds > 0) { presolver.getPresolveOptions().maxrounds = max_rounds; }
   if (dual_postsolve) {
@@ -927,14 +904,21 @@ third_party_presolve_status_t third_party_presolve_t<i_t, f_t>::apply_papilo(
 
   // Capture original dimensions before papilo.apply() mutates papilo_problem
   // in place into its reduced form.
-  const i_t original_n_vars = static_cast<i_t>(papilo_problem.getNCols());
-  const i_t original_n_cons = static_cast<i_t>(papilo_problem.getNRows());
-  const i_t original_nnz    = static_cast<i_t>(papilo_problem.getConstraintMatrix().getNnz());
+  const i_t original_n_vars = papilo_problem.getNCols();
+  const i_t original_n_cons = papilo_problem.getNRows();
+  const i_t original_nnz    = papilo_problem.getConstraintMatrix().getNnz();
 
   CUOPT_LOG_DEBUG("Original problem: %d constraints, %d variables, %d nonzeros",
                   original_n_cons,
                   original_n_vars,
                   original_nnz);
+
+  if (category == problem_category_t::MIP && indicator_strengthening_ &&
+      (!reduction_allowlist_.has_value() ||
+       reduction_allowlist_->count("indicatorstrengthening") > 0)) {
+    strengthen_indicators<i_t, f_t>(papilo_problem);
+  }
+
   CUOPT_LOG_INFO("\nRunning Papilo presolve (git hash %s)", PAPILO_GITHASH);
   if (category == problem_category_t::MIP) { dual_postsolve = false; }
   papilo::Presolve<f_t> papilo_presolver;

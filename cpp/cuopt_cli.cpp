@@ -150,7 +150,7 @@ int run_single_file(const std::string& file_path,
       std::make_unique<cuopt::mathematical_optimization::cpu_optimization_problem_t<int, double>>();
   }
 
-  // Distributed PDLP is used for large problems that don't fit on a single GPU.
+  // Multi-GPU PDLP is used for large problems that don't fit on a single GPU.
   // We need to debranch before the problem_interface is created and tries to materialize the
   // problem in device memory.
   const auto& pdlp_settings_ref = settings.get_pdlp_settings();
@@ -158,12 +158,12 @@ int run_single_file(const std::string& file_path,
       (pdlp_settings_ref.num_gpus == -1 || pdlp_settings_ref.num_gpus > 1)) {
     if (handle_ptr == nullptr) {
       CUOPT_LOG_ERROR(
-        "Distributed PDLP requires the GPU memory backend; no GPU handle is available for the "
+        "Multi-GPU PDLP requires the GPU memory backend; no GPU handle is available for the "
         "selected memory backend.");
       return -1;
     }
     if (!initial_solution_file.empty()) {
-      CUOPT_LOG_ERROR("Initial solution file is not supported for distributed PDLP.");
+      CUOPT_LOG_ERROR("Initial solution file is not supported for multi-GPU PDLP.");
       return -1;
     }
     auto solution = cuopt::mathematical_optimization::solve_lp(
@@ -217,11 +217,9 @@ int run_single_file(const std::string& file_path,
       }
 #ifdef CUOPT_ENABLE_GRPC
       if (is_mip) {
-        auto& mip_settings = settings.get_mip_settings();
-        auto solution = cuopt::mathematical_optimization::solve_mip_remote(*cpu_prob, mip_settings);
+        auto solution = cuopt::mathematical_optimization::solve_mip_remote(*cpu_prob, settings);
       } else {
-        auto& lp_settings = settings.get_pdlp_settings();
-        auto solution = cuopt::mathematical_optimization::solve_lp_remote(*cpu_prob, lp_settings);
+        auto solution = cuopt::mathematical_optimization::solve_lp_remote(*cpu_prob, settings);
       }
 #else
       // solve_remote.cpp only builds when gRPC is enabled, so these entry points do not
@@ -231,15 +229,12 @@ int run_single_file(const std::string& file_path,
       return -1;
 #endif
     } else if (is_mip) {
-      auto& mip_settings = settings.get_mip_settings();
       auto solution =
-        cuopt::mathematical_optimization::solve_mip(problem_interface.get(), mip_settings);
+        cuopt::mathematical_optimization::solve_mip(problem_interface.get(), settings);
     } else {
-      // Distributed PDLP was handled by the early-exit branch above; this
+      // Multi-GPU PDLP was handled by the early-exit branch above; this
       // path is always single-GPU LP going through problem_interface.
-      auto& lp_settings = settings.get_pdlp_settings();
-      auto solution =
-        cuopt::mathematical_optimization::solve_lp(problem_interface.get(), lp_settings);
+      auto solution = cuopt::mathematical_optimization::solve_lp(problem_interface.get(), settings);
     }
   } catch (const std::exception& e) {
     fprintf(stderr, "cuopt_cli error: %s\n", e.what());
@@ -494,7 +489,7 @@ int main(int argc, char* argv[])
     return -1;
   }
 
-  // --method 1 --num-gpus N (N>1 or -1 for all visible GPUs) selects distributed PDLP.
+  // --method 1 --num-gpus N (N>1 or -1 for all visible GPUs) selects multi-GPU PDLP.
   // Default / concurrent requires 1–2 GPUs.
   {
     auto& pdlp_settings = settings.get_pdlp_settings();
@@ -505,7 +500,7 @@ int main(int argc, char* argv[])
     if (!is_mpdlp && (num_gpus < 1 || num_gpus > 2)) {
       auto log = dummy_logger(settings);
       CUOPT_LOG_ERROR(
-        "num_gpus=%d is only supported with --method 1 (distributed PDLP, where -1 selects "
+        "num_gpus=%d is only supported with --method 1 (multi-GPU PDLP, where -1 selects "
         "all visible GPUs). Concurrent / default mode requires 1 or 2 GPUs.",
         num_gpus);
       return -1;
@@ -524,7 +519,8 @@ int main(int argc, char* argv[])
       settings.get_pdlp_settings().num_gpus = requested_gpus;
     }
     if (requested_gpus > device_count) {
-      CUOPT_LOG_ERROR("num_gpus=%d exceeds the number of visible CUDA devices (%d).",
+      auto log = dummy_logger(settings);
+      CUOPT_LOG_ERROR("num-gpus=%d exceeds the number of visible CUDA devices: %d. Aborting solve.",
                       requested_gpus,
                       device_count);
       return -1;

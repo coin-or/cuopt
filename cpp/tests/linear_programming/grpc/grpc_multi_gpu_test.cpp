@@ -8,6 +8,9 @@
 
 #include "grpc_integration_test_fixture.hpp"
 
+#include <cuopt/mathematical_optimization/constants.h>
+#include <cuopt/mathematical_optimization/solver_settings.hpp>
+
 #include <raft/core/device_setter.hpp>
 
 #include <cmath>
@@ -69,9 +72,9 @@ TEST_F(MultiGpuServerTests, SolveLPMultiGpuPDLPMatchesBaseline)
   auto problem         = load_problem_from_file(mps_path);
 
   auto submit_and_wait = [&](int num_gpus) {
-    pdlp_solver_settings_t<int32_t, double> settings;
-    settings.method   = method_t::PDLP;
-    settings.num_gpus = num_gpus;
+    solver_settings_t<int32_t, double> settings;
+    settings.set_parameter(CUOPT_METHOD, CUOPT_METHOD_PDLP);
+    settings.set_parameter(CUOPT_NUM_GPUS, num_gpus);
 
     auto submit_result = client->submit_lp(problem, settings);
     EXPECT_TRUE(submit_result.success) << submit_result.error_message;

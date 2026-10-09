@@ -15,6 +15,7 @@ set(MIP_LP_NECESSARY_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/single_lock_dual_aggregation.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/gf2_presolve.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/bhw_coeff_reduce.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/presolve/indicator_strengthening.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/solution/solution.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/conflict_graph/clique_table.cu
 )
@@ -55,12 +56,15 @@ set(MIP_NON_LP_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/cpu/starts/cardinality.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/cpu/starts/chain.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/cpu/starts/covering.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/cpu/starts/network.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/cpu/starts/pmedian.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/cpu/setup/bounds.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/cpu/setup/lp.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/cpu/setup/structure.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/fj_cpu_bridge.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/fj_cpu_binary.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/fj_cpu_binary_preprocess.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/sat/cdcl_sat.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/fj_cpu_binary_kernels.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/early_cpufj.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/feasibility_jump/early_gpufj.cu

@@ -60,7 +60,7 @@ template <typename i_t, typename f_t>
 optimization_problem_t<i_t, f_t>::optimization_problem_t(raft::handle_t const* handle_ptr)
   : handle_ptr_(handle_ptr),
     stream_view_(handle_ptr != nullptr ? cuda::stream_ref{handle_ptr->get_stream()}
-                                       : cuda::stream_ref{}),
+                                       : cuda::stream_ref{cudaStream_t{cudaStreamDefault}}),
     A_(0, stream_view_),
     A_indices_(0, stream_view_),
     A_offsets_(0, stream_view_),
@@ -114,6 +114,26 @@ optimization_problem_t<i_t, f_t>::optimization_problem_t(
 // ==============================================================================
 // Setters
 // ==============================================================================
+
+template <typename i_t, typename f_t>
+void optimization_problem_t<i_t, f_t>::clear()
+{
+  auto release = [this](auto& buffer) {
+    buffer.resize(0, stream_view_);
+    buffer.shrink_to_fit(stream_view_);
+  };
+  release(A_);
+  release(A_indices_);
+  release(A_offsets_);
+  release(b_);
+  release(c_);
+  release(variable_lower_bounds_);
+  release(variable_upper_bounds_);
+  release(constraint_lower_bounds_);
+  release(constraint_upper_bounds_);
+  release(row_types_);
+  release(variable_types_);
+}
 
 template <typename i_t, typename f_t>
 void optimization_problem_t<i_t, f_t>::set_maximize(bool maximize)

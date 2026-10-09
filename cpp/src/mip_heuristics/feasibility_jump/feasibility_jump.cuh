@@ -26,6 +26,8 @@
 #include <utilities/manual_cuda_graph.cuh>
 #include <utilities/pcgenerator.hpp>
 
+#include <cub/device/device_reduce.cuh>
+#include <cub/util_type.cuh>
 #include <functional>
 
 #define FJ_DEBUG_LOAD_BALANCING 0
@@ -113,7 +115,8 @@ class fj_t {
     std::atomic<bool>& preemption_flag,
     const probing_cache_t<i_t, f_t>* probing_cache,
     fj_settings_t settings = fj_settings_t{},
-    bool randomize_params  = false);
+    bool randomize_params  = false,
+    bool preserve_rng      = false);
   i_t alloc_max_climbers(i_t desired_climbers);
   void resize_vectors(const raft::handle_t* handle_ptr);
   void device_init(cuda::stream_ref stream);
@@ -420,12 +423,14 @@ class fj_t {
 
       HDI f_t lower_excess_score(i_t cstr, f_t lhs, f_t c_lb) const
       {
-        return raft::min(lhs - c_lb, (f_t)0);
+        const f_t excess = lhs - c_lb;
+        return excess < (f_t)0 ? excess : (f_t)0;
       }
 
       HDI f_t upper_excess_score(i_t cstr, f_t lhs, f_t c_ub) const
       {
-        return raft::min(c_ub - lhs, (f_t)0);
+        const f_t excess = c_ub - lhs;
+        return excess < (f_t)0 ? excess : (f_t)0;
       }
 
       // Computes the constraint's contribution to the feasibility score:

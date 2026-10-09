@@ -19,6 +19,91 @@ constexpr bool fj_audit_each_row_update       = false;
 constexpr bool fj_audit_each_objective_update = false;
 }  // namespace
 
+// Reused climbers mutate cached activities during ruin/repair. Recheck the raw model
+// before retaining or publishing a candidate, using the solver's configured tolerances.
+template <typename i_t, typename f_t>
+bool verify_cpufj_lns_feasible(const fj_cpu_problem_t<i_t, f_t>& problem,
+                               const std::vector<typename type_2<f_t>::type>& bounds,
+                               const std::vector<var_t>& types,
+                               const std::vector<f_t>& assignment)
+{
+  if (assignment.size() != static_cast<size_t>(problem.n_variables)) return false;
+  const f_t int_tol = problem.tolerances.integrality_tolerance;
+  for (i_t v = 0; v < problem.n_variables; ++v) {
+    const f_t x = assignment[v];
+    if (!std::isfinite(x) || x < get_lower(bounds[v]) - int_tol ||
+        x > get_upper(bounds[v]) + int_tol ||
+        (types[v] == var_t::INTEGER && !problem.is_integer(x)))
+      return false;
+  }
+  f_t objective = 0;
+  for (i_t v = 0; v < problem.n_variables; ++v)
+    objective += problem.h_obj_coeffs[v] * assignment[v];
+  if (!std::isfinite(objective)) return false;
+  for (i_t c = 0; c < problem.n_constraints; ++c) {
+    f_t activity = 0, correction = 0;
+    for (i_t p = problem.offsets[c]; p < problem.offsets[c + 1]; ++p) {
+      const f_t term = problem.coefficients[p] * assignment[problem.variables[p]] - correction;
+      const f_t next = activity + term;
+      correction     = (next - activity) - term;
+      activity       = next;
+    }
+    const f_t lb = problem.cstr_lb[c], ub = problem.cstr_ub[c];
+    const f_t tol = get_cstr_tolerance<i_t, f_t>(
+      lb, ub, problem.tolerances.absolute_tolerance, problem.tolerances.relative_tolerance);
+    if (!std::isfinite(activity) || activity < lb - tol || activity > ub + tol) return false;
+  }
+  return true;
+}
+
+template <typename i_t, typename f_t>
+bool verify_cpufj_lns_feasible(const fj_cpu_problem_t<i_t, f_t>& problem,
+                               const std::vector<typename type_2<f_t>::type>& bounds,
+                               const std::vector<f_t>& assignment)
+{
+  return verify_cpufj_lns_feasible(problem, bounds, problem.h_var_types, assignment);
+}
+
+// Project into the private search domain, then recheck the complete assignment.
+template <typename i_t, typename f_t>
+bool clamp_cpufj_lns_seed_to_domain(const fj_cpu_problem_t<i_t, f_t>& problem,
+                                    const std::vector<typename type_2<f_t>::type>& bounds,
+                                    const std::vector<var_t>& types,
+                                    std::vector<f_t>& assignment,
+                                    bool* changed)
+{
+  if (changed) *changed = false;
+  for (i_t v = 0; v < problem.n_variables; ++v) {
+    const bool integer = types[v] == var_t::INTEGER;
+    const f_t lo       = integer ? std::ceil(get_lower(bounds[v])) : get_lower(bounds[v]);
+    const f_t hi       = integer ? std::floor(get_upper(bounds[v])) : get_upper(bounds[v]);
+    if (lo > hi) return false;
+    const f_t value = std::clamp(integer ? std::round(assignment[v]) : assignment[v], lo, hi);
+    if (changed) *changed |= value != assignment[v];
+    assignment[v] = value;
+  }
+  return verify_cpufj_lns_feasible(problem, bounds, types, assignment);
+}
+
+// Round integer values and clamp to strict domains, validating before and after adjustment.
+template <typename i_t, typename f_t>
+bool clamp_and_validate_cpufj_lns_seed(const fj_cpu_problem_t<i_t, f_t>& problem,
+                                       const std::vector<typename type_2<f_t>::type>& bounds,
+                                       const std::vector<var_t>& types,
+                                       std::vector<f_t>& assignment)
+{
+  return verify_cpufj_lns_feasible(problem, bounds, types, assignment) &&
+         clamp_cpufj_lns_seed_to_domain(problem, bounds, types, assignment);
+}
+
+template <typename i_t, typename f_t>
+bool clamp_and_validate_cpufj_lns_seed(const fj_cpu_problem_t<i_t, f_t>& problem,
+                                       const std::vector<typename type_2<f_t>::type>& bounds,
+                                       std::vector<f_t>& assignment)
+{
+  return clamp_and_validate_cpufj_lns_seed(problem, bounds, problem.h_var_types, assignment);
+}
+
 template <typename i_t, typename f_t>
 void audit_assignment_bounds(fj_cpu_climber_t<i_t, f_t>& fj_cpu, const char* site)
 {
@@ -44,14 +129,28 @@ void audit_assignment_bounds(fj_cpu_climber_t<i_t, f_t>& fj_cpu, const char* sit
 }
 
 template <typename i_t, typename f_t>
+f_t fresh_row_slack(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
+                    i_t row,
+                    const f_t* assignment,
+                    f_t& correction)
+{
+  f_t activity_correction;
+  const f_t activity = compensated_dot2_csr_with_correction(fj_cpu.h_offsets.data(),
+                                                            fj_cpu.h_variables.data(),
+                                                            fj_cpu.h_coefficients.data(),
+                                                            assignment,
+                                                            row,
+                                                            activity_correction,
+                                                            -(f_t)fj_cpu.h_bound[row]);
+  correction         = -activity_correction;
+  return -activity;
+}
+
+template <typename i_t, typename f_t>
 f_t fresh_row_slack(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t row, const f_t* assignment)
 {
-  const f_t activity = compensated_dot2_csr(fj_cpu.h_offsets.data(),
-                                            fj_cpu.h_variables.data(),
-                                            fj_cpu.h_coefficients.data(),
-                                            assignment,
-                                            row);
-  return (f_t)fj_cpu.h_bound[row] - activity;
+  f_t correction;
+  return fresh_row_slack(fj_cpu, row, assignment, correction);
 }
 
 template <typename i_t, typename f_t>
@@ -73,7 +172,7 @@ void report_row_divergence(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
     (int)fj_cpu.iterations,
     (int)(row_end - row_begin),
     sumcomp,
-    fj_cpu.h_bound[cstr_idx],
+    fj_cpu.h_bound[cstr_idx].get(),
     (int)fj_cpu.stats.lhs_refresh_period_used,
     (long long)fj_cpu.stats.n_lhs_recompute_total,
     (long long)fj_cpu.stats.n_lhs_recompute_periodic,
@@ -220,8 +319,8 @@ void audit_row_updates(
       delta,
       touched,
       incidence_coeff,
-      fj_cpu.h_bound[cstr_idx],
-      fj_cpu.h_slack_sumcomp[cstr_idx],
+      fj_cpu.h_bound[cstr_idx].get(),
+      fj_cpu.h_slack_sumcomp[cstr_idx].get(),
       (int)(fj_cpu.h_offsets[cstr_idx + 1] - fj_cpu.h_offsets[cstr_idx]));
     report_row_divergence<i_t, f_t>(fj_cpu, cstr_idx, assignment, "row update");
     cuopt_assert(false, "carried slack disagrees with a fresh sum after a move");
@@ -259,13 +358,13 @@ void audit_incremental_state(fj_cpu_climber_t<i_t, f_t>& fj_cpu, const char* sit
       fj_cpu.log_prefix.c_str(),
       site,
       (int)cstr_idx,
-      fj_cpu.h_row_is_integral[cstr_idx],
+      fj_cpu.h_row_is_integral[cstr_idx].get(),
       carried_violated,
       truly_violated,
       carried,
       fresh,
       std::fabs(carried - fresh),
-      fj_cpu.h_bound[cstr_idx],
+      fj_cpu.h_bound[cstr_idx].get(),
       tol);
     report_row_divergence<i_t, f_t>(fj_cpu, cstr_idx, assignment, site);
     cuopt_assert(false, "violated set disagrees with a fresh slack");
@@ -351,12 +450,35 @@ void sanity_checks(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
     cuopt_assert(fj_cpu.row_state()[cstr_idx].weight >= 0, "Weights should be positive or zero");
   }
   cuopt_assert(fj_cpu.h_objective_weight >= 0, "Objective weight should be positive or zero");
-  cuopt_assert(fj_cpu.seed_objective_weight >= 0,
+  cuopt_assert(fj_cpu.objective_weight_floor >= 0,
                "Objective weight floor should be positive or zero");
 }
 
 #if MIP_INSTANTIATE_FLOAT
+template bool verify_cpufj_lns_feasible<int, float>(const fj_cpu_problem_t<int, float>&,
+                                                    const std::vector<float2>&,
+                                                    const std::vector<var_t>&,
+                                                    const std::vector<float>&);
+template bool verify_cpufj_lns_feasible<int, float>(const fj_cpu_problem_t<int, float>&,
+                                                    const std::vector<float2>&,
+                                                    const std::vector<float>&);
+template bool clamp_cpufj_lns_seed_to_domain<int, float>(const fj_cpu_problem_t<int, float>&,
+                                                         const std::vector<float2>&,
+                                                         const std::vector<var_t>&,
+                                                         std::vector<float>&,
+                                                         bool*);
+template bool clamp_and_validate_cpufj_lns_seed<int, float>(const fj_cpu_problem_t<int, float>&,
+                                                            const std::vector<float2>&,
+                                                            const std::vector<var_t>&,
+                                                            std::vector<float>&);
+template bool clamp_and_validate_cpufj_lns_seed<int, float>(const fj_cpu_problem_t<int, float>&,
+                                                            const std::vector<float2>&,
+                                                            std::vector<float>&);
 template void audit_assignment_bounds<int, float>(fj_cpu_climber_t<int, float>&, const char*);
+template float fresh_row_slack<int, float>(fj_cpu_climber_t<int, float>&,
+                                           int,
+                                           const float*,
+                                           float&);
 template float fresh_row_slack<int, float>(fj_cpu_climber_t<int, float>&, int, const float*);
 template void audit_objective_update<int, float>(
   fj_cpu_climber_t<int, float>&, int, float, float, float, float);
@@ -368,7 +490,30 @@ template void sanity_checks<int, float>(fj_cpu_climber_t<int, float>&);
 #endif
 
 #if MIP_INSTANTIATE_DOUBLE
+template bool verify_cpufj_lns_feasible<int, double>(const fj_cpu_problem_t<int, double>&,
+                                                     const std::vector<double2>&,
+                                                     const std::vector<var_t>&,
+                                                     const std::vector<double>&);
+template bool verify_cpufj_lns_feasible<int, double>(const fj_cpu_problem_t<int, double>&,
+                                                     const std::vector<double2>&,
+                                                     const std::vector<double>&);
+template bool clamp_cpufj_lns_seed_to_domain<int, double>(const fj_cpu_problem_t<int, double>&,
+                                                          const std::vector<double2>&,
+                                                          const std::vector<var_t>&,
+                                                          std::vector<double>&,
+                                                          bool*);
+template bool clamp_and_validate_cpufj_lns_seed<int, double>(const fj_cpu_problem_t<int, double>&,
+                                                             const std::vector<double2>&,
+                                                             const std::vector<var_t>&,
+                                                             std::vector<double>&);
+template bool clamp_and_validate_cpufj_lns_seed<int, double>(const fj_cpu_problem_t<int, double>&,
+                                                             const std::vector<double2>&,
+                                                             std::vector<double>&);
 template void audit_assignment_bounds<int, double>(fj_cpu_climber_t<int, double>&, const char*);
+template double fresh_row_slack<int, double>(fj_cpu_climber_t<int, double>&,
+                                             int,
+                                             const double*,
+                                             double&);
 template double fresh_row_slack<int, double>(fj_cpu_climber_t<int, double>&, int, const double*);
 template void audit_objective_update<int, double>(
   fj_cpu_climber_t<int, double>&, int, double, double, double, double);
