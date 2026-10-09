@@ -31,16 +31,6 @@ mkdir -p "${RAPIDS_TESTS_DIR}"
 
 rapids-print-env
 
-# TEMPORARY: verify rapids_test_install_relocatable actually produced a working
-# CTestTestfile.cmake in the installed package. Not used by run_ctests.sh yet
-# (that lands in a later PR) -- this just proves the plumbing before merge.
-# Revert before merge.
-rapids-logger "Verify ctest registry was installed"
-# The 'test' env only has runtime deps; ctest ships with cmake, which it doesn't need
-# otherwise. Install it only for this throwaway check.
-rapids-mamba-retry install --yes -n test cmake
-ctest --test-dir "${CONDA_PREFIX}/bin/gtests/libcuopt" -N
-
 rapids-logger "Check GPU usage"
 nvidia-smi
 
