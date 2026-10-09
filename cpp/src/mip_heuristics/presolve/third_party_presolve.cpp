@@ -948,6 +948,7 @@ third_party_presolve_status_t third_party_presolve_t<i_t, f_t>::apply_papilo(
                                  dual_postsolve,
                                  num_cpu_threads,
                                  max_rounds);
+  if (!dual_reductions_) { papilo_presolver.getPresolveOptions().dualreds = 0; }
   set_presolve_parameters(papilo_presolver,
                           category,
                           original_n_cons,
