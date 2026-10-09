@@ -7,7 +7,8 @@
 - New Java interface for LP, QP, QCQP, SOCP and MIP
 - New Curtis-Reid scaling for PDLP
 - Support for reusing the barrier ordering and symbolic factorization when solving a sequence of problems with different linear objectives and right-hand sides
-- New RENS (Relaxation Enforced Neighboorhood Search) for MIP
+- Add RENS (Relaxation Enforced Neighboorhood Search) and Mutation heuristics to MIP
+- MIP solver now runs a set of heuristics during the cut passes 
 - New Primal Simplex method for LPs
 - New Mod-2 cut separator for zero-half cuts (#1726)
 - New HTTP proxy server on top of gRPC, replacing the deprecated legacy HTTP server
@@ -81,7 +82,6 @@
 - Include objective gap in QP termination criteria (#1733)
 - Portfolio diversification, more starts, move batching (#1953)
 - Move Ruiz scaling and building KKT system to the GPU (#1913)
-- Add the mutation heuristic for MIP (#2001)
 
 ### Bug Fixes (26.10)
 
