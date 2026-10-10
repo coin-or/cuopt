@@ -1417,6 +1417,7 @@ struct fj_bin_engine_t {
   void solve(fj_cpu_climber_t<i_t, f_t>& climber, f_t time_limit, double work_unit_limit)
   {
     init(climber);
+    if (climber.search_started_at == 0) climber.search_started_at = tic();
 
     // CDCL search?
     if (climber.use_sat_search && !violated_list.empty() && pb.objective_vars.empty()) {

@@ -11,6 +11,7 @@
 #include <cuopt/error.hpp>
 
 #include <branch_and_bound/branch_and_bound.hpp>
+#include <math_optimization/tic_toc.hpp>
 #include <mip_heuristics/diversity/diversity_manager.cuh>
 #include <mip_heuristics/lns/cpufj.cuh>
 #include <mip_heuristics/lns/thread_budget.hpp>
@@ -355,18 +356,41 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
   }
   auto h_weights          = cuopt::host_copy(in_fj.cstr_weights, solution.handle_ptr->get_stream());
   auto h_objective_weight = in_fj.objective_weight.value(solution.handle_ptr->get_stream());
-  for (auto& cpu_fj : ls_cpu_fj) {
-    cpu_fj = fj.create_cpu_climber(solution,
-                                   h_weights,
-                                   h_weights,
-                                   h_objective_weight,
-                                   context.preempt_heuristic_solver_,
-                                   &constraint_prop.bounds_update.probing_cache,
-                                   fj_settings_t{},
-                                   true);
+  const int64_t lane_base_seed    = derive_seed(context.base_seed, rng_id_t::local_search_cpu_fj);
+  constexpr bool enable_starts    = false;
+  constexpr bool randomize_params = true;
+  constexpr bool preserve_rng     = false;
+  constexpr bool copy_related_variables = false;
+  const double construct_start          = tic();
+  if (!ls_cpu_fj.empty()) {
+    ls_cpu_fj[0] = fj.create_cpu_climber(solution,
+                                         h_weights,
+                                         h_weights,
+                                         h_objective_weight,
+                                         context.preempt_heuristic_solver_,
+                                         &constraint_prop.bounds_update.probing_cache,
+                                         fj_settings_t{},
+                                         randomize_params,
+                                         preserve_rng,
+                                         copy_related_variables);
+    for (size_t lane = 1; lane < ls_cpu_fj.size(); ++lane) {
+      fj_settings_t settings;
+      settings.seed = fj.next_seed();
+      ls_cpu_fj[lane] =
+        init_fj_cpu_clone(*ls_cpu_fj[0], context.preempt_heuristic_solver_, settings);
+    }
+    for (size_t lane = 0; lane < ls_cpu_fj.size(); ++lane) {
+      apply_lane_diversification(*ls_cpu_fj[lane], lane, lane_base_seed, enable_starts);
+      ls_cpu_fj[lane]->use_bound_prop = false;
+    }
   }
+  const double construct_seconds = toc(construct_start);
 
-  auto solution_copy = solution;
+  auto solution_copy       = solution;
+  size_t launched          = 0;
+  const double launch_time = tic();
+  double halt_signal_time  = 0;
+  double run_before_halt   = 0;
 
   // Start CPU solver in background thread
 #pragma omp taskgroup
@@ -374,6 +398,7 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
     if (ls_cpu_fj.size() > 0 &&
         feasibility_team_size(context) > CUOPT_MIP_FJ_REQUIRED_THREAD_COUNT) {
       size_t n = std::min<size_t>(feasibility_team_size(context) - 1, ls_cpu_fj.size());
+      launched = n;
       CUOPT_LOG_DEBUG("Launching %d CPUFJ tasks", n);
 
 #pragma omp taskloop shared(ls_cpu_fj) default(none) num_tasks(n) \
@@ -387,10 +412,92 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
     in_fj.settings.time_limit = timer.remaining_time();
     in_fj.solve(solution);
 
+    halt_signal_time = tic();
+    run_before_halt  = toc(launch_time);
     for (size_t i = 0; i < ls_cpu_fj.size(); ++i) {
       ls_cpu_fj[i]->halted = true;
     }
   }  // implicit barrier that waits all CPU FJ tasks to finish
+
+  const double halt_join_seconds = toc(halt_signal_time);
+  double queue_max               = 0;
+  double search_max              = 0;
+  double halt_lane_max           = 0;
+  double start_phase_max         = 0;
+  double bound_phase_max         = 0;
+  double lp_phase_max            = 0;
+  double lp_relaxation_max       = 0;
+  double coloring_phase_max      = 0;
+  double features_phase_max      = 0;
+  double lhs_phase_max           = 0;
+  double binary_phase_max        = 0;
+  size_t search_before_halt      = 0;
+  size_t search_after_halt       = 0;
+  size_t never_searched          = 0;
+  int slow_halt_lane             = -1;
+  i_t min_iterations             = std::numeric_limits<i_t>::max();
+  i_t max_iterations             = 0;
+  for (size_t i = 0; i < launched; ++i) {
+    const auto& cpu_fj = *ls_cpu_fj[i];
+    cuopt_assert(cpu_fj.solve_started_at > 0, "launched CPUFJ lane did not start");
+    cuopt_assert(cpu_fj.solve_finished_at >= cpu_fj.solve_started_at,
+                 "CPUFJ lane finished before it started");
+    queue_max = std::max(queue_max, cpu_fj.solve_started_at - launch_time);
+    if (cpu_fj.search_started_at == 0) {
+      ++never_searched;
+    } else {
+      search_max = std::max(search_max, cpu_fj.search_started_at - cpu_fj.solve_started_at);
+      if (cpu_fj.search_started_at <= halt_signal_time) {
+        ++search_before_halt;
+      } else {
+        ++search_after_halt;
+      }
+    }
+    const double halt_lane = std::max(0.0, cpu_fj.solve_finished_at - halt_signal_time);
+    if (halt_lane > halt_lane_max) {
+      halt_lane_max  = halt_lane;
+      slow_halt_lane = i;
+    }
+    start_phase_max    = std::max(start_phase_max, cpu_fj.stats.t_start);
+    bound_phase_max    = std::max(bound_phase_max, cpu_fj.stats.t_bound_prop);
+    lp_phase_max       = std::max(lp_phase_max, cpu_fj.stats.t_lp_start);
+    lp_relaxation_max  = std::max(lp_relaxation_max, cpu_fj.stats.t_lp_relaxation);
+    coloring_phase_max = std::max(coloring_phase_max, cpu_fj.stats.t_coloring);
+    features_phase_max = std::max(features_phase_max, cpu_fj.stats.t_features);
+    lhs_phase_max      = std::max(lhs_phase_max, cpu_fj.stats.t_init_lhs);
+    binary_phase_max   = std::max(binary_phase_max, cpu_fj.stats.bin_setup.total());
+    min_iterations     = std::min(min_iterations, cpu_fj.iterations);
+    max_iterations     = std::max(max_iterations, cpu_fj.iterations);
+  }
+  if (launched == 0) min_iterations = 0;
+  CUOPT_LOG_DEBUG(
+    "CPUFJ timing[%s]: configured %zu, launched %zu, construct %.4fs, queue max %.4fs, search max "
+    "%.4fs, run %.4fs, halt/join %.4fs (lane %d: %.4fs), search before/after/never %zu/%zu/%zu, "
+    "iterations %d..%d, phases max start %.4fs, bound %.4fs, LP %.4fs, LP relaxation %.4fs, "
+    "coloring %.4fs, features %.4fs, lhs %.4fs, binary %.4fs",
+    source.c_str(),
+    ls_cpu_fj.size(),
+    launched,
+    construct_seconds,
+    queue_max,
+    search_max,
+    run_before_halt,
+    halt_join_seconds,
+    slow_halt_lane,
+    halt_lane_max,
+    search_before_halt,
+    search_after_halt,
+    never_searched,
+    min_iterations,
+    max_iterations,
+    start_phase_max,
+    bound_phase_max,
+    lp_phase_max,
+    lp_relaxation_max,
+    coloring_phase_max,
+    features_phase_max,
+    lhs_phase_max,
+    binary_phase_max);
 
   CUOPT_LOG_DEBUG("All CPUFJ tasks were stopped");
 

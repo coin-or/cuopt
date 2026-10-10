@@ -29,7 +29,8 @@ void init_fj_cpu_from_problem(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
                               const std::vector<f_t>& left_weights,
                               const std::vector<f_t>& right_weights,
                               f_t objective_weight,
-                              const probing_cache_t<i_t, f_t>* probing_cache)
+                              const probing_cache_t<i_t, f_t>* probing_cache,
+                              bool copy_related_variables = true)
 {
   auto problem_data                      = std::make_shared<fj_cpu_problem_t<i_t, f_t>>();
   fj_cpu.problem                         = problem_data;
@@ -57,9 +58,11 @@ void init_fj_cpu_from_problem(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
   problem_data->h_var_types   = cuopt::host_copy_async(problem.variable_types, stream);
   fj_cpu.h_is_binary_variable = cuopt::host_copy_async(problem.is_binary_variable, stream);
   fj_cpu.h_binary_indices     = cuopt::host_copy_async(problem.binary_indices, stream);
-  problem_data->h_related_variables = cuopt::host_copy_async(problem.related_variables, stream);
-  problem_data->h_related_variables_offsets =
-    cuopt::host_copy_async(problem.related_variables_offsets, stream);
+  if (copy_related_variables) {
+    problem_data->h_related_variables = cuopt::host_copy_async(problem.related_variables, stream);
+    problem_data->h_related_variables_offsets =
+      cuopt::host_copy_async(problem.related_variables_offsets, stream);
+  }
   handle_ptr->sync_stream();
   CUOPT_LOG_DEBUG(
     "CPUFJ model download from device: %.4fs for %d nnz", toc(download_start), problem.nnz);
@@ -214,7 +217,8 @@ std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> fj_t<i_t, f_t>::create_cpu_climber(
   const probing_cache_t<i_t, f_t>* probing_cache,
   fj_settings_t settings,
   bool randomize_params,
-  bool preserve_rng)
+  bool preserve_rng,
+  bool copy_related_variables)
 {
   raft::common::nvtx::range scope("fj_cpu_init");
 
@@ -229,7 +233,8 @@ std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> fj_t<i_t, f_t>::create_cpu_climber(
                            left_weights,
                            right_weights,
                            objective_weight,
-                           probing_cache);
+                           probing_cache,
+                           copy_related_variables);
   fj_cpu->settings = settings;
   // LNS initialization consumes draws for both parameter randomization and the seed.
   // Use a copy so adding that worker does not shift later feasibility-search draws,
@@ -270,6 +275,7 @@ template std::unique_ptr<fj_cpu_climber_t<int, float>> fj_t<int, float>::create_
   const probing_cache_t<int, float>*,
   fj_settings_t,
   bool,
+  bool,
   bool);
 #endif
 
@@ -295,6 +301,7 @@ template std::unique_ptr<fj_cpu_climber_t<int, double>> fj_t<int, double>::creat
   std::atomic<bool>&,
   const probing_cache_t<int, double>*,
   fj_settings_t,
+  bool,
   bool,
   bool);
 #endif
