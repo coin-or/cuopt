@@ -35,7 +35,8 @@ void fj_cpu_worker_t<i_t, f_t>::create_worker(
   const simplex_solver_settings_t<i_t, f_t>& settings,
   std::string log_prefix,
   int64_t seed,
-  int lane)
+  int lane,
+  bool enable_starts)
 {
   auto new_climber = init_fj_cpu_from_host_lp(
     problem, variable_types, n_structural, start_assignment, settings, preemption_flag, seed);
@@ -46,7 +47,9 @@ void fj_cpu_worker_t<i_t, f_t>::create_worker(
   fj_cpu->halted               = false;
   preemption_flag              = false;
   is_initialized               = true;
-  if (lane >= 0) { apply_lane_diversification<i_t, f_t>(*fj_cpu, lane, fj_cpu->settings.seed); }
+  if (lane >= 0) {
+    apply_lane_diversification<i_t, f_t>(*fj_cpu, lane, fj_cpu->settings.seed, enable_starts);
+  }
 }
 
 template <typename i_t, typename f_t>
