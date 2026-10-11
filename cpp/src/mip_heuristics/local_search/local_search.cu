@@ -361,7 +361,6 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
   constexpr bool randomize_params = true;
   constexpr bool preserve_rng     = false;
   constexpr bool copy_related_variables = false;
-  constexpr bool prepare_batching       = false;
   const double construct_start          = tic();
   if (!ls_cpu_fj.empty()) {
     ls_cpu_fj[0] = fj.create_cpu_climber(solution,
@@ -373,8 +372,7 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
                                          fj_settings_t{},
                                          randomize_params,
                                          preserve_rng,
-                                         copy_related_variables,
-                                         prepare_batching);
+                                         copy_related_variables);
     for (size_t lane = 1; lane < ls_cpu_fj.size(); ++lane) {
       fj_settings_t settings;
       settings.seed = fj.next_seed();
@@ -383,7 +381,6 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
     }
     for (size_t lane = 0; lane < ls_cpu_fj.size(); ++lane) {
       apply_lane_diversification(*ls_cpu_fj[lane], lane, lane_base_seed, enable_starts);
-      cuopt_assert(!ls_cpu_fj[lane]->use_move_batching, "opportunistic CPUFJ enabled batching");
       ls_cpu_fj[lane]->use_bound_prop = false;
     }
   }

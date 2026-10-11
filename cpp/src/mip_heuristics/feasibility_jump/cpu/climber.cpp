@@ -116,8 +116,7 @@ void finalize_fj_cpu_host_initialization(
   i_t n_constraints,
   i_t n_integer_vars,
   i_t nnz,
-  const typename mip_solver_settings_t<i_t, f_t>::tolerances_t& tolerances,
-  bool prepare_batching)
+  const typename mip_solver_settings_t<i_t, f_t>::tolerances_t& tolerances)
 {
   raft::common::nvtx::range scope("finalize_fj_cpu_host_initialization");
   cuopt_assert(fj_cpu.problem.get() == &problem, "mutable problem builder does not match climber");
@@ -162,7 +161,7 @@ void finalize_fj_cpu_host_initialization(
 
   // Precompute static problem features for regression model
   precompute_problem_features(fj_cpu, problem);
-  if (prepare_batching) compute_variable_coloring(fj_cpu);
+  compute_variable_coloring(fj_cpu);
 }
 
 template <typename i_t, typename f_t>
@@ -579,8 +578,7 @@ template void finalize_fj_cpu_host_initialization(
   int,
   int,
   int,
-  const typename mip_solver_settings_t<int, float>::tolerances_t&,
-  bool);
+  const typename mip_solver_settings_t<int, float>::tolerances_t&);
 template std::unique_ptr<fj_cpu_climber_t<int, float>> init_fj_cpu_clone(
   const fj_cpu_climber_t<int, float>&, std::atomic<bool>&, fj_settings_t);
 #endif
@@ -622,8 +620,7 @@ template void finalize_fj_cpu_host_initialization(
   int,
   int,
   int,
-  const typename mip_solver_settings_t<int, double>::tolerances_t&,
-  bool);
+  const typename mip_solver_settings_t<int, double>::tolerances_t&);
 template std::unique_ptr<fj_cpu_climber_t<int, double>> init_fj_cpu_clone(
   const fj_cpu_climber_t<int, double>&, std::atomic<bool>&, fj_settings_t);
 #endif
