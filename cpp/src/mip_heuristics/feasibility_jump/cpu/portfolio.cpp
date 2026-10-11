@@ -291,6 +291,7 @@ void apply_lane_diversification(fj_cpu_climber_t<i_t, f_t>& c,
     c.use_fundamental_cycle_pivot    = false;
     c.network_temperature            = f_t{0};
     c.use_pmedian_start              = false;
+    c.use_equality_substitution      = false;
   }
 
   // Seek feasibility without objective interference; restore lane-specific pressure after crossing.

@@ -411,6 +411,7 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
     // Run GPU solver
     in_fj.settings.time_limit = timer.remaining_time();
     in_fj.solve(solution);
+    CUOPT_LOG_DEBUG("GPU solver finished");
 
     halt_signal_time = tic();
     run_before_halt  = toc(launch_time);
