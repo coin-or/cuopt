@@ -18,8 +18,63 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace cuopt::mathematical_optimization::mip {
+
+template <typename i_t, typename f_t>
+static std::shared_ptr<simplex::user_problem_t<i_t, f_t>> make_fj_cpu_host_lp(
+  const fj_cpu_climber_t<i_t, f_t>& fj_cpu, const raft::handle_t* handle_ptr)
+{
+  const auto& problem = *fj_cpu.problem;
+  auto host_lp        = std::make_shared<simplex::user_problem_t<i_t, f_t>>(handle_ptr);
+  host_lp->num_rows   = problem.n_constraints;
+  host_lp->num_cols   = problem.n_variables;
+  host_lp->objective  = problem.h_obj_coeffs;
+  host_lp->A.resize(problem.n_constraints, problem.n_variables, problem.nnz);
+  host_lp->A.x         = problem.reverse_coefficients;
+  host_lp->A.i         = problem.reverse_constraints;
+  host_lp->A.col_start = problem.reverse_offsets;
+
+  host_lp->rhs.resize(problem.n_constraints);
+  host_lp->row_sense.resize(problem.n_constraints);
+  for (i_t row = 0; row < problem.n_constraints; ++row) {
+    const f_t lower = problem.cstr_lb[row];
+    const f_t upper = problem.cstr_ub[row];
+    if (lower == upper) {
+      host_lp->row_sense[row] = 'E';
+      host_lp->rhs[row]       = lower;
+    } else if (upper == std::numeric_limits<f_t>::infinity()) {
+      host_lp->row_sense[row] = 'G';
+      host_lp->rhs[row]       = lower;
+    } else if (lower == -std::numeric_limits<f_t>::infinity()) {
+      host_lp->row_sense[row] = 'L';
+      host_lp->rhs[row]       = upper;
+    } else {
+      cuopt_assert(lower < upper, "crossing constraint bounds");
+      host_lp->row_sense[row] = 'E';
+      host_lp->rhs[row]       = lower;
+      host_lp->range_rows.push_back(row);
+      host_lp->range_value.push_back(upper - lower);
+    }
+  }
+  host_lp->num_range_rows = host_lp->range_rows.size();
+
+  host_lp->lower.resize(problem.n_variables);
+  host_lp->upper.resize(problem.n_variables);
+  host_lp->var_types.resize(problem.n_variables);
+  for (i_t variable = 0; variable < problem.n_variables; ++variable) {
+    const auto bounds            = fj_cpu.h_var_bounds[variable];
+    host_lp->lower[variable]     = get_lower(bounds);
+    host_lp->upper[variable]     = get_upper(bounds);
+    host_lp->var_types[variable] = problem.h_var_types[variable] == var_t::CONTINUOUS
+                                     ? simplex::variable_type_t::CONTINUOUS
+                                     : simplex::variable_type_t::INTEGER;
+  }
+  host_lp->obj_constant = problem.objective_offset;
+  host_lp->obj_scale    = problem.objective_scaling_factor;
+  return host_lp;
+}
 
 template <typename i_t, typename f_t>
 void init_fj_cpu_from_problem(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
@@ -30,7 +85,8 @@ void init_fj_cpu_from_problem(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
                               const std::vector<f_t>& right_weights,
                               f_t objective_weight,
                               const probing_cache_t<i_t, f_t>* probing_cache,
-                              bool copy_related_variables = true)
+                              bool copy_related_variables = true,
+                              bool prepare_batching       = true)
 {
   auto problem_data                      = std::make_shared<fj_cpu_problem_t<i_t, f_t>>();
   fj_cpu.problem                         = problem_data;
@@ -67,9 +123,6 @@ void init_fj_cpu_from_problem(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
   CUOPT_LOG_DEBUG(
     "CPUFJ model download from device: %.4fs for %d nnz", toc(download_start), problem.nnz);
 
-  auto host_lp = std::make_shared<simplex::user_problem_t<i_t, f_t>>(handle_ptr);
-  problem.get_host_user_problem(*host_lp);
-  problem_data->host_lp                = std::move(host_lp);
   problem_data->probing_cache          = probing_cache;
   problem_data->h_original_ids         = problem.original_ids;
   problem_data->h_reverse_original_ids = problem.reverse_original_ids;
@@ -105,7 +158,9 @@ void init_fj_cpu_from_problem(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
                                       problem.n_constraints,
                                       problem.n_integer_vars,
                                       problem.nnz,
-                                      problem.tolerances);
+                                      problem.tolerances,
+                                      prepare_batching);
+  problem_data->host_lp = make_fj_cpu_host_lp(fj_cpu, handle_ptr);
 }
 
 template <typename i_t, typename f_t>
@@ -218,7 +273,8 @@ std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> fj_t<i_t, f_t>::create_cpu_climber(
   fj_settings_t settings,
   bool randomize_params,
   bool preserve_rng,
-  bool copy_related_variables)
+  bool copy_related_variables,
+  bool prepare_batching)
 {
   raft::common::nvtx::range scope("fj_cpu_init");
 
@@ -234,7 +290,8 @@ std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> fj_t<i_t, f_t>::create_cpu_climber(
                            right_weights,
                            objective_weight,
                            probing_cache,
-                           copy_related_variables);
+                           copy_related_variables,
+                           prepare_batching);
   fj_cpu->settings = settings;
   // LNS initialization consumes draws for both parameter randomization and the seed.
   // Use a copy so adding that worker does not shift later feasibility-search draws,
@@ -276,6 +333,7 @@ template std::unique_ptr<fj_cpu_climber_t<int, float>> fj_t<int, float>::create_
   fj_settings_t,
   bool,
   bool,
+  bool,
   bool);
 #endif
 
@@ -301,6 +359,7 @@ template std::unique_ptr<fj_cpu_climber_t<int, double>> fj_t<int, double>::creat
   std::atomic<bool>&,
   const probing_cache_t<int, double>*,
   fj_settings_t,
+  bool,
   bool,
   bool,
   bool);

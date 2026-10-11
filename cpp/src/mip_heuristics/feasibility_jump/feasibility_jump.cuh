@@ -117,7 +117,8 @@ class fj_t {
     fj_settings_t settings      = fj_settings_t{},
     bool randomize_params       = false,
     bool preserve_rng           = false,
-    bool copy_related_variables = true);
+    bool copy_related_variables = true,
+    bool prepare_batching       = true);
   i_t alloc_max_climbers(i_t desired_climbers);
   void resize_vectors(const raft::handle_t* handle_ptr);
   void device_init(cuda::stream_ref stream);

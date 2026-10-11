@@ -60,5 +60,6 @@ void finalize_fj_cpu_host_initialization(
   i_t,
   i_t,
   i_t,
-  const typename mip_solver_settings_t<i_t, f_t>::tolerances_t&);
+  const typename mip_solver_settings_t<i_t, f_t>::tolerances_t&,
+  bool prepare_batching = true);
 }  // namespace cuopt::mathematical_optimization::mip
