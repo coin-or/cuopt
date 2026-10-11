@@ -64,14 +64,18 @@ local_search_t<i_t, f_t>::local_search_t(mip_solver_context_t<i_t, f_t>& context
   ls_cpu_fj.resize(n_cpufj);
   scratch_cpu_fj.resize(1);
   fj.settings.n_of_minimums_for_exit = context.settings.heuristic_params.n_of_minimums_for_exit;
-  if (context.solution_publication.enabled()) {
-    fj.improvement_callback = [this](f_t user_obj, const std::vector<f_t>& assignment) {
-      context.solution_publication.publish_if_better(
-        context.problem_ptr,
-        assignment,
-        context.problem_ptr->get_solver_obj_from_user_obj(user_obj));
-    };
-  }
+}
+
+template <typename i_t, typename f_t>
+fj_improvement_callback_t<f_t> local_search_t<i_t, f_t>::make_fj_improvement_callback(
+  problem_t<i_t, f_t>* publication_problem)
+{
+  if (!context.solution_publication.enabled()) { return {}; }
+  cuopt_assert(publication_problem != nullptr, "Publication problem pointer must not be null");
+  return [this, publication_problem](f_t user_obj, const std::vector<f_t>& assignment) {
+    context.solution_publication.publish_if_better(
+      publication_problem, assignment, publication_problem->get_solver_obj_from_user_obj(user_obj));
+  };
 }
 
 template <typename i_t, typename f_t>
@@ -418,7 +422,7 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
 
     // Run GPU solver
     in_fj.settings.time_limit = timer.remaining_time();
-    in_fj.solve(solution);
+    in_fj.solve(solution, make_fj_improvement_callback(solution.problem_ptr));
     CUOPT_LOG_DEBUG("GPU solver finished");
 
     halt_signal_time = tic();
@@ -778,6 +782,7 @@ bool local_search_t<i_t, f_t>::run_staged_fp(solution_t<i_t, f_t>& solution,
   if (binary_only || integer_only) {
     return run_fp(solution, timer, population_ptr);
   } else {
+    fp.improvement_callback   = make_fj_improvement_callback(solution.problem_ptr);
     const i_t n_fp_iterations = 1000000;
     fp.cycle_queue.reset(solution);
     fp.reset();
@@ -969,6 +974,7 @@ bool local_search_t<i_t, f_t>::run_fp(solution_t<i_t, f_t>& solution,
   rmm::device_uvector<f_t> best_solution(solution.assignment, solution.handle_ptr->get_stream());
   problem_t<i_t, f_t>* old_problem_ptr = solution.problem_ptr;
   fp.timer                             = timer_t(timer.remaining_time());
+  fp.improvement_callback              = make_fj_improvement_callback(old_problem_ptr);
   // if it has not been initialized yet, create a new problem and move it to the cut problem
   if (!problem_with_objective_cut.cutting_plane_added) {
     problem_with_objective_cut = std::move(problem_t<i_t, f_t>(*old_problem_ptr));

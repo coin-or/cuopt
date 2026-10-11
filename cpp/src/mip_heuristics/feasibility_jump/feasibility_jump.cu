@@ -796,7 +796,10 @@ void fj_t<i_t, f_t>::run_step_device(cuda::stream_ref climber_stream,
 }
 
 template <typename i_t, typename f_t>
-void fj_t<i_t, f_t>::round_remaining_fractionals(solution_t<i_t, f_t>& solution, i_t climber_idx)
+void fj_t<i_t, f_t>::round_remaining_fractionals(
+  solution_t<i_t, f_t>& solution,
+  const fj_improvement_callback_t<f_t>& improvement_callback,
+  i_t climber_idx)
 {
   auto& data = *climbers[climber_idx];
 
@@ -810,7 +813,7 @@ void fj_t<i_t, f_t>::round_remaining_fractionals(solution_t<i_t, f_t>& solution,
   climber_stream.sync();
 
   //  Run the fractional move selection and assignment update kernels until all have been rounded
-  host_loop(solution, climber_idx);
+  host_loop(solution, improvement_callback, climber_idx);
 }
 
 template <typename i_t, typename f_t>
@@ -829,7 +832,9 @@ void fj_t<i_t, f_t>::refresh_lhs_and_violation(cuda::stream_ref stream, i_t clim
 }
 
 template <typename i_t, typename f_t>
-i_t fj_t<i_t, f_t>::host_loop(solution_t<i_t, f_t>& solution, i_t climber_idx)
+i_t fj_t<i_t, f_t>::host_loop(solution_t<i_t, f_t>& solution,
+                              const fj_improvement_callback_t<f_t>& improvement_callback,
+                              i_t climber_idx)
 {
   auto& data = *climbers[climber_idx];
   auto v     = data.view();  // == climber_views[climber_idx]
@@ -1068,7 +1073,8 @@ void fj_t<i_t, f_t>::resize_vectors(const raft::handle_t* handle_ptr)
 }
 
 template <typename i_t, typename f_t>
-i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
+i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution,
+                          const fj_improvement_callback_t<f_t>& improvement_callback)
 {
   raft::common::nvtx::range scope("fj_solve");
   timer_t timer(settings.time_limit);
@@ -1116,7 +1122,7 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
   RAFT_CHECK_CUDA(handle_ptr->get_stream().get());
   handle_ptr->sync_stream();
 
-  i_t iterations = host_loop(solution);
+  i_t iterations = host_loop(solution, improvement_callback);
   RAFT_CHECK_CUDA(handle_ptr->get_stream().get());
   handle_ptr->sync_stream();
 
@@ -1130,7 +1136,7 @@ i_t fj_t<i_t, f_t>::solve(solution_t<i_t, f_t>& solution)
     settings.iteration_limit =
       settings.iteration_limit * settings.parameters.rounding_second_stage_split;
 
-    round_remaining_fractionals(solution);
+    round_remaining_fractionals(solution, improvement_callback);
 
     // if time limit exceeded: round all remaining fractionals if any by nearest rounding.
     if (climbers[0]->fractional_variables.set_size.value(handle_ptr->get_stream()) > 0) {
