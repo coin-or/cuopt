@@ -64,6 +64,14 @@ local_search_t<i_t, f_t>::local_search_t(mip_solver_context_t<i_t, f_t>& context
   ls_cpu_fj.resize(n_cpufj);
   scratch_cpu_fj.resize(1);
   fj.settings.n_of_minimums_for_exit = context.settings.heuristic_params.n_of_minimums_for_exit;
+  if (context.solution_publication.enabled()) {
+    fj.improvement_callback = [this](f_t user_obj, const std::vector<f_t>& assignment) {
+      context.solution_publication.publish_if_better(
+        context.problem_ptr,
+        assignment,
+        context.problem_ptr->get_solver_obj_from_user_obj(user_obj));
+    };
+  }
 }
 
 template <typename i_t, typename f_t>
