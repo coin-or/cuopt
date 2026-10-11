@@ -409,7 +409,7 @@ struct fj_runtime_t {
   double search_started_at{0};
   double solve_finished_at{0};
   producer_sync_t* producer_sync{nullptr};
-  std::atomic<bool> halted{false};
+  std::atomic<int> halted{0};
   instrumentation_aggregator_t memory_aggregator;
   std::atomic<bool>& preemption_flag;
 };
