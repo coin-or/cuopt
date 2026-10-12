@@ -16,10 +16,43 @@
 #include <utilities/pcgenerator.hpp>
 #include <utilities/splitmix64.hpp>
 
+#include <thrust/find.h>
+
 #include <algorithm>
 #include <cmath>
 
 namespace cuopt::mathematical_optimization::mip {
+
+template <typename i_t, typename f_t>
+static i_t compact_zero_coefficients(std::vector<f_t>& coefficients,
+                                     std::vector<i_t>& variables,
+                                     std::vector<i_t>& offsets)
+{
+  cuopt_assert(coefficients.size() == variables.size(), "matrix array size mismatch");
+  cuopt_assert(!offsets.empty() && offsets.front() == 0, "invalid CSR offsets");
+  cuopt_assert(offsets.back() >= 0 && (size_t)offsets.back() == coefficients.size(),
+               "invalid final CSR offset");
+  cuopt_assert(std::is_sorted(offsets.begin(), offsets.end()), "unsorted CSR offsets");
+
+  i_t write      = 0;
+  i_t read_begin = 0;
+  for (size_t row = 0; row + 1 < offsets.size(); ++row) {
+    const i_t read_end = offsets[row + 1];
+    offsets[row]       = write;
+    for (i_t read = read_begin; read < read_end; ++read) {
+      if (coefficients[read] == f_t{0}) continue;
+      coefficients[write] = coefficients[read];
+      variables[write]    = variables[read];
+      ++write;
+    }
+    read_begin = read_end;
+  }
+
+  offsets.back() = write;
+  coefficients.resize(write);
+  variables.resize(write);
+  return write;
+}
 
 template <typename i_t, typename f_t>
 void init_fj_cpu_from_problem(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
@@ -124,10 +157,11 @@ std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> init_fj_cpu_from_optimization_proble
   raft::common::nvtx::range scope("init_fj_cpu_from_optimization_problem");
   auto stream = problem.get_handle_ptr()->get_stream();
 
-  const double download_start = tic();
-  auto coefficients = cuopt::host_copy_async(problem.get_constraint_matrix_values(), stream);
-  auto variables    = cuopt::host_copy_async(problem.get_constraint_matrix_indices(), stream);
-  auto offsets      = cuopt::host_copy_async(problem.get_constraint_matrix_offsets(), stream);
+  const double download_start     = tic();
+  const auto& device_coefficients = problem.get_constraint_matrix_values();
+  auto coefficients               = cuopt::host_copy_async(device_coefficients, stream);
+  auto variables = cuopt::host_copy_async(problem.get_constraint_matrix_indices(), stream);
+  auto offsets   = cuopt::host_copy_async(problem.get_constraint_matrix_offsets(), stream);
   auto objective_coefficients =
     cuopt::host_copy_async(problem.get_objective_coefficients(), stream);
   auto variable_lower_bounds = cuopt::host_copy_async(problem.get_variable_lower_bounds(), stream);
@@ -139,13 +173,22 @@ std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> init_fj_cpu_from_optimization_proble
   auto constraint_bounds = cuopt::host_copy_async(problem.get_constraint_bounds(), stream);
   auto row_types         = cuopt::host_copy_async(problem.get_row_types(), stream);
   auto variable_types    = cuopt::host_copy_async(problem.get_variable_types(), stream);
+  const bool has_zero_coefficients = thrust::find(problem.get_handle_ptr()->get_thrust_policy(),
+                                                  device_coefficients.begin(),
+                                                  device_coefficients.end(),
+                                                  f_t{0}) != device_coefficients.end();
   problem.get_handle_ptr()->sync_stream();
   CUOPT_LOG_DEBUG(
     "CPUFJ model download from device: %.4fs for %d nnz", toc(download_start), problem.get_nnz());
 
+  i_t nnz = problem.get_nnz();
+  if (has_zero_coefficients) {
+    nnz = compact_zero_coefficients<i_t, f_t>(coefficients, variables, offsets);
+  }
+
   return init_fj_cpu_from_host_model<i_t, f_t>(problem.get_n_variables(),
                                                problem.get_n_constraints(),
-                                               problem.get_nnz(),
+                                               nnz,
                                                problem.get_sense(),
                                                problem.get_objective_scaling_factor(),
                                                problem.get_objective_offset(),
