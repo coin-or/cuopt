@@ -1034,6 +1034,17 @@ __global__ void compute_mtm_moves_kernel(typename fj_t<i_t, f_t>::climber_data_t
 }
 
 template <typename i_t, typename f_t>
+DI f_t clamp_move_delta(const typename fj_t<i_t, f_t>::climber_data_t::view_t& fj,
+                        i_t variable,
+                        f_t delta)
+{
+  const f_t old_value = fj.incumbent_assignment[variable];
+  const auto bounds   = fj.pb.variable_bounds[variable];
+  const f_t new_value = std::clamp(old_value + delta, get_lower(bounds), get_upper(bounds));
+  return new_value - old_value;
+}
+
+template <typename i_t, typename f_t>
 __global__ void select_variable_kernel(typename fj_t<i_t, f_t>::climber_data_t::view_t fj)
 {
   // in a graph mode, we run multiple iterations and we want to stop when break condition is reached
@@ -1111,11 +1122,9 @@ __global__ void select_variable_kernel(typename fj_t<i_t, f_t>::climber_data_t::
     *fj.candidate_variables.set_size = 0;
     *fj.selected_var                 = selected_var;
     if (selected_var != std::numeric_limits<i_t>::max()) {
-      auto bounds       = fj.pb.variable_bounds[selected_var];
-      const f_t old_val = fj.incumbent_assignment[selected_var];
-      const f_t new_val = std::clamp(
-        old_val + fj.jump_move_delta[selected_var], get_lower(bounds), get_upper(bounds));
-      fj.jump_move_delta[selected_var] = new_val - old_val;
+      auto bounds = fj.pb.variable_bounds[selected_var];
+      fj.jump_move_delta[selected_var] =
+        clamp_move_delta<i_t, f_t>(fj, selected_var, fj.jump_move_delta[selected_var]);
 #if FJ_SINGLE_STEP
       i_t var_range        = get_upper(bounds) - get_lower(bounds);
       double delta_rel_err = fabs(fj.jump_move_delta[selected_var]) / var_range * 100;
@@ -1360,7 +1369,7 @@ __global__ void handle_local_minimum_kernel(typename fj_t<i_t, f_t>::climber_dat
       }
 
       if (FIRST_THREAD) {
-        fj.jump_move_delta[selected] = delta;
+        fj.jump_move_delta[selected] = clamp_move_delta<i_t, f_t>(fj, selected, delta);
         *fj.selected_var             = selected;
         auto bounds                  = fj.pb.variable_bounds[*fj.selected_var];
         DEVICE_LOG_TRACE("selected_var: %d bounds [%.4g/%.4g], delta %g, old val %g\n",
@@ -1434,7 +1443,7 @@ __global__ void handle_local_minimum_kernel(typename fj_t<i_t, f_t>::climber_dat
       cuopt_assert(fj.pb.check_variable_within_bounds(
                      best_var, fj.incumbent_assignment[best_var] + best_delta),
                    "assignment not within bounds");
-      fj.jump_move_delta[best_var] = best_delta;
+      fj.jump_move_delta[best_var] = clamp_move_delta<i_t, f_t>(fj, best_var, best_delta);
     }
   }
 }
