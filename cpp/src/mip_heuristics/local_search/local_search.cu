@@ -398,11 +398,11 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
   }
   const double construct_seconds = toc(construct_start);
 
-  auto solution_copy       = solution;
-  size_t launched          = 0;
-  const double launch_time = tic();
-  double halt_signal_time  = 0;
-  double run_before_halt   = 0;
+  auto solution_copy                       = solution;
+  size_t launched                          = 0;
+  const double launch_time                 = tic();
+  [[maybe_unused]] double halt_signal_time = 0;
+  [[maybe_unused]] double run_before_halt  = 0;
 
   // Start CPU solver in background thread
 #pragma omp taskgroup
@@ -432,24 +432,24 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
     }
   }  // implicit barrier that waits all CPU FJ tasks to finish
 
-  const double halt_join_seconds = toc(halt_signal_time);
-  double queue_max               = 0;
-  double search_max              = 0;
-  double halt_lane_max           = 0;
-  double start_phase_max         = 0;
-  double bound_phase_max         = 0;
-  double lp_phase_max            = 0;
-  double lp_relaxation_max       = 0;
-  double coloring_phase_max      = 0;
-  double features_phase_max      = 0;
-  double lhs_phase_max           = 0;
-  double binary_phase_max        = 0;
-  size_t search_before_halt      = 0;
-  size_t search_after_halt       = 0;
-  size_t never_searched          = 0;
-  int slow_halt_lane             = -1;
-  i_t min_iterations             = std::numeric_limits<i_t>::max();
-  i_t max_iterations             = 0;
+  [[maybe_unused]] const double halt_join_seconds = toc(halt_signal_time);
+  [[maybe_unused]] double queue_max               = 0;
+  [[maybe_unused]] double search_max              = 0;
+  [[maybe_unused]] double halt_lane_max           = 0;
+  [[maybe_unused]] double start_phase_max         = 0;
+  [[maybe_unused]] double bound_phase_max         = 0;
+  [[maybe_unused]] double lp_phase_max            = 0;
+  [[maybe_unused]] double lp_relaxation_max       = 0;
+  [[maybe_unused]] double coloring_phase_max      = 0;
+  [[maybe_unused]] double features_phase_max      = 0;
+  [[maybe_unused]] double lhs_phase_max           = 0;
+  [[maybe_unused]] double binary_phase_max        = 0;
+  [[maybe_unused]] size_t search_before_halt      = 0;
+  [[maybe_unused]] size_t search_after_halt       = 0;
+  [[maybe_unused]] size_t never_searched          = 0;
+  [[maybe_unused]] int slow_halt_lane             = -1;
+  [[maybe_unused]] i_t min_iterations             = std::numeric_limits<i_t>::max();
+  [[maybe_unused]] i_t max_iterations             = 0;
   for (size_t i = 0; i < launched; ++i) {
     const auto& cpu_fj = *ls_cpu_fj[i];
     cuopt_assert(cpu_fj.solve_started_at > 0, "launched CPUFJ lane did not start");
