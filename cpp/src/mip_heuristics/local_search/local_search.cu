@@ -340,6 +340,99 @@ void local_search_t<i_t, f_t>::stop_cpufj_deterministic()
 }
 
 template <typename i_t, typename f_t>
+static void log_cpufj_portfolio_timing(
+  const std::vector<std::unique_ptr<fj_cpu_climber_t<i_t, f_t>>>& climbers,
+  size_t launched,
+  const std::string& source,
+  double construct_seconds,
+  double launch_time,
+  double halt_signal_time,
+  double run_before_halt,
+  double halt_join_seconds)
+{
+  cuopt_assert(launched <= climbers.size(), "launched lane count exceeds configured lanes");
+
+  [[maybe_unused]] double queue_max          = 0;
+  [[maybe_unused]] double search_max         = 0;
+  [[maybe_unused]] double halt_lane_max      = 0;
+  [[maybe_unused]] double start_phase_max    = 0;
+  [[maybe_unused]] double bound_phase_max    = 0;
+  [[maybe_unused]] double lp_phase_max       = 0;
+  [[maybe_unused]] double lp_relaxation_max  = 0;
+  [[maybe_unused]] double coloring_phase_max = 0;
+  [[maybe_unused]] double features_phase_max = 0;
+  [[maybe_unused]] double lhs_phase_max      = 0;
+  [[maybe_unused]] double binary_phase_max   = 0;
+  [[maybe_unused]] size_t search_before_halt = 0;
+  [[maybe_unused]] size_t search_after_halt  = 0;
+  [[maybe_unused]] size_t never_searched     = 0;
+  [[maybe_unused]] int slow_halt_lane        = -1;
+  [[maybe_unused]] i_t min_iterations        = std::numeric_limits<i_t>::max();
+  [[maybe_unused]] i_t max_iterations        = 0;
+  for (size_t i = 0; i < launched; ++i) {
+    const auto& cpu_fj = *climbers[i];
+    cuopt_assert(cpu_fj.solve_started_at > 0, "launched CPUFJ lane did not start");
+    cuopt_assert(cpu_fj.solve_finished_at >= cpu_fj.solve_started_at,
+                 "CPUFJ lane finished before it started");
+    queue_max = std::max(queue_max, cpu_fj.solve_started_at - launch_time);
+    if (cpu_fj.search_started_at == 0) {
+      ++never_searched;
+    } else {
+      search_max = std::max(search_max, cpu_fj.search_started_at - cpu_fj.solve_started_at);
+      if (cpu_fj.search_started_at <= halt_signal_time) {
+        ++search_before_halt;
+      } else {
+        ++search_after_halt;
+      }
+    }
+    const double halt_lane = std::max(0.0, cpu_fj.solve_finished_at - halt_signal_time);
+    if (halt_lane > halt_lane_max) {
+      halt_lane_max  = halt_lane;
+      slow_halt_lane = i;
+    }
+    start_phase_max    = std::max(start_phase_max, cpu_fj.stats.t_start);
+    bound_phase_max    = std::max(bound_phase_max, cpu_fj.stats.t_bound_prop);
+    lp_phase_max       = std::max(lp_phase_max, cpu_fj.stats.t_lp_start);
+    lp_relaxation_max  = std::max(lp_relaxation_max, cpu_fj.stats.t_lp_relaxation);
+    coloring_phase_max = std::max(coloring_phase_max, cpu_fj.stats.t_coloring);
+    features_phase_max = std::max(features_phase_max, cpu_fj.stats.t_features);
+    lhs_phase_max      = std::max(lhs_phase_max, cpu_fj.stats.t_init_lhs);
+    binary_phase_max   = std::max(binary_phase_max, cpu_fj.stats.bin_setup.total());
+    min_iterations     = std::min(min_iterations, cpu_fj.iterations);
+    max_iterations     = std::max(max_iterations, cpu_fj.iterations);
+  }
+  if (launched == 0) min_iterations = 0;
+  CUOPT_LOG_DEBUG(
+    "CPUFJ timing[%s]: configured %zu, launched %zu, construct %.4fs, queue max %.4fs, search max "
+    "%.4fs, run %.4fs, halt/join %.4fs (lane %d: %.4fs), search before/after/never %zu/%zu/%zu, "
+    "iterations %d..%d, phases max start %.4fs, bound %.4fs, LP %.4fs, LP relaxation %.4fs, "
+    "coloring %.4fs, features %.4fs, lhs %.4fs, binary %.4fs",
+    source.c_str(),
+    climbers.size(),
+    launched,
+    construct_seconds,
+    queue_max,
+    search_max,
+    run_before_halt,
+    halt_join_seconds,
+    slow_halt_lane,
+    halt_lane_max,
+    search_before_halt,
+    search_after_halt,
+    never_searched,
+    min_iterations,
+    max_iterations,
+    start_phase_max,
+    bound_phase_max,
+    lp_phase_max,
+    lp_relaxation_max,
+    coloring_phase_max,
+    features_phase_max,
+    lhs_phase_max,
+    binary_phase_max);
+}
+
+template <typename i_t, typename f_t>
 bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
                                            fj_t<i_t, f_t>& in_fj,
                                            f_t time_limit,
@@ -432,85 +525,15 @@ bool local_search_t<i_t, f_t>::do_fj_solve(solution_t<i_t, f_t>& solution,
     }
   }  // implicit barrier that waits all CPU FJ tasks to finish
 
-  [[maybe_unused]] const double halt_join_seconds = toc(halt_signal_time);
-  [[maybe_unused]] double queue_max               = 0;
-  [[maybe_unused]] double search_max              = 0;
-  [[maybe_unused]] double halt_lane_max           = 0;
-  [[maybe_unused]] double start_phase_max         = 0;
-  [[maybe_unused]] double bound_phase_max         = 0;
-  [[maybe_unused]] double lp_phase_max            = 0;
-  [[maybe_unused]] double lp_relaxation_max       = 0;
-  [[maybe_unused]] double coloring_phase_max      = 0;
-  [[maybe_unused]] double features_phase_max      = 0;
-  [[maybe_unused]] double lhs_phase_max           = 0;
-  [[maybe_unused]] double binary_phase_max        = 0;
-  [[maybe_unused]] size_t search_before_halt      = 0;
-  [[maybe_unused]] size_t search_after_halt       = 0;
-  [[maybe_unused]] size_t never_searched          = 0;
-  [[maybe_unused]] int slow_halt_lane             = -1;
-  [[maybe_unused]] i_t min_iterations             = std::numeric_limits<i_t>::max();
-  [[maybe_unused]] i_t max_iterations             = 0;
-  for (size_t i = 0; i < launched; ++i) {
-    const auto& cpu_fj = *ls_cpu_fj[i];
-    cuopt_assert(cpu_fj.solve_started_at > 0, "launched CPUFJ lane did not start");
-    cuopt_assert(cpu_fj.solve_finished_at >= cpu_fj.solve_started_at,
-                 "CPUFJ lane finished before it started");
-    queue_max = std::max(queue_max, cpu_fj.solve_started_at - launch_time);
-    if (cpu_fj.search_started_at == 0) {
-      ++never_searched;
-    } else {
-      search_max = std::max(search_max, cpu_fj.search_started_at - cpu_fj.solve_started_at);
-      if (cpu_fj.search_started_at <= halt_signal_time) {
-        ++search_before_halt;
-      } else {
-        ++search_after_halt;
-      }
-    }
-    const double halt_lane = std::max(0.0, cpu_fj.solve_finished_at - halt_signal_time);
-    if (halt_lane > halt_lane_max) {
-      halt_lane_max  = halt_lane;
-      slow_halt_lane = i;
-    }
-    start_phase_max    = std::max(start_phase_max, cpu_fj.stats.t_start);
-    bound_phase_max    = std::max(bound_phase_max, cpu_fj.stats.t_bound_prop);
-    lp_phase_max       = std::max(lp_phase_max, cpu_fj.stats.t_lp_start);
-    lp_relaxation_max  = std::max(lp_relaxation_max, cpu_fj.stats.t_lp_relaxation);
-    coloring_phase_max = std::max(coloring_phase_max, cpu_fj.stats.t_coloring);
-    features_phase_max = std::max(features_phase_max, cpu_fj.stats.t_features);
-    lhs_phase_max      = std::max(lhs_phase_max, cpu_fj.stats.t_init_lhs);
-    binary_phase_max   = std::max(binary_phase_max, cpu_fj.stats.bin_setup.total());
-    min_iterations     = std::min(min_iterations, cpu_fj.iterations);
-    max_iterations     = std::max(max_iterations, cpu_fj.iterations);
-  }
-  if (launched == 0) min_iterations = 0;
-  CUOPT_LOG_DEBUG(
-    "CPUFJ timing[%s]: configured %zu, launched %zu, construct %.4fs, queue max %.4fs, search max "
-    "%.4fs, run %.4fs, halt/join %.4fs (lane %d: %.4fs), search before/after/never %zu/%zu/%zu, "
-    "iterations %d..%d, phases max start %.4fs, bound %.4fs, LP %.4fs, LP relaxation %.4fs, "
-    "coloring %.4fs, features %.4fs, lhs %.4fs, binary %.4fs",
-    source.c_str(),
-    ls_cpu_fj.size(),
-    launched,
-    construct_seconds,
-    queue_max,
-    search_max,
-    run_before_halt,
-    halt_join_seconds,
-    slow_halt_lane,
-    halt_lane_max,
-    search_before_halt,
-    search_after_halt,
-    never_searched,
-    min_iterations,
-    max_iterations,
-    start_phase_max,
-    bound_phase_max,
-    lp_phase_max,
-    lp_relaxation_max,
-    coloring_phase_max,
-    features_phase_max,
-    lhs_phase_max,
-    binary_phase_max);
+  const double halt_join_seconds = toc(halt_signal_time);
+  log_cpufj_portfolio_timing(ls_cpu_fj,
+                             launched,
+                             source,
+                             construct_seconds,
+                             launch_time,
+                             halt_signal_time,
+                             run_before_halt,
+                             halt_join_seconds);
 
   CUOPT_LOG_DEBUG("All CPUFJ tasks were stopped");
 
