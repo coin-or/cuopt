@@ -217,6 +217,7 @@ struct fj_bin_engine_t {
   int32_t iterations_at_same_objective{0};
   double last_best_objective{std::numeric_limits<double>::infinity()};
   double incumbent_objective{0};
+  double objective_sumcomp{0};
   double best_objective{std::numeric_limits<double>::infinity()};
   double obj_magnitude{1.0};
   double objective_offset{0};
@@ -324,8 +325,10 @@ struct fj_bin_engine_t {
       row_slack[r]        = slack;
       if (slack < 0) set_violated(r);
     }
-    incumbent_objective =
-      objective_offset + compensated_dot2(pb.objective.data(), assign.data(), pb.n_variables);
+    double objective_correction;
+    incumbent_objective = compensated_dot2_with_correction(
+      pb.objective.data(), assign.data(), pb.n_variables, objective_correction, objective_offset);
+    objective_sumcomp = -objective_correction;
     nnz_touched += pb.nnz;
     rebuild_scores();
   }
@@ -478,10 +481,13 @@ struct fj_bin_engine_t {
     nnz_touched += oe - ob;
     rows_walked += oe - ob;
 
-    assign[var]       = new_val;
-    assign_i32_p[var] = new_val;
-    var_score_p[var]  = own_score;
-    incumbent_objective += pb.objective[var] * delta;
+    assign[var]                = new_val;
+    assign_i32_p[var]          = new_val;
+    var_score_p[var]           = own_score;
+    const double objective_old = incumbent_objective;
+    const double objective_y   = pb.objective[var] * delta - objective_sumcomp;
+    incumbent_objective        = objective_old + objective_y;
+    objective_sumcomp          = (incumbent_objective - objective_old) - objective_y;
     if (pb.objective[var] != 0) obj_base_score[var] = flip_objective_base(var);
 
     // a new best incumbent!
