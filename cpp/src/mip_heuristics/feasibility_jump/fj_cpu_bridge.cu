@@ -78,17 +78,23 @@ void init_fj_cpu_from_problem(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
   fj_cpu.h_initial_right_weights = right_weights;
   fj_cpu.max_weight              = f_t{1};
   fj_cpu.h_objective_weight      = objective_weight;
-  if (start_assignment.empty()) {
-    start_assignment.resize(problem.n_variables);
-    for (i_t variable = 0; variable < problem.n_variables; ++variable) {
-      const auto bounds = fj_cpu.h_var_bounds[variable].get();
-      f_t value         = std::clamp(f_t{0}, get_lower(bounds), get_upper(bounds));
-      if (fj_cpu.problem->h_var_types[variable] == var_t::INTEGER) { value = std::round(value); }
-      start_assignment[variable] = value;
-    }
-  }
+  if (start_assignment.empty()) { start_assignment.resize(problem.n_variables, f_t{0}); }
   cuopt_assert(start_assignment.size() == static_cast<size_t>(problem.n_variables),
                "start assignment must cover every variable");
+  for (i_t variable = 0; variable < problem.n_variables; ++variable) {
+    const auto bounds = fj_cpu.h_var_bounds[variable].get();
+    f_t lower         = get_lower(bounds);
+    f_t upper         = get_upper(bounds);
+    f_t value         = start_assignment[variable];
+    if (fj_cpu.problem->h_var_types[variable] == var_t::INTEGER) {
+      lower = std::ceil(lower);
+      upper = std::floor(upper);
+      cuopt_assert(lower <= upper, "integer variable has an empty domain");
+      fj_cpu.h_var_bounds[variable] = typename type_2<f_t>::type{lower, upper};
+      value                         = std::round(value);
+    }
+    start_assignment[variable] = std::clamp(value, lower, upper);
+  }
   fj_cpu.h_assignment      = start_assignment;
   fj_cpu.h_best_assignment = std::move(start_assignment);
   fj_cpu.h_lhs.resize(problem.n_constraints);

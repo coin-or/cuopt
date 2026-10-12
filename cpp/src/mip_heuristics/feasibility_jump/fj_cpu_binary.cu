@@ -78,8 +78,17 @@ static void audit_binary_incumbent(const fj_cpu_climber_t<i_t, f_t>& climber,
   const f_t objective_tolerance =
     std::max(problem.tolerances.absolute_tolerance,
              f_t{64} * std::numeric_limits<f_t>::epsilon() * objective_scale);
-  cuopt_assert(std::fabs(objective - reported_objective) <= objective_tolerance,
-               "binary incumbent objective disagrees with the original assignment");
+  const f_t objective_gap = std::fabs(objective - reported_objective);
+  if (!(objective_gap <= objective_tolerance)) {
+    CUOPT_LOG_DEBUG(
+      "%sCPUFJ binary incumbent objective: c'x %.17g, reported %.17g, gap %.17g, tolerance %.17g",
+      climber.log_prefix.c_str(),
+      objective,
+      reported_objective,
+      objective_gap,
+      objective_tolerance);
+    cuopt_assert(false, "binary incumbent objective disagrees with the original assignment");
+  }
   if (!climber.bin_singletons.empty()) {
     cuopt_assert(std::fabs(objective - engine_objective) <= objective_tolerance,
                  "binary singleton substitution changed the objective");
