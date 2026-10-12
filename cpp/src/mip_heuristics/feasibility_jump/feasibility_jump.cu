@@ -392,22 +392,23 @@ void fj_t<i_t, f_t>::climber_init(i_t climber_idx, cuda::stream_ref climber_stre
                0);
 
   // clamp the incumbent assignment to within the variable bounds and round if needed
-  thrust::for_each(
-    rmm::exec_policy(climber_stream),
-    thrust::counting_iterator<i_t>(0),
-    thrust::counting_iterator<i_t>(pb_ptr->n_variables),
-    [pb                   = pb_ptr->view(),
-     mode                 = settings.mode,
-     incumbent_assignment = climber->incumbent_assignment.data()] __device__(i_t var_idx) {
-      // round if integer
-      if (mode != fj_mode_t::ROUNDING && pb.is_integer_var(var_idx)) {
-        incumbent_assignment[var_idx] = round(incumbent_assignment[var_idx]);
-      }
-      // clamp to bounds
-      auto bounds = pb.variable_bounds[var_idx];
-      incumbent_assignment[var_idx] =
-        max(get_lower(bounds), min(get_upper(bounds), incumbent_assignment[var_idx]));
-    });
+  thrust::for_each(rmm::exec_policy(climber_stream),
+                   thrust::counting_iterator<i_t>(0),
+                   thrust::counting_iterator<i_t>(pb_ptr->n_variables),
+                   [pb                   = pb_ptr->view(),
+                    mode                 = settings.mode,
+                    incumbent_assignment = climber->incumbent_assignment.data(),
+                    best_assignment = climber->best_assignment.data()] __device__(i_t var_idx) {
+                     // round if integer
+                     if (mode != fj_mode_t::ROUNDING && pb.is_integer_var(var_idx)) {
+                       incumbent_assignment[var_idx] = round(incumbent_assignment[var_idx]);
+                     }
+                     // clamp to bounds
+                     auto bounds                   = pb.variable_bounds[var_idx];
+                     incumbent_assignment[var_idx] = std::clamp(
+                       incumbent_assignment[var_idx], get_lower(bounds), get_upper(bounds));
+                     best_assignment[var_idx] = incumbent_assignment[var_idx];
+                   });
 
   thrust::for_each(
     rmm::exec_policy(climber_stream),
