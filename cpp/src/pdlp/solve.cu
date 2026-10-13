@@ -2676,12 +2676,12 @@ optimization_problem_solution_t<i_t, f_t> solve_lp_distributed_from_mps(
   const i_t n_cstr  = static_cast<i_t>(mps_data_model.get_constraint_lower_bounds().size());
   const index_t nnz = static_cast<index_t>(mps_data_model.get_constraint_matrix_values().size());
   CUOPT_LOG_INFO(
-    "Solving a problem with %d constraints, %d variables (%d integers), and %d "
+    "Solving a problem with %d constraints, %d variables (%d integers), and %lld "
     "nonzeros",
     n_cstr,
     n_vars,
     0,
-    nnz);
+    static_cast<long long>(nnz));
 
   auto lp_timer = cuopt::timer_t(settings_resolved.time_limit);
 
