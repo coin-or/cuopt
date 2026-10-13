@@ -6,27 +6,12 @@
 gRPC API (Reference)
 ======================
 
-The **CuOptRemoteService** gRPC API is defined in Protocol Buffers under the ``cuopt.remote`` package:
+The **CuOptRemoteService** gRPC API is defined in Protocol Buffers under the ``cuopt.remote`` package. Source files in the repository:
 
-* ``cuopt_remote_service.proto`` — service and job/chunk/log RPCs
-* ``cuopt_remote.proto`` — LP/MIP problem, settings, and result messages
-* ``cuopt_remote_data.proto`` — problem and result fields, including the array field ids used by chunked transfer. Generated from ``cpp/src/grpc/codegen/field_registry.yaml`` and committed to the repository.
-* ``cuopt_routing.proto`` — VRP request messages
-* ``cuopt_routing_solution.proto`` — VRP result messages
-
-The ``libcuopt-client`` wheel and conda package install all five in one directory, because they import each other by file name:
-
-* pip: ``<site-packages>/libcuopt_client/share/cuopt/proto``
-* conda: ``$CONDA_PREFIX/share/cuopt/proto``
-
-Generate stubs for your language with that directory as the include path, for example for Python:
-
-.. code-block:: bash
-
-   python -m grpc_tools.protoc -I "$PROTO_DIR" --python_out=. --grpc_python_out=. \
-     "$PROTO_DIR"/*.proto
-
-The same files are in the repository under ``cpp/src/grpc/``, ``cpp/src/grpc/routing/`` and ``cpp/src/grpc/codegen/generated/``. The chunked-transfer wire format is described in `GRPC_INTERFACE.md <https://github.com/NVIDIA/cuopt/blob/main/cpp/src/grpc/GRPC_INTERFACE.md>`_.
+* ``cpp/src/grpc/cuopt_remote_service.proto`` — service and job/chunk/log RPCs
+* ``cpp/src/grpc/cuopt_remote.proto`` — LP/MIP problem, settings, and result messages
+* ``cpp/src/grpc/routing/cuopt_routing.proto`` — VRP request messages
+* ``cpp/src/grpc/routing/cuopt_routing_solution.proto`` — VRP result messages
 
 Most users do **not** call these RPCs directly:
 
