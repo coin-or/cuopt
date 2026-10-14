@@ -7,7 +7,6 @@
 
 #include <cuopt/error.hpp>
 
-#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <unordered_set>
@@ -250,19 +249,6 @@ std::vector<rank_data_t<i_t, f_t>> create_rank_data_from_parts(
   return rank_data;
 }
 
-namespace {
-
-template <typename i_t, typename index_t>
-std::vector<i_t> narrow_vector(const std::vector<index_t>& src)
-{
-  std::vector<i_t> dst(src.size());
-  std::transform(
-    src.begin(), src.end(), dst.begin(), [](index_t v) { return static_cast<i_t>(v); });
-  return dst;
-}
-
-}  // namespace
-
 template <typename i_t, typename index_t, typename f_t>
 std::vector<rank_data_t<i_t, f_t>> narrow_rank_data(std::vector<rank_data_t<index_t, f_t>>&& wide)
 {
@@ -296,17 +282,24 @@ std::vector<rank_data_t<i_t, f_t>> narrow_rank_data(std::vector<rank_data_t<inde
     dst.owned_cstr_size = static_cast<i_t>(src.owned_cstr_size);
     dst.total_cstr_size = static_cast<i_t>(src.total_cstr_size);
 
-    dst.owned_var_indices  = narrow_vector<i_t>(src.owned_var_indices);
-    dst.owned_cstr_indices = narrow_vector<i_t>(src.owned_cstr_indices);
+    dst.owned_var_indices =
+      std::vector<i_t>(src.owned_var_indices.begin(), src.owned_var_indices.end());
+    dst.owned_cstr_indices =
+      std::vector<i_t>(src.owned_cstr_indices.begin(), src.owned_cstr_indices.end());
 
     for (std::size_t peer = 0; peer < nb_parts; ++peer) {
-      dst.var_send_per_peer[peer]  = narrow_vector<i_t>(src.var_send_per_peer[peer]);
-      dst.cstr_send_per_peer[peer] = narrow_vector<i_t>(src.cstr_send_per_peer[peer]);
+      dst.var_send_per_peer[peer] =
+        std::vector<i_t>(src.var_send_per_peer[peer].begin(), src.var_send_per_peer[peer].end());
+      dst.cstr_send_per_peer[peer] =
+        std::vector<i_t>(src.cstr_send_per_peer[peer].begin(), src.cstr_send_per_peer[peer].end());
     }
-    dst.var_recv_counts   = narrow_vector<i_t>(src.var_recv_counts);
-    dst.var_recv_offsets  = narrow_vector<i_t>(src.var_recv_offsets);
-    dst.cstr_recv_counts  = narrow_vector<i_t>(src.cstr_recv_counts);
-    dst.cstr_recv_offsets = narrow_vector<i_t>(src.cstr_recv_offsets);
+    dst.var_recv_counts = std::vector<i_t>(src.var_recv_counts.begin(), src.var_recv_counts.end());
+    dst.var_recv_offsets =
+      std::vector<i_t>(src.var_recv_offsets.begin(), src.var_recv_offsets.end());
+    dst.cstr_recv_counts =
+      std::vector<i_t>(src.cstr_recv_counts.begin(), src.cstr_recv_counts.end());
+    dst.cstr_recv_offsets =
+      std::vector<i_t>(src.cstr_recv_offsets.begin(), src.cstr_recv_offsets.end());
 
     dst.global_to_local_var.reserve(src.global_to_local_var.size());
     for (const auto& [global_id, local_id] : src.global_to_local_var) {
@@ -316,16 +309,20 @@ std::vector<rank_data_t<i_t, f_t>> narrow_rank_data(std::vector<rank_data_t<inde
     for (const auto& [global_id, local_id] : src.global_to_local_cstr) {
       dst.global_to_local_cstr.emplace(static_cast<i_t>(global_id), static_cast<i_t>(local_id));
     }
-    dst.local_to_global_var  = narrow_vector<i_t>(src.local_to_global_var);
-    dst.local_to_global_cstr = narrow_vector<i_t>(src.local_to_global_cstr);
+    dst.local_to_global_var =
+      std::vector<i_t>(src.local_to_global_var.begin(), src.local_to_global_var.end());
+    dst.local_to_global_cstr =
+      std::vector<i_t>(src.local_to_global_cstr.begin(), src.local_to_global_cstr.end());
 
-    dst.h_A_row_offsets = narrow_vector<i_t>(src.h_A_row_offsets);
-    dst.h_A_col_indices = narrow_vector<i_t>(src.h_A_col_indices);
+    dst.h_A_row_offsets = std::vector<i_t>(src.h_A_row_offsets.begin(), src.h_A_row_offsets.end());
+    dst.h_A_col_indices = std::vector<i_t>(src.h_A_col_indices.begin(), src.h_A_col_indices.end());
     // Same f_t on both sides: move rather than copy, this is the bulk of the bytes.
-    dst.h_A_values        = std::move(src.h_A_values);
-    dst.h_A_t_row_offsets = narrow_vector<i_t>(src.h_A_t_row_offsets);
-    dst.h_A_t_col_indices = narrow_vector<i_t>(src.h_A_t_col_indices);
-    dst.h_A_t_values      = std::move(src.h_A_t_values);
+    dst.h_A_values = std::move(src.h_A_values);
+    dst.h_A_t_row_offsets =
+      std::vector<i_t>(src.h_A_t_row_offsets.begin(), src.h_A_t_row_offsets.end());
+    dst.h_A_t_col_indices =
+      std::vector<i_t>(src.h_A_t_col_indices.begin(), src.h_A_t_col_indices.end());
+    dst.h_A_t_values = std::move(src.h_A_t_values);
 
     narrow.push_back(std::move(dst));
     // Release the wide shard as we go so both representations are never fully live at once.
