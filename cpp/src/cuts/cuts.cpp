@@ -1000,11 +1000,6 @@ void extend_to_odd_wheel(const std::vector<i_t>& cycle_vertices,
 
 }  // namespace
 
-template <typename i_t, typename f_t>
-bool rational_coefficients(const std::vector<variable_type_t>& var_types,
-                           const inequality_t<i_t, f_t>& inequality,
-                           inequality_t<i_t, f_t>& rational_inequality);
-
 int64_t gcd(const std::vector<int64_t>& integers);
 
 int64_t lcm(const std::vector<int64_t>& integers);
@@ -1605,7 +1600,14 @@ knapsack_generation_t<i_t, f_t>::knapsack_generation_t(
   for (i_t i = 0; i < lp.num_rows; i++) {
     inequality_t<i_t, f_t> inequality(Arow, i, lp.rhs[i]);
     inequality_t<i_t, f_t> rational_inequality = inequality;
-    if (!rational_coefficients(var_types, inequality, rational_inequality)) { continue; }
+    if (!rational_coefficients(var_types,
+                               lp.lower,
+                               lp.upper,
+                               inequality_sense_t::LESS_EQUAL,
+                               inequality,
+                               rational_inequality)) {
+      continue;
+    }
     inequality = rational_inequality;
 
     const i_t row_len = rational_inequality.size();
@@ -2575,13 +2577,22 @@ i_t knapsack_generation_t<i_t, f_t>::generate_knapsack_cut(
   // Get the row associated with the knapsack constraint
   inequality_t<i_t, f_t> knapsack_inequality(Arow, knapsack_row, lp.rhs[knapsack_row]);
   inequality_t<i_t, f_t> rational_knapsack_inequality = knapsack_inequality;
-  if (!rational_coefficients(var_types, knapsack_inequality, rational_knapsack_inequality)) {
+  if (!rational_coefficients(var_types,
+                             lp.lower,
+                             lp.upper,
+                             inequality_sense_t::LESS_EQUAL,
+                             knapsack_inequality,
+                             rational_knapsack_inequality)) {
     return -1;
   }
   knapsack_inequality = rational_knapsack_inequality;
 
-  // Given the following knapsack constraint:
-  // sum_j a_j x_j <= beta
+  // Given the following knapsack constraint with integer weights a_j and a real
+  // capacity beta:
+  // sum_j a_j * x_j <= beta
+  //
+  // The weight of a set C is given by C_w = sum_{j in C} a_j.
+  // C is a cover if C_w > beta.
   //
   // We solve the following separation problem:
   // minimize   sum_j (1 - xstar_j) z_j
@@ -2589,13 +2600,36 @@ i_t knapsack_generation_t<i_t, f_t>::generate_knapsack_cut(
   //            z_j in {0, 1}
   // When z_j = 1, then j is in the cover.
   // Let phi_star be the optimal objective of this problem.
-  // We have a violated cover when phi_star < 1.0
+  // We have a violated cover when phi_star < 1.0.
   //
-  // We convert this problem into a 0-1 knapsack problem
-  // maximize     sum_j (1 - xstar_j) zbar_j
-  // subject to   sum_j a_j zbar_j <= sum_j a_j - (beta + 1)
+  // Let W = sum_j a_j be the total weight. We have
+  //
+  //   W = C_w + sum_{j not in C} a_j,
+  //
+  // so the cover condition is
+  //
+  //   C_w = W - sum_{j not in C} a_j > beta.
+  //
+  // In order for this separation problem to be a 0-1 knapsack problem, we must
+  // replace the strict greater-than (>) inequality with a greater-than-or-equal
+  // (>=) inequality.
+  // Since the weights are integers, C_w is also an integer.
+  // The smallest integer strictly greater than beta is floor(beta) + 1.
+  // For example, beta = 3 and beta = 3.2 both require a cover weight of at least 4.
+  // Thus the cover condition is equivalent to
+  //
+  //   C_w = W - sum_{j not in C} a_j >= floor(beta) + 1.
+  //
+  // Rearranging gives
+  //
+  //   sum_{j not in C} a_j <= W - (floor(beta) + 1).
+  //
+  // Let zbar_j = 1 - z_j. Then sum_j a_j * zbar_j = sum_{j not in C} a_j,
+  // so we obtain the following 0-1 knapsack problem:
+  // maximize   sum_j (1 - xstar_j) zbar_j
+  // subject to sum_j a_j zbar_j <= W - (floor(beta) + 1)
   //            zbar_j in {0, 1}
-  // where zbar_j = 1 - z_j
+  //
   // This problem is in the form of a 0-1 knapsack problem
   // which we can solve with dynamic programming or generate
   // a heuristic solution with a greedy algorithm.
@@ -2622,7 +2656,8 @@ i_t knapsack_generation_t<i_t, f_t>::generate_knapsack_cut(
     }
   }
   if (verbose) { settings.log.printf(" <= %g\n", knapsack_inequality.rhs); }
-  seperation_rhs -= (knapsack_inequality.rhs + 1);
+  // seperation_rhs currently contains W.
+  seperation_rhs -= (std::floor(knapsack_inequality.rhs) + 1.0);
 
   if (verbose) {
     settings.log.printf("\t");
@@ -2637,7 +2672,7 @@ i_t knapsack_generation_t<i_t, f_t>::generate_knapsack_cut(
     settings.log.printf("seperation_rhs %g\n", seperation_rhs);
   }
 
-  if (seperation_rhs <= 0.0) {
+  if (seperation_rhs < 0.0) {
     restore_complemented(complemented_variables);
     return -1;
   }
@@ -2651,6 +2686,7 @@ i_t knapsack_generation_t<i_t, f_t>::generate_knapsack_cut(
   f_t objective_constant = 0.0;
   std::vector<i_t> fixed_variables;
   std::vector<f_t> fixed_values;
+  std::vector<f_t> fixed_weights;
   const f_t x_tol = 1e-5;
   for (i_t k = 0; k < knapsack_inequality.size(); k++) {
     const i_t j = knapsack_inequality.index(k);
@@ -2662,6 +2698,7 @@ i_t knapsack_generation_t<i_t, f_t>::generate_knapsack_cut(
         // if xstar_j is close to 0, then we can fix z to zero
         fixed_variables.push_back(j);
         fixed_values.push_back(0.0);
+        fixed_weights.push_back(knapsack_inequality.vector.x[k]);
         seperation_rhs -= knapsack_inequality.vector.x[k];
         // No need to adjust the objective constant
         continue;
@@ -2670,6 +2707,7 @@ i_t knapsack_generation_t<i_t, f_t>::generate_knapsack_cut(
         // if xstar_j is close to 1, then we can fix z to 1
         fixed_variables.push_back(j);
         fixed_values.push_back(1.0);
+        fixed_weights.push_back(knapsack_inequality.vector.x[k]);
         // Note seperation rhs is unchanged
         objective_constant += vj;
         continue;
@@ -2683,7 +2721,7 @@ i_t knapsack_generation_t<i_t, f_t>::generate_knapsack_cut(
   std::vector<f_t> solution;
   solution.resize(values.size());
 
-  if (seperation_rhs <= 0.0) {
+  if (seperation_rhs < 0.0) {
     restore_complemented(complemented_variables);
     return -1;
   }
@@ -2711,12 +2749,27 @@ i_t knapsack_generation_t<i_t, f_t>::generate_knapsack_cut(
     return -1;
   }
 
-  i_t cover_size = 0;
+  i_t cover_size   = 0;
+  f_t cover_weight = 0.0;
   for (i_t k = 0; k < solution.size(); k++) {
-    if (solution[k] == 0.0) { cover_size++; }
+    if (solution[k] == 0.0) {
+      cover_size++;
+      cover_weight += weights[k];
+    }
   }
   for (i_t k = 0; k < fixed_values.size(); k++) {
-    if (fixed_values[k] == 1.0) { cover_size++; }
+    if (fixed_values[k] == 1.0) {
+      cover_size++;
+      cover_weight += fixed_weights[k];
+    }
+  }
+
+  // sum_{j in C} a_j > beta is what makes sum_{j in C} x_j <= |C| - 1 valid.
+  const bool is_cover = cover_weight > knapsack_inequality.rhs;
+  cuopt_assert(is_cover, "knapsack separation produced a set that is not a cover");
+  if (!is_cover) {
+    restore_complemented(complemented_variables);
+    return -1;
   }
 
   cut.reserve(cover_size);
@@ -2886,6 +2939,8 @@ void knapsack_generation_t<i_t, f_t>::minimal_cover_and_partition(
       continue;
     }
   }
+
+  cuopt_assert(cover_sum > beta, "minimal cover reduction dropped an item the cover needed");
 
   // Go through and correct cover_indicies and cover_coefficients
   for (i_t k = 0; k < cover_coefficients.size();) {
@@ -3220,7 +3275,10 @@ f_t knapsack_generation_t<i_t, f_t>::solve_knapsack_problem(const std::vector<f_
 
   solution.assign(n, 0.0);
 
-  // dp(j, v) = minimum weight using first j items to get value v
+  // dp(j, v) = minimum weight using first j items to get value v.
+  // The weights are rounded up: rounding one down would let the dynamic programming algorithm
+  // return a set that violates the capacity, and the caller reads the complement of that set
+  // as a cover.
   dense_matrix_t<i_t, i_t> dp(n + 1, sum_value + 1, INT_INF);
   dense_matrix_t<i_t, uint8_t> take(n + 1, sum_value + 1, 0);
   dp(0, 0) = 0;
@@ -3233,8 +3291,7 @@ f_t knapsack_generation_t<i_t, f_t>::solve_knapsack_problem(const std::vector<f_
 
       // Take item j-1 if possible
       if (v >= scaled_values[j - 1]) {
-        i_t candidate =
-          dp(j - 1, v - scaled_values[j - 1]) + static_cast<i_t>(std::floor(weights[j - 1]));
+        i_t candidate = dp(j - 1, v - scaled_values[j - 1]) + std::ceil(weights[j - 1]);
         if (candidate < dp(j, v)) {
           dp(j, v)   = candidate;
           take(j, v) = 1;
@@ -3259,6 +3316,15 @@ f_t knapsack_generation_t<i_t, f_t>::solve_knapsack_problem(const std::vector<f_
       solution[j - 1] = 0.0;
     }
   }
+
+#ifdef ASSERT_MODE
+  f_t selected_weight = 0.0;
+  for (i_t j = 0; j < n; ++j) {
+    selected_weight += solution[j] * weights[j];
+  }
+  cuopt_assert(selected_weight <= rhs + settings_.primal_tol,
+               "knapsack dynamic program returned a solution over capacity");
+#endif
 
   objective = best_value * scale;
   return objective;
@@ -4464,8 +4530,14 @@ void cut_generation_t<i_t, f_t>::generate_mir_cuts(
       work_estimate += transformed_inequality.size();
 
       inequality_t<i_t, f_t> cut;
-      bool cut_found = complemented_mir.cut_generation_heuristic(
-        transformed_inequality, var_types, transformed_xstar, cut, work_estimate);
+      bool cut_found = complemented_mir.cut_generation_heuristic(transformed_inequality,
+                                                                 var_types,
+                                                                 transformed_xstar,
+                                                                 cut,
+                                                                 work_estimate,
+                                                                 start_time,
+                                                                 settings.time_limit);
+      if (toc(start_time) >= settings.time_limit) { return; }
       // Note cut is in the transformed variables
 
       if (cut_found) {
@@ -4664,7 +4736,10 @@ void cut_generation_t<i_t, f_t>::generate_gomory_cuts(
       complemented_mir.remove_small_coefficients(lp.lower, lp.upper, cut_A_float);
 
       inequality_t<i_t, f_t> cut_A(lp.num_cols);
-      if (cut_ok) { cut_ok = rational_coefficients(var_types, cut_A_float, cut_A); }
+      if (cut_ok) {
+        cut_ok = rational_coefficients(
+          var_types, lp.lower, lp.upper, inequality_sense_t::GREATER_EQUAL, cut_A_float, cut_A);
+      }
 
       // See if the inequality is violated by the original relaxation solution
       f_t cut_A_violation = complemented_mir.compute_violation(cut_A, xstar);
@@ -4701,7 +4776,10 @@ void cut_generation_t<i_t, f_t>::generate_gomory_cuts(
       complemented_mir.remove_small_coefficients(lp.lower, lp.upper, cut_B_float);
 
       inequality_t<i_t, f_t> cut_B(lp.num_cols);
-      if (cut_ok) { cut_ok = rational_coefficients(var_types, cut_B_float, cut_B); }
+      if (cut_ok) {
+        cut_ok = rational_coefficients(
+          var_types, lp.lower, lp.upper, inequality_sense_t::GREATER_EQUAL, cut_B_float, cut_B);
+      }
 
       bool B_valid        = false;
       f_t cut_B_distance  = 0.0;
@@ -4882,6 +4960,9 @@ i_t tableau_equality_t<i_t, f_t>::generate_base_equality(
 
 template <typename i_t, typename f_t>
 bool rational_coefficients(const std::vector<variable_type_t>& var_types,
+                           const std::vector<f_t>& lower_bounds,
+                           const std::vector<f_t>& upper_bounds,
+                           inequality_sense_t sense,
                            const inequality_t<i_t, f_t>& input_inequality,
                            inequality_t<i_t, f_t>& rational_inequality)
 {
@@ -4909,12 +4990,35 @@ bool rational_coefficients(const std::vector<variable_type_t>& var_types,
   int64_t lcm_denominators = lcm(denominators);
 
   f_t scalar = static_cast<f_t>(lcm_denominators) / static_cast<f_t>(gcd_numerators);
-  if (scalar < 0) { return false; }
-  if (std::abs(scalar) > 1000) { return false; }
+  if (!std::isfinite(scalar) || scalar <= 0.0 || scalar > 1000.0) { return false; }
 
+  // The scaled product can land an ulp off the integer it represents.
   rational_inequality.scale(scalar);
 
-  return true;
+  // Suppose sum_j a_j * x_j <= beta, and we compute a scaling s such that
+  // A_j = s*a_j + delta_j, with A_j integer. Here delta_j is the error when
+  // rationalizing the coefficient. We modify the rhs of the inequality as
+  // follows to account for this error. We then have
+  // sum_j A_j * x_j <= s*beta
+  //                   + sum_{j : delta_j > 0} delta_j * u_j
+  //                   + sum_{j : delta_j < 0} delta_j * l_j.
+  // For a >= inequality, exchange the upper and lower bounds.
+  const i_t sz = indices.size();
+  for (i_t k = 0; k < sz; k++) {
+    const i_t index = indices[k];
+    const i_t j     = input_inequality.index(index);
+    const f_t coeff = input_inequality.coeff(index);
+    const f_t delta = rational_inequality.coeff(index) - scalar * coeff;
+    if (delta == 0.0) { continue; }
+
+    const bool use_upper_bound =
+      sense == inequality_sense_t::LESS_EQUAL ? delta > 0.0 : delta < 0.0;
+    const f_t bound = use_upper_bound ? upper_bounds[j] : lower_bounds[j];
+    if (!std::isfinite(bound)) { return false; }
+    rational_inequality.rhs += delta * bound;
+  }
+
+  return std::isfinite(rational_inequality.rhs);
 }
 
 int64_t gcd(const std::vector<int64_t>& integers)
@@ -5311,7 +5415,9 @@ bool complemented_mixed_integer_rounding_cut_t<i_t, f_t>::cut_generation_heurist
   const std::vector<variable_type_t>& var_types,
   const std::vector<f_t>& transformed_xstar,
   inequality_t<i_t, f_t>& transformed_cut,
-  f_t& work_estimate)
+  f_t& work_estimate,
+  f_t start_time,
+  f_t time_limit)
 {
   std::vector<f_t> deltas_to_try;
   deltas_to_try.reserve(transformed_inequality.size());
@@ -5370,8 +5476,17 @@ bool complemented_mixed_integer_rounding_cut_t<i_t, f_t>::cut_generation_heurist
   f_t delta          = 0.0;
   f_t best_violation = 0.0;
 
+  // Dense rows can spend minutes in these candidate searches. Poll in batches to
+  // avoid a clock read for every candidate.
+  constexpr size_t time_check_interval = 64;
+  size_t candidates                    = 0;
+  const auto time_limit_reached        = [&]() {
+    return candidates++ % time_check_interval == 0 && toc(start_time) >= time_limit;
+  };
+
   // First try without any complementation
   for (const f_t tmp_delta : deltas_to_try) {
+    if (time_limit_reached()) { return false; }
     bool cut_ok = scale_uncomplement_and_generate_cut(var_types,
                                                       transformed_xstar,
                                                       complemented_indices,
@@ -5413,6 +5528,7 @@ bool complemented_mixed_integer_rounding_cut_t<i_t, f_t>::cut_generation_heurist
       complemented_indices.push_back(l);
 
       for (const f_t tmp_delta : deltas_to_try) {
+        if (time_limit_reached()) { return false; }
         bool cut_ok = scale_uncomplement_and_generate_cut(var_types,
                                                           transformed_xstar,
                                                           complemented_indices,
@@ -5467,6 +5583,7 @@ bool complemented_mixed_integer_rounding_cut_t<i_t, f_t>::cut_generation_heurist
   work_estimate += 4 * transformed_inequality.size();
   complemented_indices.clear();
   for (const i_t idx : perm) {
+    if (time_limit_reached()) { return false; }
     const i_t l = integer_indices[idx];
     const i_t j = complemented_inequality.index(l);
     // We have an integer variable x_j <= b_j
@@ -6946,6 +7063,13 @@ template class flow_cover_generation_t<int, double>;
 template class tableau_equality_t<int, double>;
 template class complemented_mixed_integer_rounding_cut_t<int, double>;
 template class variable_bounds_t<int, double>;
+
+template bool rational_coefficients<int, double>(const std::vector<variable_type_t>& var_types,
+                                                 const std::vector<double>& lower_bounds,
+                                                 const std::vector<double>& upper_bounds,
+                                                 inequality_sense_t sense,
+                                                 const inequality_t<int, double>& inequality,
+                                                 inequality_t<int, double>& rational_inequality);
 
 template int add_cuts(const simplex_solver_settings_t<int, double>& settings,
                       const csr_matrix_t<int, double>& cuts,

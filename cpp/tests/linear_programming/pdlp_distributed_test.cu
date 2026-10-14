@@ -5,7 +5,7 @@
  */
 /* clang-format on */
 
-// Multi-GPU distributed PDLP parity tests.
+// Multi-GPU PDLP parity tests.
 // Binary name PDLP_MG_TEST matches the *_MG_TEST glob in ci/test_cpp_multi_gpu.sh.
 
 #include "utilities/pdlp_test_utilities.cuh"
@@ -29,8 +29,8 @@
 
 namespace cuopt::mathematical_optimization::test {
 
-// Solve `mps_rel_path` with the single-GPU PDLP ("base") and with distributed PDLP
-// (num_gpus = -1 selects all visible devices), then assert the distributed run is:
+// Solve `mps_rel_path` with the single-GPU PDLP ("base") and with multi-GPU PDLP
+// (num_gpus = -1 selects all visible devices), then assert the multi-GPU run is:
 //   - optimal (same status as base),
 //   - within a loose relative tolerance of base on primal/dual objective and step count.
 static void expect_distributed_matches_base(raft::handle_t const& handle,
@@ -48,8 +48,6 @@ static void expect_distributed_matches_base(raft::handle_t const& handle,
 
   pdlp_solver_settings_t<int, double> base_settings{};
   base_settings.method = method_t::PDLP;
-  // Curtis-Reid scaling is not supported yet for multi-GPU.
-  base_settings.hyper_params.do_curtis_reid_scaling = false;
 
   auto base_op = mps_data_model_to_optimization_problem<int, double>(&handle, problem);
   auto base    = solve_lp(base_op, base_settings);
@@ -107,7 +105,7 @@ TEST_P(DistributedPdlpParityTest, matches_base)
 }
 
 // Same instances through the public C API: cuOptReadProblem materializes a GPU
-// optimization_problem_t, then cuOptSolve must dispatch to distributed PDLP
+// optimization_problem_t, then cuOptSolve must dispatch to multi-GPU PDLP
 // when method=PDLP and num_gpus=-1.
 struct c_api_lp_result_t {
   cuopt_int_t solve_status{CUOPT_RUNTIME_ERROR};
