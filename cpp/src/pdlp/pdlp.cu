@@ -539,21 +539,20 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(
     std::chrono::duration<double>(std::chrono::steady_clock::now() - partition_start).count());
 
   // ----- 4. Build per-rank data -----
-  // narrow_rank_data converts the index_t to i_t if necessary, no-op otherwise
   CUOPT_LOG_INFO("Loading sub-problems on %d GPUs", distributed_pdlp_num_gpus);
   const auto shards_start = std::chrono::steady_clock::now();
-  std::vector<rank_data_t<i_t, f_t>> sub_pdlp_rank_data = narrow_rank_data<i_t, index_t, f_t>(
-    create_rank_data_from_parts<index_t, f_t>(parts,
-                                              h_A_row_offsets,
-                                              h_A_col_indices,
-                                              h_A_values,
-                                              h_A_t_row_offsets,
-                                              h_A_t_col_indices,
-                                              h_A_t_values,
-                                              settings.num_gpus,
-                                              n_cstr,
-                                              n_vars,
-                                              nnz));
+  std::vector<rank_data_t<i_t, f_t>> sub_pdlp_rank_data =
+    create_rank_data_from_parts<i_t, index_t, f_t>(parts,
+                                                   h_A_row_offsets,
+                                                   h_A_col_indices,
+                                                   h_A_values,
+                                                   h_A_t_row_offsets,
+                                                   h_A_t_col_indices,
+                                                   h_A_t_values,
+                                                   settings.num_gpus,
+                                                   n_cstr,
+                                                   n_vars,
+                                                   nnz);
 
   // ----- 5. Per-shard settings -----
   pdlp_solver_settings_t<i_t, f_t> sub_pdlp_settings = settings;

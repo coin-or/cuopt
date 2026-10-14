@@ -7,6 +7,7 @@
 
 #include <cuopt/error.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <unordered_set>
@@ -14,19 +15,19 @@
 
 namespace cuopt::mathematical_optimization::pdlp {
 
-template <typename i_t, typename f_t>
+template <typename i_t, typename index_t, typename f_t>
 std::vector<rank_data_t<i_t, f_t>> create_rank_data_from_parts(
   const std::vector<int>& parts,
-  const std::vector<i_t>& A_row_offsets,
-  const std::vector<i_t>& A_col_indices,
+  const std::vector<index_t>& A_row_offsets,
+  const std::vector<index_t>& A_col_indices,
   const std::vector<f_t>& A_values,
-  const std::vector<i_t>& A_t_row_offsets,
-  const std::vector<i_t>& A_t_col_indices,
+  const std::vector<index_t>& A_t_row_offsets,
+  const std::vector<index_t>& A_t_col_indices,
   const std::vector<f_t>& A_t_values,
-  i_t nb_parts,
+  int nb_parts,
   i_t nb_cstr,
   i_t nb_vars,
-  i_t nnz)
+  index_t nnz)
 {
   std::vector<rank_data_t<i_t, f_t>> rank_data(nb_parts, rank_data_t<i_t, f_t>(nb_parts));
   cuopt_expects(static_cast<i_t>(parts.size()) == nb_cstr + nb_vars,
@@ -39,8 +40,8 @@ std::vector<rank_data_t<i_t, f_t>> create_rank_data_from_parts(
 
   std::vector<i_t> owned_cstr_counts(nb_parts, 0);
   std::vector<i_t> owned_var_counts(nb_parts, 0);
-  std::vector<i_t> owned_A_nnz(nb_parts, 0);
-  std::vector<i_t> owned_A_t_nnz(nb_parts, 0);
+  std::vector<index_t> owned_A_nnz(nb_parts, 0);
+  std::vector<index_t> owned_A_t_nnz(nb_parts, 0);
 
   // Pre-count ownership and nnz to reserve exact capacities and avoid
   // repeated growth/reallocation across huge vectors.
@@ -54,6 +55,13 @@ std::vector<rank_data_t<i_t, f_t>> create_rank_data_from_parts(
     ++owned_var_counts[owner];
     owned_A_t_nnz[owner] += (A_t_row_offsets[j + 1] - A_t_row_offsets[j]);
   }
+
+  constexpr index_t max_i_t = static_cast<index_t>(std::numeric_limits<i_t>::max());
+  const auto overflows = [max_i_t](index_t nnz) { return nnz > max_i_t; };
+  cuopt_expects(std::none_of(owned_A_nnz.begin(), owned_A_nnz.end(), overflows) &&
+                  std::none_of(owned_A_t_nnz.begin(), owned_A_t_nnz.end(), overflows),
+                error_type_t::ValidationError,
+                "A shard holds too many nonzeros for a 32-bit local index; increase num_gpus");
   // Reserve exact capacities
   for (i_t rank = 0; rank < nb_parts; ++rank) {
     rank_data[rank].owned_cstr_indices.reserve(owned_cstr_counts[rank]);
@@ -89,7 +97,7 @@ std::vector<rank_data_t<i_t, f_t>> create_rank_data_from_parts(
     // Keep the same indices here but re-order later
     for (auto owned_cstr : rd.owned_cstr_indices) {
       i_t cstr_len  = A_row_offsets[owned_cstr + 1] - A_row_offsets[owned_cstr];
-      i_t row_start = A_row_offsets[owned_cstr];
+      index_t row_start = A_row_offsets[owned_cstr];
       local_A_col_indices.insert(local_A_col_indices.end(),
                                  A_col_indices.begin() + row_start,
                                  A_col_indices.begin() + row_start + cstr_len);
@@ -139,7 +147,7 @@ std::vector<rank_data_t<i_t, f_t>> create_rank_data_from_parts(
 
     for (auto owned_var : rd.owned_var_indices) {
       i_t var_len   = A_t_row_offsets[owned_var + 1] - A_t_row_offsets[owned_var];
-      i_t row_start = A_t_row_offsets[owned_var];
+      index_t row_start = A_t_row_offsets[owned_var];
       local_A_t_col_indices.insert(local_A_t_col_indices.end(),
                                    A_t_col_indices.begin() + row_start,
                                    A_t_col_indices.begin() + row_start + var_len);
@@ -249,90 +257,7 @@ std::vector<rank_data_t<i_t, f_t>> create_rank_data_from_parts(
   return rank_data;
 }
 
-template <typename i_t, typename index_t, typename f_t>
-std::vector<rank_data_t<i_t, f_t>> narrow_rank_data(std::vector<rank_data_t<index_t, f_t>>&& wide)
-{
-  if constexpr (std::is_same_v<i_t, index_t>) {
-    return std::move(wide);
-  }
-  constexpr index_t max_i_t = static_cast<index_t>(std::numeric_limits<i_t>::max());
-
-  std::vector<rank_data_t<i_t, f_t>> narrow;
-  narrow.reserve(wide.size());
-
-  for (std::size_t rank = 0; rank < wide.size(); ++rank) {
-    auto& src                  = wide[rank];
-    const std::size_t nb_parts = src.var_send_per_peer.size();
-
-    // Column indices have already been remapped to shard-local ids, so they are bounded by
-    // total_var_size / total_cstr_size and cannot overflow. Only the row offsets can: their
-    // last entry is this shard's nonzero count, which is what the partition has to keep
-    // inside i_t for the per-GPU solvers to be 32-bit.
-    const index_t a_nnz = src.h_A_row_offsets.empty() ? index_t{0} : src.h_A_row_offsets.back();
-    const index_t a_t_nnz =
-      src.h_A_t_row_offsets.empty() ? index_t{0} : src.h_A_t_row_offsets.back();
-    cuopt_expects(a_nnz <= max_i_t && a_t_nnz <= max_i_t,
-                  error_type_t::ValidationError,
-                  "Shard %d holds too many nonzeros for a 32-bit local index; increase num_gpus",
-                  static_cast<int>(rank));
-
-    rank_data_t<i_t, f_t> dst(nb_parts);
-    dst.owned_var_size  = static_cast<i_t>(src.owned_var_size);
-    dst.total_var_size  = static_cast<i_t>(src.total_var_size);
-    dst.owned_cstr_size = static_cast<i_t>(src.owned_cstr_size);
-    dst.total_cstr_size = static_cast<i_t>(src.total_cstr_size);
-
-    dst.owned_var_indices =
-      std::vector<i_t>(src.owned_var_indices.begin(), src.owned_var_indices.end());
-    dst.owned_cstr_indices =
-      std::vector<i_t>(src.owned_cstr_indices.begin(), src.owned_cstr_indices.end());
-
-    for (std::size_t peer = 0; peer < nb_parts; ++peer) {
-      dst.var_send_per_peer[peer] =
-        std::vector<i_t>(src.var_send_per_peer[peer].begin(), src.var_send_per_peer[peer].end());
-      dst.cstr_send_per_peer[peer] =
-        std::vector<i_t>(src.cstr_send_per_peer[peer].begin(), src.cstr_send_per_peer[peer].end());
-    }
-    dst.var_recv_counts = std::vector<i_t>(src.var_recv_counts.begin(), src.var_recv_counts.end());
-    dst.var_recv_offsets =
-      std::vector<i_t>(src.var_recv_offsets.begin(), src.var_recv_offsets.end());
-    dst.cstr_recv_counts =
-      std::vector<i_t>(src.cstr_recv_counts.begin(), src.cstr_recv_counts.end());
-    dst.cstr_recv_offsets =
-      std::vector<i_t>(src.cstr_recv_offsets.begin(), src.cstr_recv_offsets.end());
-
-    dst.global_to_local_var.reserve(src.global_to_local_var.size());
-    for (const auto& [global_id, local_id] : src.global_to_local_var) {
-      dst.global_to_local_var.emplace(static_cast<i_t>(global_id), static_cast<i_t>(local_id));
-    }
-    dst.global_to_local_cstr.reserve(src.global_to_local_cstr.size());
-    for (const auto& [global_id, local_id] : src.global_to_local_cstr) {
-      dst.global_to_local_cstr.emplace(static_cast<i_t>(global_id), static_cast<i_t>(local_id));
-    }
-    dst.local_to_global_var =
-      std::vector<i_t>(src.local_to_global_var.begin(), src.local_to_global_var.end());
-    dst.local_to_global_cstr =
-      std::vector<i_t>(src.local_to_global_cstr.begin(), src.local_to_global_cstr.end());
-
-    dst.h_A_row_offsets = std::vector<i_t>(src.h_A_row_offsets.begin(), src.h_A_row_offsets.end());
-    dst.h_A_col_indices = std::vector<i_t>(src.h_A_col_indices.begin(), src.h_A_col_indices.end());
-    // Same f_t on both sides: move rather than copy, this is the bulk of the bytes.
-    dst.h_A_values = std::move(src.h_A_values);
-    dst.h_A_t_row_offsets =
-      std::vector<i_t>(src.h_A_t_row_offsets.begin(), src.h_A_t_row_offsets.end());
-    dst.h_A_t_col_indices =
-      std::vector<i_t>(src.h_A_t_col_indices.begin(), src.h_A_t_col_indices.end());
-    dst.h_A_t_values = std::move(src.h_A_t_values);
-
-    narrow.push_back(std::move(dst));
-    // Release the wide shard as we go so both representations are never fully live at once.
-    src = rank_data_t<index_t, f_t>(0);
-  }
-
-  return narrow;
-}
-
-template std::vector<rank_data_t<int, double>> create_rank_data_from_parts<int, double>(
+template std::vector<rank_data_t<int, double>> create_rank_data_from_parts<int, int, double>(
   const std::vector<int>& parts,
   const std::vector<int>& A_row_offsets,
   const std::vector<int>& A_col_indices,
@@ -345,7 +270,7 @@ template std::vector<rank_data_t<int, double>> create_rank_data_from_parts<int, 
   int nb_vars,
   int nnz);
 
-template std::vector<rank_data_t<int64_t, double>> create_rank_data_from_parts<int64_t, double>(
+template std::vector<rank_data_t<int, double>> create_rank_data_from_parts<int, int64_t, double>(
   const std::vector<int>& parts,
   const std::vector<int64_t>& A_row_offsets,
   const std::vector<int64_t>& A_col_indices,
@@ -353,14 +278,9 @@ template std::vector<rank_data_t<int64_t, double>> create_rank_data_from_parts<i
   const std::vector<int64_t>& A_t_row_offsets,
   const std::vector<int64_t>& A_t_col_indices,
   const std::vector<double>& A_t_values,
-  int64_t nb_parts,
-  int64_t nb_cstr,
-  int64_t nb_vars,
+  int nb_parts,
+  int nb_cstr,
+  int nb_vars,
   int64_t nnz);
-
-template std::vector<rank_data_t<int, double>> narrow_rank_data<int, int, double>(
-  std::vector<rank_data_t<int, double>>&&);
-template std::vector<rank_data_t<int, double>> narrow_rank_data<int, int64_t, double>(
-  std::vector<rank_data_t<int64_t, double>>&&);
 
 }  // namespace cuopt::mathematical_optimization::pdlp
