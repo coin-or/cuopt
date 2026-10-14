@@ -51,6 +51,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <optional>
 #include <tuple>
@@ -530,10 +531,17 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(
     : (kind == partitioner_kind_t::KaMinPar) ? "kaminpar"
                                              : "unknown");
   auto partitioner = make_partitioner<index_t, f_t>(kind);
-  parts            = partitioner->partition(partition_input);
+  CUOPT_LOG_INFO("Partitioning dependency graph of the Linear Problem");
+  const auto partition_start = std::chrono::steady_clock::now();
+  parts                      = partitioner->partition(partition_input);
+  CUOPT_LOG_INFO(
+    "Partitioned in %.3fs",
+    std::chrono::duration<double>(std::chrono::steady_clock::now() - partition_start).count());
 
   // ----- 4. Build per-rank data -----
   // narrow_rank_data converts the index_t to i_t if necessary, no-op otherwise
+  CUOPT_LOG_INFO("Loading sub-problems on %d GPUs", distributed_pdlp_num_gpus);
+  const auto shards_start = std::chrono::steady_clock::now();
   std::vector<rank_data_t<i_t, f_t>> sub_pdlp_rank_data = narrow_rank_data<i_t, index_t, f_t>(
     create_rank_data_from_parts<index_t, f_t>(parts,
                                               h_A_row_offsets,
@@ -560,6 +568,9 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(
 
   // ----- 6. Construct the engine: NCCL comms + per-shard pdlp_solver_t -----
   multi_gpu_engine.emplace(std::move(sub_pdlp_rank_data), mps, sub_pdlp_settings);
+  CUOPT_LOG_INFO(
+    "Sub-problems loaded in %.3fs",
+    std::chrono::duration<double>(std::chrono::steady_clock::now() - shards_start).count());
 
   // Non-owning back-pointer so engine helpers (e.g. allreduce_sum_inplace_to_master)
   // can apply a single pdlp_solver_t-shaped accessor lambda to master too.
