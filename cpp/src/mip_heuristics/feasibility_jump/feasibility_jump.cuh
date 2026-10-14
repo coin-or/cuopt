@@ -26,6 +26,8 @@
 #include <utilities/manual_cuda_graph.cuh>
 #include <utilities/pcgenerator.hpp>
 
+#include <cub/device/device_reduce.cuh>
+#include <cub/util_type.cuh>
 #include <functional>
 
 #define FJ_DEBUG_LOAD_BALANCING 0
@@ -104,7 +106,8 @@ class fj_t {
        rng_id_t seed_component_id = rng_id_t::local_search_cpu_fj);
   ~fj_t();
   void reset_cuda_graph();
-  i_t solve(solution_t<i_t, f_t>& solution);
+  i_t solve(solution_t<i_t, f_t>& solution,
+            const fj_improvement_callback_t<f_t>& improvement_callback = {});
   std::unique_ptr<fj_cpu_climber_t<i_t, f_t>> create_cpu_climber(
     solution_t<i_t, f_t>& solution,
     const std::vector<f_t>& left_weights,
@@ -112,8 +115,10 @@ class fj_t {
     f_t objective_weight,
     std::atomic<bool>& preemption_flag,
     const probing_cache_t<i_t, f_t>* probing_cache,
-    fj_settings_t settings = fj_settings_t{},
-    bool randomize_params  = false);
+    fj_settings_t settings      = fj_settings_t{},
+    bool randomize_params       = false,
+    bool preserve_rng           = false,
+    bool copy_related_variables = true);
   i_t alloc_max_climbers(i_t desired_climbers);
   void resize_vectors(const raft::handle_t* handle_ptr);
   void device_init(cuda::stream_ref stream);
@@ -125,14 +130,18 @@ class fj_t {
   void copy_weights(const weight_t<i_t, f_t>& weights,
                     const raft::handle_t* handle_ptr,
                     std::optional<i_t> new_size = std::nullopt);
-  i_t host_loop(solution_t<i_t, f_t>& solution, i_t climber_idx = 0);
+  i_t host_loop(solution_t<i_t, f_t>& solution,
+                const fj_improvement_callback_t<f_t>& improvement_callback,
+                i_t climber_idx = 0);
   void run_step_device(i_t climber_idx = 0, bool use_graph = true);
   void run_step_device(cuda::stream_ref stream, i_t climber_idx = 0, bool use_graph = true);
   void refresh_lhs_and_violation(cuda::stream_ref stream, i_t climber_idx = 0);
   // load balancing
   void load_balancing_score_update(cuda::stream_ref stream, i_t climber_idx = 0);
   // executed after a roudning FJ run if any fractionals remain to eliminate them
-  void round_remaining_fractionals(solution_t<i_t, f_t>& solution, i_t climber_idx = 0);
+  void round_remaining_fractionals(solution_t<i_t, f_t>& solution,
+                                   const fj_improvement_callback_t<f_t>& improvement_callback,
+                                   i_t climber_idx = 0);
 
   uint64_t next_seed() { return rng.next_u64(); }
 
@@ -420,12 +429,14 @@ class fj_t {
 
       HDI f_t lower_excess_score(i_t cstr, f_t lhs, f_t c_lb) const
       {
-        return raft::min(lhs - c_lb, (f_t)0);
+        const f_t excess = lhs - c_lb;
+        return excess < (f_t)0 ? excess : (f_t)0;
       }
 
       HDI f_t upper_excess_score(i_t cstr, f_t lhs, f_t c_ub) const
       {
-        return raft::min(c_ub - lhs, (f_t)0);
+        const f_t excess = c_ub - lhs;
+        return excess < (f_t)0 ? excess : (f_t)0;
       }
 
       // Computes the constraint's contribution to the feasibility score:
@@ -536,7 +547,6 @@ class fj_t {
   // `view_t::settings`.
   rmm::device_scalar<fj_settings_t> device_settings;
 
-  fj_improvement_callback_t<f_t> improvement_callback;
   f_t last_reported_objective_{std::numeric_limits<f_t>::infinity()};
 };
 

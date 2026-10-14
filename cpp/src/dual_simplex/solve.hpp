@@ -18,6 +18,7 @@ struct work_limit_context_t;
 }
 
 namespace cuopt::mathematical_optimization {
+template <typename i_t, typename f_t>
 class barrier_cache_t;
 }  // namespace cuopt::mathematical_optimization
 
@@ -66,6 +67,13 @@ f_t compute_user_objective(const lp_problem_t<i_t, f_t>& lp, const std::vector<f
 
 template <typename i_t, typename f_t>
 f_t compute_user_objective(const lp_problem_t<i_t, f_t>& lp, f_t obj);
+
+template <typename i_t, typename f_t>
+void compute_objective_gap(const lp_problem_t<i_t, f_t>& problem,
+                           f_t primal_obj,
+                           f_t dual_obj,
+                           f_t& objective_gap,
+                           f_t& relative_objective_gap);
 
 template <typename i_t, typename f_t>
 f_t compute_presolved_objective(const lp_problem_t<i_t, f_t>& lp, f_t user_obj);
@@ -148,7 +156,7 @@ lp_status_t solve_linear_program_with_barrier(
   const user_problem_t<i_t, f_t>& user_problem,
   const simplex_solver_settings_t<i_t, f_t>& settings,
   lp_solution_t<i_t, f_t>& solution,
-  cuopt::mathematical_optimization::barrier_cache_t* cache = nullptr);
+  cuopt::mathematical_optimization::barrier_cache_t<i_t, f_t>* cache = nullptr);
 
 template <typename i_t, typename f_t>
 lp_status_t solve_linear_program_with_barrier(
@@ -156,7 +164,7 @@ lp_status_t solve_linear_program_with_barrier(
   const simplex_solver_settings_t<i_t, f_t>& settings,
   f_t start_time,
   lp_solution_t<i_t, f_t>& solution,
-  cuopt::mathematical_optimization::barrier_cache_t* cache = nullptr);
+  cuopt::mathematical_optimization::barrier_cache_t<i_t, f_t>* cache = nullptr);
 
 template <typename i_t, typename f_t>
 lp_status_t solve_linear_program_with_primal(const user_problem_t<i_t, f_t>& user_problem,
@@ -169,7 +177,7 @@ lp_status_t solve_linear_program_with_barrier(
   const simplex_solver_settings_t<i_t, f_t>& settings,
   f_t start_time,
   lp_solution_t<i_t, f_t>& solution,
-  cuopt::mathematical_optimization::barrier_cache_t* cache,
+  cuopt::mathematical_optimization::barrier_cache_t<i_t, f_t>* cache,
   const raft::handle_t* handle_ptr);
 
 template <typename i_t, typename f_t>
