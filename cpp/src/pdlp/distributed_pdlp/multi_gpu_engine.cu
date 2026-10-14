@@ -16,8 +16,8 @@
 #include <numeric>
 
 #include <cub/device/device_transform.cuh>
-#include <utilities/logger.hpp>
 #include <mip_heuristics/mip_constants.hpp>
+#include <utilities/logger.hpp>
 
 namespace cuopt::mathematical_optimization::pdlp {
 
@@ -465,12 +465,12 @@ template multi_gpu_engine_t<int, double>::multi_gpu_engine_t(
   io::mps_data_model_t<int64_t, double> const&,
   pdlp_solver_settings_t<int, double> const&);
 
-  #if MIP_INSTANTIATE_FLOAT || PDLP_INSTANTIATE_FLOAT
-  template struct multi_gpu_engine_t<int, float>;
-  template multi_gpu_engine_t<int, float>::multi_gpu_engine_t(
-    std::vector<rank_data_t<int, float>>&&,
-    io::mps_data_model_t<int, float> const&,
-    pdlp_solver_settings_t<int, float> const&);
-  #endif
+#if MIP_INSTANTIATE_FLOAT || PDLP_INSTANTIATE_FLOAT
+template struct multi_gpu_engine_t<int, float>;
+template multi_gpu_engine_t<int, float>::multi_gpu_engine_t(
+  std::vector<rank_data_t<int, float>>&&,
+  io::mps_data_model_t<int, float> const&,
+  pdlp_solver_settings_t<int, float> const&);
+#endif
 
 }  // namespace cuopt::mathematical_optimization::pdlp

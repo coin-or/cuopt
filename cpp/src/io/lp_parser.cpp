@@ -1507,7 +1507,8 @@ lp_parser_t<i_t, f_t>::lp_parser_t(mps_data_model_t<i_t, f_t>& problem, std::str
 
 template class lp_parser_t<int, float>;
 template class lp_parser_t<int, double>;
-// This instantiation is used for the index64 path. we unconditionally instantiate it to allow cli-swap to index64
+// This instantiation is used for the index64 path. we unconditionally instantiate it to allow
+// cli-swap to index64
 template class lp_parser_t<int64_t, double>;
 
 // ===========================================================================

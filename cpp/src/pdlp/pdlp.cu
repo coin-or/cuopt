@@ -466,7 +466,7 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(
 
   // A (CSR) — mutable copies for the engine + partitioner consumers below.
   std::vector<index_t> h_A_row_offsets = mps.get_constraint_matrix_offsets();
-  std::vector<index_t> h_A_col_indices     = mps.get_constraint_matrix_indices();
+  std::vector<index_t> h_A_col_indices = mps.get_constraint_matrix_indices();
   std::vector<f_t> h_A_values          = mps.get_constraint_matrix_values();
 
   // ----- 2. Transpose A -> A^T on the host (one-shot CSR transpose) -----
@@ -482,7 +482,7 @@ pdlp_solver_t<i_t, f_t>::pdlp_solver_t(
   A_csr.to_compressed_col(AT_as_csc);
   std::vector<index_t> h_A_t_row_offsets = std::move(AT_as_csc.col_start);
   std::vector<index_t> h_A_t_col_indices = std::move(AT_as_csc.i);
-  std::vector<f_t> h_A_t_values      = std::move(AT_as_csc.x);
+  std::vector<f_t> h_A_t_values          = std::move(AT_as_csc.x);
 
   // ----- 3. Partition -----
   std::vector<int> parts;

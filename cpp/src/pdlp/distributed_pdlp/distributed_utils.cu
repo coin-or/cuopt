@@ -57,7 +57,7 @@ std::vector<rank_data_t<i_t, f_t>> create_rank_data_from_parts(
   }
 
   constexpr index_t max_i_t = static_cast<index_t>(std::numeric_limits<i_t>::max());
-  const auto overflows = [max_i_t](index_t nnz) { return nnz > max_i_t; };
+  const auto overflows      = [max_i_t](index_t nnz) { return nnz > max_i_t; };
   cuopt_expects(std::none_of(owned_A_nnz.begin(), owned_A_nnz.end(), overflows) &&
                   std::none_of(owned_A_t_nnz.begin(), owned_A_t_nnz.end(), overflows),
                 error_type_t::ValidationError,
@@ -96,7 +96,7 @@ std::vector<rank_data_t<i_t, f_t>> create_rank_data_from_parts(
     // For each owned constraint, add associated matrix row to local A
     // Keep the same indices here but re-order later
     for (auto owned_cstr : rd.owned_cstr_indices) {
-      i_t cstr_len  = A_row_offsets[owned_cstr + 1] - A_row_offsets[owned_cstr];
+      i_t cstr_len      = A_row_offsets[owned_cstr + 1] - A_row_offsets[owned_cstr];
       index_t row_start = A_row_offsets[owned_cstr];
       local_A_col_indices.insert(local_A_col_indices.end(),
                                  A_col_indices.begin() + row_start,
@@ -146,7 +146,7 @@ std::vector<rank_data_t<i_t, f_t>> create_rank_data_from_parts(
     local_A_t_row_offsets.push_back(local_A_t_nnz);
 
     for (auto owned_var : rd.owned_var_indices) {
-      i_t var_len   = A_t_row_offsets[owned_var + 1] - A_t_row_offsets[owned_var];
+      i_t var_len       = A_t_row_offsets[owned_var + 1] - A_t_row_offsets[owned_var];
       index_t row_start = A_t_row_offsets[owned_var];
       local_A_t_col_indices.insert(local_A_t_col_indices.end(),
                                    A_t_col_indices.begin() + row_start,
