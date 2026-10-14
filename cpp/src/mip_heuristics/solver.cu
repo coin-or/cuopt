@@ -216,6 +216,8 @@ solution_t<i_t, f_t> mip_solver_t<i_t, f_t>::run_solver()
   bool presolve_success = run_presolve ? dm.run_presolve(presolve_time_limit, timer_) : true;
 
   // Stop early CPUFJ after cuopt presolve (probing cache) but before main solve
+  if (context.early_cpufj_ptr) { context.early_cpufj_ptr->request_stop(); }
+  if (context.early_structural_ptr) { context.early_structural_ptr->request_stop(); }
   if (context.early_cpufj_ptr) {
     context.early_cpufj_ptr->stop();
     if (context.early_cpufj_ptr->solution_found()) {
