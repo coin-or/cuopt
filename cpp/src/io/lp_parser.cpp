@@ -1507,9 +1507,7 @@ lp_parser_t<i_t, f_t>::lp_parser_t(mps_data_model_t<i_t, f_t>& problem, std::str
 
 template class lp_parser_t<int, float>;
 template class lp_parser_t<int, double>;
-// 64-bit indices exist for the multi-GPU PDLP path, which is double-only. The LP
-// format is unlikely to carry such a problem, but io::read<int64_t, double>()
-// dispatches on the file extension and therefore needs this instantiation.
+// This instantiation is used for the index64 path. we unconditionally instantiate it to allow cli-swap to index64
 template class lp_parser_t<int64_t, double>;
 
 // ===========================================================================
