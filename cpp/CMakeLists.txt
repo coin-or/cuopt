@@ -1398,8 +1398,6 @@ install(DIRECTORY include/cuopt/grpc/
         COMPONENT client-dev
 )
 
-# The wire contract for writing a client in any language. The protos import each other by
-# bare file name, so they have to share one directory: protoc -I <this directory>.
 if(NOT SKIP_GRPC_BUILD)
     install(FILES
             ${PROTO_PATH_MANUAL}/cuopt_remote_service.proto
