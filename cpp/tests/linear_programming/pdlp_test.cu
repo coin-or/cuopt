@@ -211,17 +211,17 @@ TEST(pdlp_class, concurrent_cutoff_runs_pdlp_without_cpu_solvers)
   cuopt::mathematical_optimization::io::mps_data_model_t<int, double> op_problem =
     cuopt::mathematical_optimization::io::read_mps<int, double>(path, true);
 
-  auto settings                  = pdlp_solver_settings_t<int, double>{};
-  settings.method                = cuopt::mathematical_optimization::method_t::Concurrent;
-  settings.presolver             = cuopt::mathematical_optimization::presolver_t::None;
-  settings.concurrent_nnz_cutoff = 0;
+  auto settings                = pdlp_solver_settings_t<int, double>{};
+  settings.method              = cuopt::mathematical_optimization::method_t::Concurrent;
+  settings.presolver           = cuopt::mathematical_optimization::presolver_t::None;
+  settings.large_nnz_threshold = 0;
 
   testing::internal::CaptureStdout();
   optimization_problem_solution_t<int, double> solution = solve_lp(&handle_, op_problem, settings);
   const auto logs                                       = testing::internal::GetCapturedStdout();
 
   EXPECT_THAT(logs, testing::HasSubstr("Skipping concurrent barrier and dual simplex"));
-  EXPECT_THAT(logs, testing::HasSubstr("(CONCURRENT_NNZ_CUTOFF: 0)"));
+  EXPECT_THAT(logs, testing::HasSubstr("(LARGE_NNZ_THRESHOLD: 0)"));
   EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
 }
 
@@ -293,6 +293,7 @@ TEST(pdlp_class, run_double_very_low_accuracy)
   settings.tolerances.absolute_gap_tolerance    = settings.minimal_absolute_tolerance;
   settings.tolerances.relative_gap_tolerance    = 0.0;
   settings.method                               = cuopt::mathematical_optimization::method_t::PDLP;
+  settings.iteration_limit                      = 100000;
 
   optimization_problem_solution_t<int, double> solution = solve_lp(&handle_, op_problem, settings);
   EXPECT_EQ((int)solution.get_termination_status(), CUOPT_TERMINATION_STATUS_OPTIMAL);
