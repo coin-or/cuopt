@@ -21,7 +21,7 @@ The ``libcuopt-client`` wheel and conda package install the same five files:
 * pip: ``<site-packages>/libcuopt_client/share/cuopt/proto``
 * conda: ``$CONDA_PREFIX/share/cuopt/proto``
 
-Generate stubs for your language with that directory as the include path, for example for Python:
+Generate stubs for your language with that directory as the include path, for example for Python (``pip install grpcio-tools`` first):
 
 .. code-block:: bash
 
