@@ -42,9 +42,6 @@ if [ -f test/MOI_wrapper.jl ]; then
     sed -i '/^function test_air05()/,/^end$/s/^/# /' test/MOI_wrapper.jl
 fi
 
-# Since the component split, the C API lives in libcuopt_mathopt.so and libcuopt.so is
-# only a linker script. cuOpt.jl looks for libcuopt_mathopt first and falls back to
-# libcuopt for older layouts, so prefer the former and add its directory to LD_LIBRARY_PATH.
 LIBCUOPT_PATH=""
 for lib in libcuopt_mathopt.so libcuopt.so; do
     LIBCUOPT_PATH=$(find /pyenv/ -name "$lib" \( -type f -o -type l \) 2>/dev/null | head -1)
