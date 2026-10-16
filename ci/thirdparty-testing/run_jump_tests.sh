@@ -44,13 +44,13 @@ fi
 
 LIBCUOPT_PATH=""
 for lib in libcuopt_mathopt.so libcuopt.so; do
-    LIBCUOPT_PATH=$(find /pyenv/ -name "$lib" \( -type f -o -type l \) 2>/dev/null | head -1)
+    LIBCUOPT_PATH=$(find /pyenv/ -name "$lib" \( -type f -o -type l \) -print -quit 2>/dev/null)
     [ -n "$LIBCUOPT_PATH" ] && break
 done
 
 if [ -n "$LIBCUOPT_PATH" ]; then
     LIBCUOPT_DIR=$(dirname "$LIBCUOPT_PATH")
-    export LD_LIBRARY_PATH="${LIBCUOPT_DIR}:${LD_LIBRARY_PATH:-}"
+    export LD_LIBRARY_PATH="${LIBCUOPT_DIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
     rapids-logger "Found $LIBCUOPT_PATH, added directory to LD_LIBRARY_PATH: $LIBCUOPT_DIR"
 else
     rapids-logger "Warning: neither libcuopt_mathopt.so nor libcuopt.so found in root filesystem"
