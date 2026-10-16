@@ -42,17 +42,21 @@ if [ -f test/MOI_wrapper.jl ]; then
     sed -i '/^function test_air05()/,/^end$/s/^/# /' test/MOI_wrapper.jl
 fi
 
-# Find libcuopt.so and add its directory to LD_LIBRARY_PATH
-LIBCUOPT_PATH=$(find /pyenv/ -name "libcuopt.so" -type f 2>/dev/null | head -1)
+# Since the component split, the C API lives in libcuopt_mathopt.so and libcuopt.so is
+# only a linker script. cuOpt.jl looks for libcuopt_mathopt first and falls back to
+# libcuopt for older layouts, so prefer the former and add its directory to LD_LIBRARY_PATH.
+LIBCUOPT_PATH=""
+for lib in libcuopt_mathopt.so libcuopt.so; do
+    LIBCUOPT_PATH=$(find /pyenv/ -name "$lib" \( -type f -o -type l \) 2>/dev/null | head -1)
+    [ -n "$LIBCUOPT_PATH" ] && break
+done
 
 if [ -n "$LIBCUOPT_PATH" ]; then
-    rapids-logger "LIBCUOPT_PATH: $LIBCUOPT_PATH"
     LIBCUOPT_DIR=$(dirname "$LIBCUOPT_PATH")
-    rapids-logger "LIBCUOPT_DIR: $LIBCUOPT_DIR"
-    export LD_LIBRARY_PATH="${LIBCUOPT_DIR}:${LD_LIBRARY_PATH}"
-    rapids-logger "Found libcuopt.so at $LIBCUOPT_PATH, added directory to LD_LIBRARY_PATH: $LIBCUOPT_DIR"
+    export LD_LIBRARY_PATH="${LIBCUOPT_DIR}:${LD_LIBRARY_PATH:-}"
+    rapids-logger "Found $LIBCUOPT_PATH, added directory to LD_LIBRARY_PATH: $LIBCUOPT_DIR"
 else
-    rapids-logger "Warning: libcuopt.so not found in root filesystem"
+    rapids-logger "Warning: neither libcuopt_mathopt.so nor libcuopt.so found in root filesystem"
 fi
 
 rapids-logger "Running Julia tests for cuOpt.jl"

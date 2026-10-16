@@ -29,6 +29,15 @@ JuMP Support
 JuMP can be used with near zero code changes: simply switch to cuOpt as a solver to solve linear and mixed-integer programming problems.
 Please refer to the `JuMP documentation <https://github.com/jump-dev/cuOpt.jl>`_ for more information.
 
+cuOpt.jl loads ``libcuopt_mathopt.so`` through the system dynamic loader, so the directory containing it must be on ``LD_LIBRARY_PATH``. This is not the case by default for a pip install, which places the library inside the Python environment:
+
+.. code-block:: bash
+
+   pip install --extra-index-url=https://pypi.nvidia.com libcuopt-cu13==26.10.*
+   export LD_LIBRARY_PATH="$(python -c 'import libcuopt_mathopt, os; print(os.path.join(os.path.dirname(libcuopt_mathopt.__file__), "lib64"))'):$LD_LIBRARY_PATH"
+
+``libcuopt.so`` is only a linker script and cannot be loaded directly, so pointing the loader at the ``libcuopt`` wheel directory is not enough.
+
 --------------------------
 Pyomo Support
 --------------------------
