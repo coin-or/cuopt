@@ -12,7 +12,6 @@ from .data_model cimport data_model_view_t, mps_data_model_t, write_mps
 import warnings
 
 import numpy as np
-cimport numpy as cnp
 
 from cuopt.utilities import get_data_ptr
 
@@ -32,10 +31,15 @@ cdef extern from "cuopt/mathematical_optimization/utilities/barrier_cache.hpp" n
         void update_rhs(const f_t* b, i_t m) except +
 
 
-cdef inline uintptr_t _numpy_data_ptr(cnp.ndarray array) except? 0:
+ctypedef fused _buffer_type:
+    double
+    int
+
+
+cdef inline uintptr_t _buffer_data_ptr(const _buffer_type[::1] array) except? 0:
     if array is None:
-        raise TypeError("Expected a NumPy array, got None")
-    return <uintptr_t>cnp.PyArray_DATA(array)
+        raise TypeError("Expected an array, got None")
+    return <uintptr_t>&array[0]
 
 
 def type_cast(np_obj, np_type, name):
@@ -562,8 +566,8 @@ cdef class DataModel:
             qc.linear_values.resize(linear_nnz)
             qc.linear_indices.resize(linear_nnz)
             if linear_nnz > 0:
-                c_linear_values = _numpy_data_ptr(item["linear_values"])
-                c_linear_indices = _numpy_data_ptr(item["linear_indices"])
+                c_linear_values = _buffer_data_ptr[double](item["linear_values"])
+                c_linear_indices = _buffer_data_ptr[int](item["linear_indices"])
                 for i in range(linear_nnz):
                     qc.linear_values[i] = (<double*>c_linear_values)[i]
                     qc.linear_indices[i] = (<int*>c_linear_indices)[i]
@@ -573,9 +577,9 @@ cdef class DataModel:
             qc.rows.resize(quadratic_nnz)
             qc.cols.resize(quadratic_nnz)
             if quadratic_nnz > 0:
-                c_vals = _numpy_data_ptr(item["vals"])
-                c_rows = _numpy_data_ptr(item["rows"])
-                c_cols = _numpy_data_ptr(item["cols"])
+                c_vals = _buffer_data_ptr[double](item["vals"])
+                c_rows = _buffer_data_ptr[int](item["rows"])
+                c_cols = _buffer_data_ptr[int](item["cols"])
                 for i in range(quadratic_nnz):
                     qc.vals[i] = (<double*>c_vals)[i]
                     qc.rows[i] = (<int*>c_rows)[i]
