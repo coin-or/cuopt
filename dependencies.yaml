@@ -291,6 +291,7 @@ files:
     includes:
       - build_common
       - build_python_common
+      - run_common
       - depends_on_libcuopt
       # needed for find_package(cuopt) to resolve cuopt::client/mathopt/routing
       - depends_on_libcuopt_client

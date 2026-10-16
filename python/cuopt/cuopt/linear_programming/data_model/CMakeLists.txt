@@ -3,8 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # cmake-format: on
 
+find_package(Python REQUIRED COMPONENTS NumPy)
+
 set(cython_sources data_model_wrapper.pyx)
-set(linked_libraries cuopt::mathopt cuopt::client)
+set(linked_libraries cuopt::mathopt cuopt::client Python::NumPy)
 
 rapids_cython_create_modules(SOURCE_FILES "${cython_sources}" LINKED_LIBRARIES "${linked_libraries}" ASSOCIATED_TARGETS cuopt
                                                                                CXX)
