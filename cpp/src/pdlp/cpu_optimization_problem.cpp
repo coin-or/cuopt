@@ -772,9 +772,9 @@ void cpu_optimization_problem_t<i_t, f_t>::write_to_file(const std::string& file
   }
 
   if (format == file_format_t::lp) {
-    cuopt::mathematical_optimization::io::write_lp(data_model_view, file_path);
+    io::write_lp(data_model_view, file_path);
   } else {
-    cuopt::mathematical_optimization::io::write_mps(data_model_view, file_path);
+    io::write_mps(data_model_view, file_path);
   }
 }
 

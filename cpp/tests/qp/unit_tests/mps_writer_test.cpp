@@ -292,7 +292,7 @@ TEST_P(MpsWriterBoundsTest, constraint_bounds_round_trip)
   if (named) { op.set_row_names(names); }
   std::string const path = std::string(::testing::TempDir()) + "constraint_bounds_round_trip.mps";
   temp_mps_file_guard_t guard(path);
-  op.write_to_mps(path);
+  op.write_to_file(path, file_format_t::mps);
   auto parsed = io::read_mps<int, double>(path);
   EXPECT_EQ(parsed.get_constraint_lower_bounds(), lower);
   EXPECT_EQ(parsed.get_constraint_upper_bounds(), upper);

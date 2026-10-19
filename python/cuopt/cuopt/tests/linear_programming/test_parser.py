@@ -370,9 +370,44 @@ def test_write_dispatches_on_extension():
     assert "ENDATA" in mps_content
 
 
+@pytest.mark.parametrize("suffix", [".lp", ".mps"])
+def test_write_rejects_mismatched_variable_types(suffix):
+    from cuopt.linear_programming import data_model
+
+    data_model_obj = data_model.DataModel()
+    data_model_obj.set_csr_constraint_matrix(
+        np.array([1.0, 1.0]),
+        np.array([0, 1], dtype=np.int32),
+        np.array([0, 2], dtype=np.int32),
+    )
+    data_model_obj.set_constraint_bounds(np.array([5.0]))
+    data_model_obj.set_row_types(np.array(["L"]))
+    data_model_obj.set_objective_coefficients(np.array([1.0, 1.0]))
+    data_model_obj.set_variable_lower_bounds(np.array([0.0, 0.0]))
+    data_model_obj.set_variable_upper_bounds(np.array([10.0, 10.0]))
+    # Two variables, but only one variable type.
+    data_model_obj.set_variable_types(np.array(["I"]))
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        out_path = f.name
+    try:
+        with pytest.raises(ValueError, match="variable_types has 1 entries"):
+            data_model_obj.write(out_path)
+    finally:
+        os.unlink(out_path)
+
+
 @pytest.mark.parametrize(
     "suffix",
-    [".xyz", ".lp.gz", ".lp.bz2", ".mps.gz", ".mps.bz2", ".qps.gz", ".qps.bz2"],
+    [
+        ".xyz",
+        ".lp.gz",
+        ".lp.bz2",
+        ".mps.gz",
+        ".mps.bz2",
+        ".qps.gz",
+        ".qps.bz2",
+    ],
 )
 def test_write_unsupported_extension(suffix):
     from cuopt.linear_programming.problem import MINIMIZE, Problem

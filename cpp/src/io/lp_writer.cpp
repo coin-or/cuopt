@@ -7,6 +7,7 @@
 
 #include <cuopt/mathematical_optimization/io/lp_writer.hpp>
 
+#include <cuopt/export.hpp>
 #include <cuopt/mathematical_optimization/io/data_model_view.hpp>
 #include <cuopt/mathematical_optimization/io/mps_data_model.hpp>
 #include <mps_parser_internal.hpp>
@@ -18,7 +19,6 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
-#include <memory>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -41,16 +41,8 @@ f_t default_upper()
   return std::numeric_limits<f_t>::infinity();
 }
 
-}  // namespace
-
 template <typename i_t, typename f_t>
-lp_writer_t<i_t, f_t>::lp_writer_t(const data_model_view_t<i_t, f_t>& problem) : problem_(problem)
-{
-}
-
-template <typename i_t, typename f_t>
-data_model_view_t<i_t, f_t> lp_writer_t<i_t, f_t>::create_view(
-  const mps_data_model_t<i_t, f_t>& model)
+data_model_view_t<i_t, f_t> create_view(const mps_data_model_t<i_t, f_t>& model)
 {
   data_model_view_t<i_t, f_t> view;
 
@@ -123,15 +115,10 @@ data_model_view_t<i_t, f_t> lp_writer_t<i_t, f_t>::create_view(
   return view;
 }
 
-template <typename i_t, typename f_t>
-lp_writer_t<i_t, f_t>::lp_writer_t(const mps_data_model_t<i_t, f_t>& problem)
-  : owned_view_(std::make_unique<data_model_view_t<i_t, f_t>>(create_view(problem))),
-    problem_(*owned_view_)
-{
-}
+}  // namespace
 
 template <typename i_t, typename f_t>
-void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
+void write_lp(const data_model_view_t<i_t, f_t>& problem, const std::string& lp_file_path)
 {
   std::ofstream lp_file(lp_file_path);
 
@@ -142,16 +129,16 @@ void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
 
   const f_t inf = std::numeric_limits<f_t>::infinity();
 
-  const auto c_span         = problem_.get_objective_coefficients();
-  const auto lb_span        = problem_.get_variable_lower_bounds();
-  const auto ub_span        = problem_.get_variable_upper_bounds();
-  const auto types_span     = problem_.get_variable_types();
-  const auto& var_names_ref = problem_.get_variable_names();
-  const auto A_values_span  = problem_.get_constraint_matrix_values();
-  const auto A_indices_span = problem_.get_constraint_matrix_indices();
-  const auto A_offsets_span = problem_.get_constraint_matrix_offsets();
-  const auto& row_names_ref = problem_.get_row_names();
-  const auto& quadratic_constraints = problem_.get_quadratic_constraints();
+  const auto c_span                 = problem.get_objective_coefficients();
+  const auto lb_span                = problem.get_variable_lower_bounds();
+  const auto ub_span                = problem.get_variable_upper_bounds();
+  const auto types_span             = problem.get_variable_types();
+  const auto& var_names_ref         = problem.get_variable_names();
+  const auto A_values_span          = problem.get_constraint_matrix_values();
+  const auto A_indices_span         = problem.get_constraint_matrix_indices();
+  const auto A_offsets_span         = problem.get_constraint_matrix_offsets();
+  const auto& row_names_ref         = problem.get_row_names();
+  const auto& quadratic_constraints = problem.get_quadratic_constraints();
 
   // Variable count is defined by the lower-bound vector (same as the MPS writer).
   // Require other per-variable arrays to match when present.
@@ -171,12 +158,12 @@ void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
                      "LP writer: variable types size (%zu) must match n_variables (%d)",
                      types_span.size(),
                      n_variables);
-  mps_parser_expects(var_names_ref.empty() ||
-                       var_names_ref.size() == static_cast<size_t>(n_variables),
-                     error_type_t::ValidationError,
-                     "LP writer: variable names size (%zu) must match n_variables (%d)",
-                     var_names_ref.size(),
-                     n_variables);
+  mps_parser_expects(
+    var_names_ref.empty() || var_names_ref.size() == static_cast<size_t>(n_variables),
+    error_type_t::ValidationError,
+    "LP writer: variable names size (%zu) must match n_variables (%d)",
+    var_names_ref.size(),
+    n_variables);
 
   std::vector<f_t> c(n_variables, f_t(0));
   if (!c_span.empty()) { std::copy(c_span.begin(), c_span.end(), c.begin()); }
@@ -196,10 +183,10 @@ void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
   };
 
   // --- Linear constraint bounds -------------------------------------------
-  const auto b_span     = problem_.get_constraint_bounds();
-  const auto clb_span   = problem_.get_constraint_lower_bounds();
-  const auto cub_span   = problem_.get_constraint_upper_bounds();
-  const auto rtype_span = problem_.get_row_types();
+  const auto b_span     = problem.get_constraint_bounds();
+  const auto clb_span   = problem.get_constraint_lower_bounds();
+  const auto cub_span   = problem.get_constraint_upper_bounds();
+  const auto rtype_span = problem.get_row_types();
 
   i_t n_constraints = 0;
   if (!b_span.empty())
@@ -224,18 +211,18 @@ void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
                      "LP writer: constraint bounds size (%zu) must match n_constraints (%d)",
                      b_span.size(),
                      n_constraints);
-  mps_parser_expects(row_names_ref.empty() ||
-                       row_names_ref.size() == static_cast<size_t>(n_constraints),
-                     error_type_t::ValidationError,
-                     "LP writer: row names size (%zu) must match n_constraints (%d)",
-                     row_names_ref.size(),
-                     n_constraints);
-  mps_parser_expects(A_offsets_span.empty() ||
-                       A_offsets_span.size() == static_cast<size_t>(n_constraints) + 1,
-                     error_type_t::ValidationError,
-                     "LP writer: CSR offsets size (%zu) must be n_constraints+1 (%d)",
-                     A_offsets_span.size(),
-                     n_constraints + 1);
+  mps_parser_expects(
+    row_names_ref.empty() || row_names_ref.size() == static_cast<size_t>(n_constraints),
+    error_type_t::ValidationError,
+    "LP writer: row names size (%zu) must match n_constraints (%d)",
+    row_names_ref.size(),
+    n_constraints);
+  mps_parser_expects(
+    A_offsets_span.empty() || A_offsets_span.size() == static_cast<size_t>(n_constraints) + 1,
+    error_type_t::ValidationError,
+    "LP writer: CSR offsets size (%zu) must be n_constraints+1 (%d)",
+    A_offsets_span.size(),
+    n_constraints + 1);
 
   std::vector<f_t> clb(n_constraints);
   std::vector<f_t> cub(n_constraints);
@@ -292,10 +279,10 @@ void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
   lp_file << std::setprecision(precision);
 
   // --- Objective ----------------------------------------------------------
-  lp_file << (problem_.get_sense() ? "Maximize\n" : "Minimize\n");
+  lp_file << (problem.get_sense() ? "Maximize\n" : "Minimize\n");
   {
     std::string obj_name =
-      problem_.get_objective_name().empty() ? "obj" : problem_.get_objective_name();
+      problem.get_objective_name().empty() ? "obj" : problem.get_objective_name();
     lp_file << " " << obj_name << ":";
 
     int terms_on_line = 0;
@@ -304,7 +291,7 @@ void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
     }
     // A constant objective term is written directly; read_lp folds it into
     // the objective offset.
-    const f_t offset = problem_.get_objective_offset();
+    const f_t offset = problem.get_objective_offset();
     if (std::isfinite(offset) && offset != f_t(0)) {
       lp_file << (offset < f_t(0) ? " - " : " + ") << fmt(std::abs(offset));
     }
@@ -314,10 +301,10 @@ void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
     // block. In the LP objective convention a bracket coefficient p on a term
     // contributes 0.5*p to the objective, so for H = Q + Q^T the diagonal
     // coefficient is H[i][i] and the off-diagonal coefficient is 2*H[i][j].
-    if (problem_.has_quadratic_objective()) {
-      auto Qv = problem_.get_quadratic_objective_values();
-      auto Qi = problem_.get_quadratic_objective_indices();
-      auto Qo = problem_.get_quadratic_objective_offsets();
+    if (problem.has_quadratic_objective()) {
+      auto Qv = problem.get_quadratic_objective_values();
+      auto Qi = problem.get_quadratic_objective_indices();
+      auto Qo = problem.get_quadratic_objective_offsets();
       std::vector<f_t> Q_values(Qv.begin(), Qv.end());
       std::vector<i_t> Q_indices(Qi.begin(), Qi.end());
       std::vector<i_t> Q_offsets(Qo.begin(), Qo.end());
@@ -325,7 +312,7 @@ void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
       std::vector<f_t> H_values;
       std::vector<i_t> H_indices;
       std::vector<i_t> H_offsets;
-      if (problem_.is_Q_symmetrized()) {
+      if (problem.is_Q_symmetrized()) {
         H_values  = std::move(Q_values);
         H_indices = std::move(Q_indices);
         H_offsets = std::move(Q_offsets);
@@ -414,12 +401,13 @@ void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
   // '[ ... ]' block (no '/ 2' suffix). Q is stored upper-triangular with the
   // full x^T Q x coefficient per variable pair, which is exactly what the LP
   // constraint-bracket convention expects.
+  coo_canonicalization_scratch_t<i_t, f_t> qc_scratch;
   for (size_t q = 0; q < quadratic_constraints.size(); ++q) {
     typename mps_data_model_t<i_t, f_t>::quadratic_constraint_t qc = quadratic_constraints[q];
-    const std::string name = qc.constraint_row_name;
-    const char* rel        = qc.constraint_row_type == 'G'   ? ">="
-                             : qc.constraint_row_type == 'E' ? "="
-                                                             : "<=";
+    const std::string name                                         = qc.constraint_row_name;
+    const char* rel = qc.constraint_row_type == 'G'   ? ">="
+                      : qc.constraint_row_type == 'E' ? "="
+                                                      : "<=";
 
     if (name.empty()) {
       lp_file << " ";
@@ -433,7 +421,7 @@ void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
       }
     }
 
-    canonicalize_coo_matrix(qc.rows, qc.cols, qc.vals);
+    canonicalize_coo_matrix(qc.rows, qc.cols, qc.vals, qc_scratch);
     lp_file << " + [";
     int quad_terms = 0;
     for (size_t p = 0; p < qc.vals.size(); ++p) {
@@ -525,7 +513,19 @@ void lp_writer_t<i_t, f_t>::write(const std::string& lp_file_path)
   lp_file.close();
 }
 
-template class lp_writer_t<int, float>;
-template class lp_writer_t<int, double>;
+template <typename i_t, typename f_t>
+void write_lp(const mps_data_model_t<i_t, f_t>& problem, const std::string& lp_file_path)
+{
+  write_lp(create_view(problem), lp_file_path);
+}
+
+template CUOPT_EXPORT void write_lp<int, float>(const data_model_view_t<int, float>& problem,
+                                                const std::string& lp_file_path);
+template CUOPT_EXPORT void write_lp<int, double>(const data_model_view_t<int, double>& problem,
+                                                 const std::string& lp_file_path);
+template CUOPT_EXPORT void write_lp<int, float>(const mps_data_model_t<int, float>& problem,
+                                                const std::string& lp_file_path);
+template CUOPT_EXPORT void write_lp<int, double>(const mps_data_model_t<int, double>& problem,
+                                                 const std::string& lp_file_path);
 
 }  // namespace cuopt::mathematical_optimization::io

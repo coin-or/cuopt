@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -24,6 +25,8 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace cuopt::mathematical_optimization::io {
@@ -54,14 +57,99 @@ std::string write_lp_to_string(const mps_data_model_t<int, double>& model, const
 {
   const std::string path = std::string(::testing::TempDir()) + "lp_writer_" + tag + ".lp";
   temp_file_guard_t guard(path);
-  lp_writer_t<int, double> writer(model);
-  writer.write(path);
+  write_lp(model, path);
   return read_file(path);
 }
 
-std::string rewrite_lp_text(std::string_view lp_text, const std::string& tag)
+std::string read_lp_and_write_back_to_lp(std::string_view lp_text, const std::string& tag)
 {
   return write_lp_to_string(read_lp_from_string<int, double>(lp_text), tag);
+}
+
+using quadratic_constraint = mps_data_model_t<int, double>::quadratic_constraint_t;
+
+// Sorted (index, value) view of a sparse vector so comparisons ignore storage order.
+std::vector<std::pair<int, double>> sorted_sparse(const std::vector<int>& indices,
+                                                  const std::vector<double>& values)
+{
+  std::vector<std::pair<int, double>> entries;
+  entries.reserve(indices.size());
+  for (size_t i = 0; i < indices.size(); ++i) {
+    entries.emplace_back(indices[i], values[i]);
+  }
+  std::sort(
+    entries.begin(), entries.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+  return entries;
+}
+
+// Sorted (row, col, value) view of COO triplets so comparisons ignore storage order.
+std::vector<std::tuple<int, int, double>> sorted_triplets(const std::vector<int>& rows,
+                                                          const std::vector<int>& cols,
+                                                          const std::vector<double>& vals)
+{
+  std::vector<std::tuple<int, int, double>> entries;
+  entries.reserve(vals.size());
+  for (size_t i = 0; i < vals.size(); ++i) {
+    entries.emplace_back(rows[i], cols[i], vals[i]);
+  }
+  std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+    if (std::get<0>(a) != std::get<0>(b)) { return std::get<0>(a) < std::get<0>(b); }
+    return std::get<1>(a) < std::get<1>(b);
+  });
+  return entries;
+}
+
+void expect_quadratic_constraint_equal(const quadratic_constraint& expected,
+                                       const quadratic_constraint& actual)
+{
+  EXPECT_EQ(expected.constraint_row_name, actual.constraint_row_name);
+  EXPECT_EQ(expected.constraint_row_type, actual.constraint_row_type);
+  EXPECT_NEAR(expected.rhs_value, actual.rhs_value, 1e-9);
+
+  const auto expected_linear = sorted_sparse(expected.linear_indices, expected.linear_values);
+  const auto actual_linear   = sorted_sparse(actual.linear_indices, actual.linear_values);
+  ASSERT_EQ(expected_linear.size(), actual_linear.size());
+  for (size_t t = 0; t < expected_linear.size(); ++t) {
+    EXPECT_EQ(expected_linear[t].first, actual_linear[t].first);
+    EXPECT_NEAR(expected_linear[t].second, actual_linear[t].second, 1e-9);
+  }
+
+  const auto expected_quad = sorted_triplets(expected.rows, expected.cols, expected.vals);
+  const auto actual_quad   = sorted_triplets(actual.rows, actual.cols, actual.vals);
+  ASSERT_EQ(expected_quad.size(), actual_quad.size());
+  for (size_t p = 0; p < expected_quad.size(); ++p) {
+    EXPECT_EQ(std::get<0>(expected_quad[p]), std::get<0>(actual_quad[p]));
+    EXPECT_EQ(std::get<1>(expected_quad[p]), std::get<1>(actual_quad[p]));
+    EXPECT_NEAR(std::get<2>(expected_quad[p]), std::get<2>(actual_quad[p]), 1e-9);
+  }
+}
+
+void expect_quadratic_content_equal(const mps_data_model_t<int, double>& expected,
+                                    const mps_data_model_t<int, double>& actual)
+{
+  EXPECT_EQ(expected.get_sense(), actual.get_sense());
+  EXPECT_EQ(expected.get_variable_names(), actual.get_variable_names());
+
+  ASSERT_EQ(expected.has_quadratic_objective(), actual.has_quadratic_objective());
+  if (expected.has_quadratic_objective()) {
+    EXPECT_EQ(expected.get_quadratic_objective_offsets(), actual.get_quadratic_objective_offsets());
+    const auto expected_q = sorted_sparse(expected.get_quadratic_objective_indices(),
+                                          expected.get_quadratic_objective_values());
+    const auto actual_q   = sorted_sparse(actual.get_quadratic_objective_indices(),
+                                        actual.get_quadratic_objective_values());
+    ASSERT_EQ(expected_q.size(), actual_q.size());
+    for (size_t p = 0; p < expected_q.size(); ++p) {
+      EXPECT_EQ(expected_q[p].first, actual_q[p].first);
+      EXPECT_NEAR(expected_q[p].second, actual_q[p].second, 1e-9);
+    }
+  }
+
+  const auto& expected_qcs = expected.get_quadratic_constraints();
+  const auto& actual_qcs   = actual.get_quadratic_constraints();
+  ASSERT_EQ(expected_qcs.size(), actual_qcs.size());
+  for (size_t q = 0; q < expected_qcs.size(); ++q) {
+    expect_quadratic_constraint_equal(expected_qcs[q], actual_qcs[q]);
+  }
 }
 
 }  // namespace
@@ -69,7 +157,7 @@ std::string rewrite_lp_text(std::string_view lp_text, const std::string& tag)
 TEST(lp_writer, simple_lp_exact_output)
 {
   // Named rows/vars, mixed constraint senses, non-default bounds.
-  const std::string out = rewrite_lp_text(R"LP(
+  const std::string out = read_lp_and_write_back_to_lp(R"LP(
 Minimize
  obj: 3 x + 2 y - z
 Subject To
@@ -82,7 +170,7 @@ Bounds
  -5 <= z <= 5
 End
 )LP",
-                                          "simple_lp");
+                                                       "simple_lp");
 
   EXPECT_EQ(out,
             "Minimize\n"
@@ -100,14 +188,14 @@ End
 
 TEST(lp_writer, maximize_and_offset_exact_output)
 {
-  const std::string out = rewrite_lp_text(R"LP(
+  const std::string out = read_lp_and_write_back_to_lp(R"LP(
 Maximize
  obj: 2 a + 3 b + 7
 Subject To
  r1: a + b <= 4
 End
 )LP",
-                                          "max_offset");
+                                                       "max_offset");
 
   EXPECT_EQ(out,
             "Maximize\n"
@@ -153,7 +241,7 @@ TEST(lp_writer, unnamed_constraints_omit_names)
 
 TEST(lp_writer, mip_generals_binaries_exact_output)
 {
-  const std::string out = rewrite_lp_text(R"LP(
+  const std::string out = read_lp_and_write_back_to_lp(R"LP(
 Minimize
  obj: x + y + 2 z
 Subject To
@@ -167,7 +255,7 @@ Binaries
  z
 End
 )LP",
-                                          "mip");
+                                                       "mip");
 
   EXPECT_EQ(out,
             "Minimize\n"
@@ -186,7 +274,7 @@ End
 
 TEST(lp_writer, free_and_fixed_bounds_exact_output)
 {
-  const std::string out = rewrite_lp_text(R"LP(
+  const std::string out = read_lp_and_write_back_to_lp(R"LP(
 Minimize
  obj: p + q + r
 Subject To
@@ -197,7 +285,7 @@ Bounds
  r <= 9
 End
 )LP",
-                                          "bounds");
+                                                       "bounds");
 
   EXPECT_EQ(out,
             "Minimize\n"
@@ -214,14 +302,14 @@ End
 TEST(lp_writer, quadratic_objective_exact_output)
 {
   // min 0.5*(2 x^2 + 4 x*y + 6 y^2) + x  →  written with H = Q+Q^T convention
-  const std::string out = rewrite_lp_text(R"LP(
+  const std::string out = read_lp_and_write_back_to_lp(R"LP(
 Minimize
  obj: x + [ 2 x ^ 2 + 4 x * y + 6 y ^ 2 ] / 2
 Subject To
  c1: x + y >= 1
 End
 )LP",
-                                          "qp_obj");
+                                                       "qp_obj");
 
   EXPECT_EQ(out,
             "Minimize\n"
@@ -231,26 +319,46 @@ End
             "End\n");
 }
 
-TEST(lp_writer, quadratic_constraint_round_trip)
+TEST(lp_writer, quadratic_constraint_exact_output)
 {
-  // Retain one round-trip for QCQP content (parser/writer quadratic path).
-  const auto original = read_lp_from_string<int, double>(R"LP(
+  const std::string out = read_lp_and_write_back_to_lp(R"LP(
 Minimize
  obj: x + y
 Subject To
  lin: x + y <= 10
  qc: x + [ x ^ 2 + y ^ 2 ] <= 4
 End
-)LP");
-  const auto rewritten =
-    read_lp_from_string<int, double>(write_lp_to_string(original, "qcqp_rt"));
+)LP",
+                                                       "qc_exact");
 
-  EXPECT_EQ(original.get_sense(), rewritten.get_sense());
-  EXPECT_EQ(original.get_quadratic_constraints().size(),
-            rewritten.get_quadratic_constraints().size());
-  ASSERT_EQ(rewritten.get_quadratic_constraints().size(), 1u);
-  EXPECT_EQ(rewritten.get_quadratic_constraints()[0].constraint_row_name, "qc");
-  EXPECT_NEAR(rewritten.get_quadratic_constraints()[0].rhs_value, 4.0, 1e-9);
+  EXPECT_EQ(out,
+            "Minimize\n"
+            " obj: + 1 x + 1 y\n"
+            "Subject To\n"
+            " lin: + 1 x + 1 y <= 10\n"
+            " qc: + 1 x + [ + 1 x ^ 2 + 1 y ^ 2 ] <= 4\n"
+            "End\n");
+}
+
+TEST(lp_writer, quadratic_constraint_round_trip)
+{
+  // Retain one round-trip for QCQP content (parser/writer quadratic path).
+  const auto original  = read_lp_from_string<int, double>(R"LP(
+Minimize
+ obj: x + y + [ 4 x ^ 2 + 2 x * y ] / 2
+Subject To
+ lin: x + y <= 10
+ qc: 3 x - 2 y + [ x ^ 2 + 5 x * y + 2 y ^ 2 ] <= 4
+ qc2: y + [ 2 y ^ 2 ] <= 8
+End
+)LP");
+  const auto rewritten = read_lp_from_string<int, double>(write_lp_to_string(original, "qcqp_rt"));
+
+  // Guard against a vacuous comparison if the parser ever stops populating these.
+  ASSERT_TRUE(original.has_quadratic_objective());
+  ASSERT_EQ(original.get_quadratic_constraints().size(), 2u);
+
+  expect_quadratic_content_equal(original, rewritten);
 }
 
 }  // namespace cuopt::mathematical_optimization::io

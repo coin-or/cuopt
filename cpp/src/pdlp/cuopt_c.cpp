@@ -35,6 +35,7 @@
 using cuopt::mathematical_optimization::char_to_var_type;
 using cuopt::mathematical_optimization::csc_matrix_t;
 using cuopt::mathematical_optimization::csr_matrix_t;
+using cuopt::mathematical_optimization::file_format_t;
 using cuopt::mathematical_optimization::get_memory_backend_type;
 using cuopt::mathematical_optimization::is_valid_public_var_type_code;
 using cuopt::mathematical_optimization::lp_solution_interface_t;
@@ -328,9 +329,8 @@ cuopt_int_t cuOptWriteProblem(cuOptOptimizationProblem problem,
   problem_and_stream_view_t* problem_and_stream_view =
     static_cast<problem_and_stream_view_t*>(problem);
   try {
-    const auto file_format = (format == CUOPT_FILE_FORMAT_LP)
-                               ? cuopt::mathematical_optimization::file_format_t::lp
-                               : cuopt::mathematical_optimization::file_format_t::mps;
+    const auto file_format =
+      (format == CUOPT_FILE_FORMAT_LP) ? file_format_t::lp : file_format_t::mps;
     problem_and_stream_view->get_problem()->write_to_file(std::string(filename), file_format);
   } catch (const std::exception& e) {
     CUOPT_LOG_INFO("Error writing problem file: %s", e.what());
