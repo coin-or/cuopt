@@ -3605,6 +3605,16 @@ i_t barrier_solver_t<i_t, f_t>::gpu_compute_search_direction(iteration_data_t<i_
         raft::device_span<const f_t>(data.d_complementarity_target_.data() + cone_var_start, m_c),
         raft::device_span<f_t>(data.d_dz_.data() + cone_var_start, m_c),
         stream_view_);
+      recover_sparse_cone_dz(
+        raft::device_span<const f_t>(data.d_dx_.data() + cone_var_start, m_c),
+        data.cones(),
+        raft::device_span<const f_t>(data.d_complementarity_target_.data() + cone_var_start, m_c),
+        raft::device_span<f_t>(data.d_dz_.data() + cone_var_start, m_c),
+        raft::device_span<const f_t>(data.cone_kkt_data_.sparse_Hs_diag.data(),
+                                     data.cone_kkt_data_.sparse_Hs_diag.size()),
+        raft::device_span<const f_t>(data.d_augmented_soln_.data() + lp.num_cols + lp.num_rows,
+                                     2 * static_cast<size_t>(data.cones().n_sparse_cones)),
+        stream_view_);
     }
 
     recover_linear_orthant_dz<i_t, f_t>(
