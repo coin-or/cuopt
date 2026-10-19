@@ -33,7 +33,7 @@ target_include_directories(GRPC_CLIENT_TEST
 
 target_link_libraries(GRPC_CLIENT_TEST
     PRIVATE
-    cuopt
+    cuopt_static
     GTest::gmock
     GTest::gmock_main
     gRPC::grpc++
@@ -44,7 +44,7 @@ if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
   target_link_options(GRPC_CLIENT_TEST PRIVATE -Wl,--enable-new-dtags)
 endif()
 
-add_test(NAME GRPC_CLIENT_TEST COMMAND GRPC_CLIENT_TEST)
+rapids_test_add(NAME GRPC_CLIENT_TEST COMMAND GRPC_CLIENT_TEST INSTALL_COMPONENT_SET testing)
 set_tests_properties(GRPC_CLIENT_TEST PROPERTIES LABELS "numopt")
 
 install(
@@ -76,7 +76,7 @@ target_include_directories(GRPC_PIPE_SERIALIZATION_TEST
 
 target_link_libraries(GRPC_PIPE_SERIALIZATION_TEST
     PRIVATE
-    cuopt
+    cuopt_static
     GTest::gtest
     GTest::gtest_main
     protobuf::libprotobuf
@@ -86,11 +86,42 @@ if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
   target_link_options(GRPC_PIPE_SERIALIZATION_TEST PRIVATE -Wl,--enable-new-dtags)
 endif()
 
-add_test(NAME GRPC_PIPE_SERIALIZATION_TEST COMMAND GRPC_PIPE_SERIALIZATION_TEST)
+rapids_test_add(NAME GRPC_PIPE_SERIALIZATION_TEST COMMAND GRPC_PIPE_SERIALIZATION_TEST
+                 INSTALL_COMPONENT_SET testing)
 set_tests_properties(GRPC_PIPE_SERIALIZATION_TEST PROPERTIES LABELS "numopt")
 
 install(
     TARGETS GRPC_PIPE_SERIALIZATION_TEST
+    COMPONENT testing
+    DESTINATION bin/gtests/libcuopt
+    EXCLUDE_FROM_ALL
+)
+
+# ##################################################################################################
+# - gRPC worker spawn argument checks --------------------------------------------------------------
+# Runs cuopt_grpc_server with internal and user argv. Both cases exit in the
+# argument parser, so no GPU or listening socket is required.
+
+add_executable(GRPC_WORKER_SPAWN_TEST ${CMAKE_CURRENT_SOURCE_DIR}/grpc_worker_spawn_test.cpp)
+
+target_link_libraries(GRPC_WORKER_SPAWN_TEST PRIVATE GTest::gtest GTest::gtest_main)
+
+if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
+  target_link_options(GRPC_WORKER_SPAWN_TEST PRIVATE -Wl,--enable-new-dtags)
+endif()
+
+add_dependencies(GRPC_WORKER_SPAWN_TEST cuopt_grpc_server)
+
+add_test(
+    NAME GRPC_WORKER_SPAWN_TEST
+    COMMAND ${CMAKE_COMMAND} -E env
+        "CUOPT_GRPC_SERVER_PATH=$<TARGET_FILE:cuopt_grpc_server>"
+        $<TARGET_FILE:GRPC_WORKER_SPAWN_TEST>
+)
+set_tests_properties(GRPC_WORKER_SPAWN_TEST PROPERTIES LABELS "numopt")
+
+install(
+    TARGETS GRPC_WORKER_SPAWN_TEST
     COMPONENT testing
     DESTINATION bin/gtests/libcuopt
     EXCLUDE_FROM_ALL
@@ -119,12 +150,16 @@ target_include_directories(GRPC_INTEGRATION_TEST
 
 target_link_libraries(GRPC_INTEGRATION_TEST
     PRIVATE
-    cuopt
+    cuopt_static
     GTest::gmock
     GTest::gmock_main
     gRPC::grpc++
     protobuf::libprotobuf
 )
+
+if(CUOPT_ENABLE_GRPC_ROUTING)
+    target_compile_definitions(GRPC_INTEGRATION_TEST PRIVATE CUOPT_ENABLE_GRPC_ROUTING)
+endif()
 
 if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
   target_link_options(GRPC_INTEGRATION_TEST PRIVATE -Wl,--enable-new-dtags)
@@ -133,11 +168,15 @@ endif()
 # Integration tests need the server binary to be built first
 add_dependencies(GRPC_INTEGRATION_TEST cuopt_grpc_server)
 
-add_test(
+rapids_test_add(
     NAME GRPC_INTEGRATION_TEST
     COMMAND ${CMAKE_COMMAND} -E env
         "CUOPT_GRPC_SERVER_PATH=$<TARGET_FILE:cuopt_grpc_server>"
         $<TARGET_FILE:GRPC_INTEGRATION_TEST>
+    # The COMMAND's first token is cmake itself, not the test target, so
+    # rapids_test_add can't infer what to install -- name it explicitly.
+    INSTALL_COMPONENT_SET testing
+    INSTALL_TARGET GRPC_INTEGRATION_TEST
 )
 set_tests_properties(GRPC_INTEGRATION_TEST PROPERTIES LABELS "numopt")
 

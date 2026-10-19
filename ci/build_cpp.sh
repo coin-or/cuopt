@@ -8,11 +8,14 @@ set -euo pipefail
 
 source rapids-configure-sccache
 
-source rapids-date-string
+source rapids-datetime-string
 
 export CMAKE_GENERATOR=Ninja
 
 rapids-print-env
+
+rapids-logger "Verify gRPC codegen output matches committed files"
+./ci/verify_grpc_codegen.sh
 
 rapids-logger "Begin cpp build"
 

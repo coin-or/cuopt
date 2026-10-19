@@ -30,9 +30,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 
-import cuopt_server.utils.health_check as health_check
+import cuopt_server.utils.deprecated.health_check as health_check
 import cuopt_server.utils.settings as settings
 from cuopt_server._version import __version__
+from cuopt_server.utils.client_version import check_client_version
 from cuopt_server.utils.data_definition import (
     DeleteRequestModel,
     DeleteResponse,
@@ -69,7 +70,21 @@ from cuopt_server.utils.exceptions import (
     http_exception_handler,
     validation_exception_handler,
 )
-from cuopt_server.utils.job_queue import (
+from cuopt_server.utils.http_codec import (
+    encode,
+    get_data,
+    get_format,
+    mime_json,
+    mime_msgpack,
+    mime_pickle,
+    mime_wild,
+    mime_zlib,
+)
+from cuopt_server.utils.local_files import (
+    get_output_name,
+    validate_file_path,
+)
+from cuopt_server.utils.deprecated.job_queue import (
     BaseResult,
     BinaryJobResult,
     NVCFJobResult,
@@ -79,17 +94,11 @@ from cuopt_server.utils.job_queue import (
     abort_all,
     abort_by_id,
     add_cache_entry,
-    check_client_version,
     delete_cache_entry,
     get_cache_content_type,
     get_incumbents_for_id,
     get_solution_for_id,
     get_warmstart_data_for_id,
-    mime_json,
-    mime_msgpack,
-    mime_pickle,
-    mime_wild,
-    mime_zlib,
     status_by_id,
     update_cache_entry,
 )
@@ -173,65 +182,6 @@ def health():
         raise HTTPException(status_code=500, detail=f"{msg}")
 
 
-# Get name for file that stores the result of Solve
-def get_output_name(resultdir, CUOPT_DATA_FILE, CUOPT_RESULT_FILE):
-    # Prevent absolute paths, or navigating with ../..
-    if CUOPT_RESULT_FILE.startswith("/") or ".." in CUOPT_RESULT_FILE:
-        CUOPT_RESULT_FILE = ""
-    if not resultdir:
-        res = ""
-    elif CUOPT_RESULT_FILE:
-        res = CUOPT_RESULT_FILE
-    elif CUOPT_DATA_FILE:
-        res = os.path.basename(CUOPT_DATA_FILE) + ".result"
-    else:
-        res = str(uuid.uuid4())
-    return res
-
-
-# Validate if given data file and file path exists
-def validate_file_path(cuopt_data_file):
-    ddir = settings.get_data_dir()
-    if not ddir:
-        logging.error("cuopt data directory not set!")
-        raise HTTPException(
-            status_code=400,
-            detail="cuopt data directory not set",
-        )
-
-    if os.path.isabs(cuopt_data_file):
-        raise HTTPException(
-            status_code=400,
-            detail="cuopt-data-file must be relative to CUOPT_DATA_DIR",
-        )
-
-    root = os.path.realpath(ddir)
-    file_path = os.path.realpath(os.path.join(root, cuopt_data_file))
-    if os.path.commonpath([root, file_path]) != root:
-        raise HTTPException(
-            status_code=400,
-            detail="cuopt-data-file must stay inside CUOPT_DATA_DIR",
-        )
-
-    if not os.path.exists(file_path):
-        logging.error("cuopt-data-file does not exist")
-        raise HTTPException(
-            status_code=400,
-            detail=f"specified data file does not exist: {cuopt_data_file}",
-        )
-
-    if not os.path.isfile(file_path):
-        logging.error("cuopt-data-file is not a regular file")
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"specified data file is not a regular file: {cuopt_data_file}"
-            ),
-        )
-
-    return file_path
-
-
 app_exit = None
 job_queue = None
 abort_queue = None
@@ -265,52 +215,6 @@ class SolverException(Exception):
         self.response = response
 
 
-def encode(result, accept, job_result=False):
-    if accept not in [mime_json, mime_msgpack, mime_zlib] + mime_wild:
-        accept = mime_json
-
-    # This is an exception packaged up elsewhere
-    if isinstance(result, JSONResponse):
-        status_code = result.status_code
-        result = json.loads(result.body)
-        result["error_result"] = job_result
-        if accept == mime_json:
-            return JSONResponse(result, status_code)
-    else:
-        status_code = 200
-
-    # Expect a dictionary at this point
-    if accept == mime_json:
-        logging.debug("job_result returning json")
-        r = result
-    elif accept == mime_zlib:
-        logging.debug("job_result returning zlib")
-        d = bytes(json.dumps(result), encoding="utf-8")
-        r = Response(
-            content=zlib.compress(d, zlib.Z_BEST_SPEED),
-            media_type=mime_zlib,
-            status_code=status_code,
-        )
-    else:
-        logging.debug("job_result returning msgpack")
-        r = Response(
-            content=msgpack.dumps(result),
-            media_type=mime_msgpack,
-            status_code=status_code,
-        )
-    return r
-
-
-def get_format(mime_type):
-    f = {
-        mime_json: "json",
-        mime_zlib: "zlib",
-        mime_msgpack: "msgpack",
-        mime_pickle: "pickle",
-    }
-    return f[mime_type]
-
-
 @app.get(
     "/cuopt/log/{id}",
     description="Note: This is for self-hosted. "
@@ -341,6 +245,18 @@ def getsolverlogs(
                 status_code=415,
                 detail=f"Unsupported Accept value {accept}, "
                 f"supported values are {[mime_json, mime_msgpack, mime_zlib]}",
+            )
+
+        try:
+            uuid.UUID(id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="Invalid request id format"
+            )
+
+        if frombyte < 0:
+            raise HTTPException(
+                status_code=422, detail="frombyte must be >= 0"
             )
 
         # result_dir is guaranteed to exist on startup
@@ -446,6 +362,13 @@ def deletesolverlogs(
                 status_code=415,
                 detail=f"Unsupported Accept value {accept}, "
                 f"supported values are {[mime_json, mime_msgpack, mime_zlib]}",
+            )
+
+        try:
+            uuid.UUID(id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="Invalid request id format"
             )
 
         # Delete the log for the request if the request is not done
@@ -571,8 +494,17 @@ async def postsolution(
             buf = bytearray(sz)
             solution = buf
 
-        await get_data(buf, request)
+        try:
+            await get_data(buf, request)
+        except Exception:
+            if s:
+                buf.release()
+                s.close()
+                s.unlink()
+            r.unregister_result()
+            raise
         if s:
+            buf.release()
             s.close()
         if isinstance(solution, bytearray):
             solution = bytes(solution)
@@ -952,7 +884,7 @@ async def postrequest(
     ),
     incumbent_set_solutions: Optional[bool] = Query(
         default=False,
-        description="If set to True, MIP problems will register a set-solution callback (this disables presolve).",  # noqa
+        description="If set to True, MIP problems will register a set-solution callback. The configured presolve setting is preserved, with dual reductions disabled.",  # noqa
     ),
     solver_logs: Optional[bool] = Query(
         default=False,
@@ -1118,8 +1050,19 @@ async def postrequest(
                 buf = bytearray(sz)
                 data_bytes = buf  # save this reference for later
 
-            await get_data(buf, request)
+            try:
+                await get_data(buf, request)
+            except Exception:
+                if s:
+                    buf.release()
+                    s.close()
+                    s.unlink()
+                if cache:
+                    delete_cache_entry(id)
+                r.unregister_result()
+                raise
             if s:
+                buf.release()
                 s.close()
             elif cache and data_bytes:
                 # If shared memory is not enabled, save the byte array
@@ -1209,16 +1152,6 @@ async def postrequest(
 
     except Exception as e:
         return encode(exception_handler(e), accept)
-
-
-async def get_data(buf, request):
-    pos = 0
-    try:
-        async for chunk in request.stream():
-            buf[pos : pos + len(chunk)] = chunk
-            pos = pos + len(chunk)
-    except Exception:
-        print("exception in get_data")
 
 
 async def get_body(request: Request):
@@ -1316,6 +1249,52 @@ def cuopt(request: Request, data_bytes: bytes = Depends(get_body)):
             )
         )
 
+        # Canonicalize NVCF_LARGE_OUTPUT_DIR before use as a write directory.
+        # Headers are untrusted; resolve symlinks and require absolute paths.
+        # If CUOPT_NVCF_OUTPUT_ROOT is set, further require containment within
+        # that deployment-configured root.
+        large_output_dir = ""
+        if NVCF_LARGE_OUTPUT_DIR:
+            if not os.path.isabs(NVCF_LARGE_OUTPUT_DIR):
+                raise HTTPException(
+                    status_code=400,
+                    detail="nvcf-large-output-dir must be an absolute path",
+                )
+            large_output_dir = os.path.realpath(NVCF_LARGE_OUTPUT_DIR)
+            nvcf_output_root = os.environ.get("CUOPT_NVCF_OUTPUT_ROOT", "")
+            if nvcf_output_root:
+                trusted_root = os.path.realpath(nvcf_output_root)
+                if (
+                    os.path.commonpath([trusted_root, large_output_dir])
+                    != trusted_root
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="nvcf-large-output-dir must be within the configured output root",
+                    )
+
+        # Validate NVCF asset path before registering the result so that
+        # validation failures do not leave a registered-but-unreachable result.
+        file_path = None
+        if NVCF_FUNCTION_ASSET_IDS:
+            asset_id = NVCF_FUNCTION_ASSET_IDS.split(",")[0]
+            if not NVCF_ASSET_DIR:
+                raise HTTPException(
+                    status_code=400,
+                    detail="nvcf-asset-dir must be set when nvcf-function-asset-ids is provided",
+                )
+            asset_root = os.path.realpath(NVCF_ASSET_DIR)
+            candidate = os.path.realpath(os.path.join(asset_root, asset_id))
+            if (
+                os.path.isabs(asset_id)
+                or os.path.commonpath([asset_root, candidate]) != asset_root
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Asset path must stay within the asset directory",
+                )
+            file_path = candidate
+
         # Create a NVCFJobResult to hold the solution
         if os.environ.get("CUOPT_SERVER_TEST_LARGE_RESULT", False):
             maxresult = 0
@@ -1324,13 +1303,10 @@ def cuopt(request: Request, data_bytes: bytes = Depends(get_body)):
                 maxresult = int(NVCF_MAX_RESPONSE_SIZE_BYTES) / 1000
             except Exception:
                 _, maxresult, _ = settings.get_result_dir()
-        r = NVCFJobResult(NVCF_LARGE_OUTPUT_DIR, maxresult, accept)
+        r = NVCFJobResult(large_output_dir, maxresult, accept)
         id = r.register_result()
 
-        if NVCF_FUNCTION_ASSET_IDS:
-            file_path = os.path.join(
-                NVCF_ASSET_DIR, NVCF_FUNCTION_ASSET_IDS.split(",")[0]
-            )
+        if file_path is not None:
             job = SolverBinaryJobPath(
                 id,
                 warnings,

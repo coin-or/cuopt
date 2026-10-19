@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <cuopt/export.hpp>
 #include <cuopt/mathematical_optimization/cpu_optimization_problem_solution.hpp>
 #include <cuopt/mathematical_optimization/mip/solver_solution.hpp>
 #include <cuopt/mathematical_optimization/optimization_problem_solution_interface.hpp>
@@ -14,9 +15,9 @@
 #include <cuopt/mathematical_optimization/utilities/cython_types.hpp>
 
 #include <raft/core/copy.hpp>
-#include <rmm/cuda_stream_view.hpp>
 
-namespace cuopt::mathematical_optimization {
+namespace cuopt {
+namespace CUOPT_EXPORT mathematical_optimization {
 
 /**
  * @brief GPU-backed LP solution (wraps optimization_problem_solution_t)
@@ -63,7 +64,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
                solution_.get_primal_solution().data(),
                solution_.get_primal_solution().size(),
                stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -75,7 +76,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
                solution_.get_dual_solution().data(),
                solution_.get_dual_solution().size(),
                stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -86,7 +87,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
     auto stream = reduced_cost.stream();
     std::vector<f_t> result(reduced_cost.size());
     raft::copy(result.data(), reduced_cost.data(), reduced_cost.size(), stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -152,7 +153,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
                ws.current_primal_solution_.data(),
                ws.current_primal_solution_.size(),
                stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -165,7 +166,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
     std::vector<f_t> result(ws.current_dual_solution_.size());
     raft::copy(
       result.data(), ws.current_dual_solution_.data(), ws.current_dual_solution_.size(), stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -178,7 +179,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
     std::vector<f_t> result(ws.initial_primal_average_.size());
     raft::copy(
       result.data(), ws.initial_primal_average_.data(), ws.initial_primal_average_.size(), stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -191,7 +192,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
     std::vector<f_t> result(ws.initial_dual_average_.size());
     raft::copy(
       result.data(), ws.initial_dual_average_.data(), ws.initial_dual_average_.size(), stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -203,7 +204,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
     auto stream = ws.current_ATY_.stream();
     std::vector<f_t> result(ws.current_ATY_.size());
     raft::copy(result.data(), ws.current_ATY_.data(), ws.current_ATY_.size(), stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -216,7 +217,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
     std::vector<f_t> result(ws.sum_primal_solutions_.size());
     raft::copy(
       result.data(), ws.sum_primal_solutions_.data(), ws.sum_primal_solutions_.size(), stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -228,7 +229,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
     auto stream = ws.sum_dual_solutions_.stream();
     std::vector<f_t> result(ws.sum_dual_solutions_.size());
     raft::copy(result.data(), ws.sum_dual_solutions_.data(), ws.sum_dual_solutions_.size(), stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -243,7 +244,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
                ws.last_restart_duality_gap_primal_solution_.data(),
                ws.last_restart_duality_gap_primal_solution_.size(),
                stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -258,7 +259,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
                ws.last_restart_duality_gap_dual_solution_.data(),
                ws.last_restart_duality_gap_dual_solution_.size(),
                stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -364,7 +365,7 @@ class gpu_lp_solution_t : public lp_solution_interface_t<i_t, f_t> {
 
   /**
    * @brief Polymorphic conversion to Python return type (interface override)
-   * Populates the gpu_solutions_t variant inside linear_programming_ret_t.
+   * Populates the lp_gpu_ptr alternative inside linear_programming_ret_t.
    */
   cuopt::cython::linear_programming_ret_t to_python_lp_ret() override
   {
@@ -404,7 +405,7 @@ class gpu_mip_solution_t : public mip_solution_interface_t<i_t, f_t> {
     std::vector<f_t> result(solution_.get_solution().size());
     raft::copy(
       result.data(), solution_.get_solution().data(), solution_.get_solution().size(), stream);
-    stream.synchronize();
+    stream.sync();
     return result;
   }
 
@@ -468,7 +469,7 @@ class gpu_mip_solution_t : public mip_solution_interface_t<i_t, f_t> {
 
   /**
    * @brief Polymorphic conversion to Python return type (interface override)
-   * Populates the gpu_buffer variant inside mip_ret_t.
+   * Populates the mip_gpu_ptr alternative inside mip_ret_t.
    */
   cuopt::cython::mip_ret_t to_python_mip_ret() override { return to_mip_ret_t(); }
 
@@ -476,4 +477,5 @@ class gpu_mip_solution_t : public mip_solution_interface_t<i_t, f_t> {
   mip_solution_t<i_t, f_t> solution_;
 };
 
-}  // namespace cuopt::mathematical_optimization
+}  // namespace CUOPT_EXPORT mathematical_optimization
+}  // namespace cuopt

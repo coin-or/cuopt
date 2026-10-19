@@ -16,13 +16,15 @@
 #include <pdlp/saddle_point.hpp>
 #include <pdlp/swap_and_resize_helper.cuh>
 
+#include <cuda/stream>
 #include <raft/core/handle.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/device_scalar.hpp>
 #include <rmm/device_uvector.hpp>
 
 #include <thrust/universal_vector.h>
+
+#include <optional>
 
 namespace cuopt::mathematical_optimization::pdlp {
 template <typename i_t, typename f_t>
@@ -81,9 +83,21 @@ class adaptive_step_size_strategy_t {
   const rmm::device_uvector<f_t>& get_norm_squared_delta_primal() const;
   const rmm::device_uvector<f_t>& get_norm_squared_delta_dual() const;
 
+  // Mutable overloads — used by the multi-GPU path to NCCL-allreduce the
+  // per-shard scalar contributions in place and to mirror them back to the
+  // master step_size_strategy_.
+  rmm::device_uvector<f_t>& get_interaction();
+  rmm::device_uvector<f_t>& get_norm_squared_delta_primal();
+  rmm::device_uvector<f_t>& get_norm_squared_delta_dual();
+
+  // owned_primal_size / owned_cstr_size are mGPU overrides.
+  // mGPU needs to know owned size to restrict the reductions to the owned prefix.
+  // When unset, reductions use the full primal/dual sizes from the saddle point state.
   void compute_interaction_and_movement(rmm::device_uvector<f_t>& tmp_primal,
                                         cusparse_view_t<i_t, f_t>& cusparse_view,
-                                        saddle_point_state_t<i_t, f_t>& current_saddle_point_state);
+                                        saddle_point_state_t<i_t, f_t>& current_saddle_point_state,
+                                        std::optional<i_t> owned_primal_size = std::nullopt,
+                                        std::optional<i_t> owned_cstr_size   = std::nullopt);
 
   void swap_context(const thrust::universal_host_pinned_vector<swap_pair_t<i_t>>& swap_pairs);
   void resize_context(i_t new_size);
@@ -92,7 +106,7 @@ class adaptive_step_size_strategy_t {
   const bool batch_mode_;
 
   raft::handle_t const* handle_ptr_{nullptr};
-  rmm::cuda_stream_view stream_view_;
+  cuda::stream_ref stream_view_;
 
   i_t primal_size_;
   i_t dual_size_;

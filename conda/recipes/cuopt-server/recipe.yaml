@@ -1,12 +1,10 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 schema_version: 1
 
 context:
   version: ${{ env.get("RAPIDS_PACKAGE_VERSION") }}
-  date_string: '${{ env.get("RAPIDS_DATE_STRING") }}'
-  py_version: ${{ env.get("RAPIDS_PY_VERSION") }}
-  py_buildstring: ${{ py_version | version_to_buildstring }}
+  datetime_string: '${{ env.get("RAPIDS_DATETIME_STRING") }}'
   head_rev: '${{ git.head_rev(".")[:8] }}'
 
 package:
@@ -17,18 +15,18 @@ source:
   path: ../../..
 
 build:
-  string: py${{ py_buildstring }}_${{ date_string }}_${{ head_rev }}
+  noarch: python
+  string: ${{ datetime_string }}_${{ head_rev }}
   script:
     content: |
-      # We pass an explicit matrix-entry here along with `disable-cuda=true` to
-      # avoid `rapids-build-backend` trying to use an unavailable `nvcc` to
-      # lookup a `CUDA_VERSION` that we don't need for the conda build.
-      python -m pip install -C rapidsai.disable-cuda=true -C rapidsai.matrix-entry='cuda=12.x;cuda_suffixed=true' ./python/cuopt_server
+      ./build.sh cuopt_server
+    env:
+      RAPIDS_CUDA_VERSION: ${{ env.get("RAPIDS_CUDA_VERSION") }}
 
 requirements:
   host:
     - pip
-    - python-gil =${{ py_version }}
+    - python >=3.12
     - rapids-build-backend >=0.4.0,<0.5.0
     - setuptools>=77.0.0
   run:
@@ -40,7 +38,7 @@ requirements:
     - numpy >=2.0,<3.0
     - pandas>=2
     - psutil>=6.0.0
-    - python
+    - python >=3.12
     - uvicorn =0.34
 
 tests:

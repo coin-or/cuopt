@@ -34,9 +34,10 @@ static void init_handler(const raft::handle_t* handle_ptr)
 {
   // Init cuBlas / cuSparse context here to avoid having it during solving time
   RAFT_CUBLAS_TRY(raft::linalg::detail::cublassetpointermode(
-    handle_ptr->get_cublas_handle(), CUBLAS_POINTER_MODE_DEVICE, handle_ptr->get_stream()));
-  RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsesetpointermode(
-    handle_ptr->get_cusparse_handle(), CUSPARSE_POINTER_MODE_DEVICE, handle_ptr->get_stream()));
+    handle_ptr->get_cublas_handle(), CUBLAS_POINTER_MODE_DEVICE, handle_ptr->get_stream().get()));
+  RAFT_CUSPARSE_TRY(raft::sparse::detail::cusparsesetpointermode(handle_ptr->get_cusparse_handle(),
+                                                                 CUSPARSE_POINTER_MODE_DEVICE,
+                                                                 handle_ptr->get_stream().get()));
 }
 
 TEST(barrier, chess_set)
@@ -261,12 +262,12 @@ TEST(barrier, qplib_8515_ruiz_forced_off)
 
   auto settings                    = pdlp_solver_settings_t<int, double>{};
   settings.method                  = method_t::Barrier;
-  settings.qcqp_ruiz_equilibration = 0;  // force off
+  settings.qcqp_ruiz_equilibration = 0;   // force off
+  settings.iteration_limit         = 50;  // equilibrated needs ~14; forced-off can't finish in 50
 
   auto solution = solve_lp(&handle, mps_data, settings);
 
-  const int iters = solution.get_additional_termination_information().number_of_steps_taken;
-  EXPECT_GT(iters, 50);
+  EXPECT_EQ(solution.get_termination_status(), pdlp_termination_status_t::IterationLimit);
 }
 
 }  // namespace cuopt::mathematical_optimization::simplex::test

@@ -8,10 +8,12 @@
 #pragma once
 
 #include <branch_and_bound/shared_strong_branching_context.hpp>
+#include <cuopt/mathematical_optimization/io/mps_data_model.hpp>
 #include <cuopt/mathematical_optimization/pdlp/solver_settings.hpp>
 #include <cuopt/mathematical_optimization/pdlp/solver_solution.hpp>
 
 #include <pdlp/cusparse_view.hpp>
+#include <pdlp/distributed_pdlp/multi_gpu_engine.hpp>
 #include <pdlp/initial_scaling_strategy/initial_scaling.cuh>
 #include <pdlp/pdhg.hpp>
 #include <pdlp/pdlp_climber_strategy.hpp>
@@ -25,6 +27,7 @@
 
 #include <utilities/timer.hpp>
 
+#include <cuda/stream>
 #include <raft/core/handle.hpp>
 
 #include <rmm/device_scalar.hpp>
@@ -57,10 +60,18 @@ class pdlp_solver_t {
    *
    * @param[in] op_problem An mip::problem_t<i_t, f_t> object with a
    * representation of a linear program
+   * @param[in] is_distributed_sub_pdlp true when constructed as a shard of a
+   * multi-GPU solve.
    */
   pdlp_solver_t(mip::problem_t<i_t, f_t>& op_problem,
                 pdlp_solver_settings_t<i_t, f_t> const& settings,
-                bool is_batch_mode = false);
+                bool is_batch_mode           = false,
+                bool is_distributed_sub_pdlp = false);
+
+  // Multi-GPU solver constructor
+  pdlp_solver_t(mip::problem_t<i_t, f_t>& placeholder_problem,
+                cuopt::mathematical_optimization::io::mps_data_model_t<i_t, f_t> const& mps,
+                pdlp_solver_settings_t<i_t, f_t> const& settings);
 
   optimization_problem_solution_t<i_t, f_t> run_solver(const timer_t& timer);
 
@@ -97,6 +108,27 @@ class pdlp_solver_t {
 
   void compute_initial_step_size();
   void compute_initial_primal_weight();
+  // Thin dispatch wrappers used by run_solver so single-GPU and multi-GPU
+  // callers hit the same call sites.
+  void scale_problem();
+  void create_spmv_op_plans();
+
+  // Needed by multi-GPU to mutate them
+  pdlp_initial_scaling_strategy_t<i_t, f_t>& get_initial_scaling_strategy();
+  pdlp_restart_strategy_t<i_t, f_t>& get_restart_strategy();
+
+  // Per-shard primal/dual step sizes are private state on pdlp_solver_t but
+  // are needed inside the multi-GPU dispatch paths that fan out a master cub
+  // call across all shards' pdhg_solver_t::*_transform methods.
+  rmm::device_uvector<f_t>& get_primal_step_size() { return primal_step_size_; }
+  rmm::device_uvector<f_t>& get_dual_step_size() { return dual_step_size_; }
+  // Multi-GPU restart broadcast needs to mirror master's primal_weight /
+  // best_primal_weight onto every shard after each cuPDLPx restart so that
+  // downstream shard-side restart machinery stays in sync with master.
+  rmm::device_uvector<f_t>& get_primal_weight() { return primal_weight_; }
+  rmm::device_uvector<f_t>& get_best_primal_weight() { return best_primal_weight_; }
+  rmm::device_uvector<f_t>& get_step_size() { return step_size_; }
+  raft::handle_t const* get_handle_ptr() const { return handle_ptr_; }
 
  private:
   void print_termination_criteria(const timer_t& timer, bool is_average = false);
@@ -125,7 +157,7 @@ class pdlp_solver_t {
                  [[maybe_unused]] bool is_major_iteration);
   void take_adaptive_step(i_t total_pdlp_iterations, bool is_major_iteration);
   void take_constant_step(bool is_major_iteration);
-
+  void project_initial_primal_transform();
   /**
    * @brief Update current primal & dual solution by setting new solutions and triggering a
    * recomputation of the primal weight and step size
@@ -145,7 +177,7 @@ class pdlp_solver_t {
   bool batch_mode_{false};
 
   raft::handle_t const* handle_ptr_;
-  rmm::cuda_stream_view stream_view_;
+  cuda::stream_ref stream_view_;
   // Intentionnaly take a copy to avoid an unintentional modification in the calling context
   const pdlp_solver_settings_t<i_t, f_t> settings_;
   mip::shared_strong_branching_context_view_t<i_t, f_t> sb_view_{settings_.shared_sb_solved};
@@ -184,9 +216,18 @@ class pdlp_solver_t {
   pdlp::adaptive_step_size_strategy_t<i_t, f_t> step_size_strategy_;
 
  public:
+  // std::optional because multi_gpu_engine_t is non-default-constructible
+  // (collectively bootstraps NCCL, owns RMM resources). Stays nullopt in
+  // single-GPU mode; emplaced by the multi-GPU ctor.
+  std::optional<multi_gpu_engine_t<i_t, f_t>> multi_gpu_engine;
+
   // Inner solver
   pdlp::pdhg_solver_t<i_t, f_t> pdhg_solver_;
-  void halpern_update();
+
+  // This solver is the multi-GPU PDLP master orchestrator iff it owns the
+  // multi-GPU engine. Shards (sub-solvers) leave the optional empty -> false.
+  // Single-GPU PDLP reports false.
+  bool is_distributed_master() const;
 
  private:
   void compute_fixed_error(std::vector<int>& has_restarted);

@@ -5,6 +5,7 @@
  */
 /* clang-format on */
 
+#include <cuopt/export.hpp>
 #include <cuopt/mathematical_optimization/io/mps_data_model.hpp>
 #include <utilities/error.hpp>
 
@@ -199,7 +200,8 @@ void mps_data_model_t<i_t, f_t>::append_quadratic_constraint(i_t constraint_row_
     qc.rows.assign(rows.begin(), rows.end());
     qc.cols.assign(cols.begin(), cols.end());
     qc.vals.assign(vals.begin(), vals.end());
-    canonicalize_coo_matrix(qc.rows, qc.cols, qc.vals);
+    coo_canonicalization_scratch_t<i_t, f_t> scratch;
+    canonicalize_coo_matrix(qc.rows, qc.cols, qc.vals, scratch);
   }
 
   quadratic_constraints_.push_back(std::move(qc));
@@ -463,19 +465,20 @@ template <typename i_t, typename f_t>
 void canonicalize_quadratic_constraints(
   std::vector<typename mps_data_model_t<i_t, f_t>::quadratic_constraint_t>& constraints)
 {
+  coo_canonicalization_scratch_t<i_t, f_t> scratch;
   for (auto& qc : constraints) {
-    canonicalize_coo_matrix(qc.rows, qc.cols, qc.vals);
+    canonicalize_coo_matrix(qc.rows, qc.cols, qc.vals, scratch);
   }
 }
 
 // NOTE: Explicitly instantiate all types here in order to avoid linker error
-template class mps_data_model_t<int, float>;
+template class CUOPT_EXPORT mps_data_model_t<int, float>;
 
-template class mps_data_model_t<int, double>;
+template class CUOPT_EXPORT mps_data_model_t<int, double>;
 
-template void canonicalize_quadratic_constraints<int, float>(
+template CUOPT_EXPORT void canonicalize_quadratic_constraints<int, float>(
   std::vector<mps_data_model_t<int, float>::quadratic_constraint_t>&);
-template void canonicalize_quadratic_constraints<int, double>(
+template CUOPT_EXPORT void canonicalize_quadratic_constraints<int, double>(
   std::vector<mps_data_model_t<int, double>::quadratic_constraint_t>&);
 //  TODO current raft to cusparse wrappers only support int64_t
 //  can be CUSPARSE_INDEX_16U, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_64I

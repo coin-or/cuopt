@@ -7,41 +7,39 @@
 
 #pragma once
 
+#include <cuopt/export.hpp>
 // Include the solution interface definitions so unique_ptr can properly delete them
 #include <cuopt/mathematical_optimization/optimization_problem_solution_interface.hpp>
 
 #include <memory>
 
-namespace cuopt::mathematical_optimization {
+namespace cuopt {
+namespace CUOPT_EXPORT mathematical_optimization {
 
 // Forward declarations (only declaration needed, not definition)
 template <typename i_t, typename f_t>
 class cpu_optimization_problem_t;
 
 template <typename i_t, typename f_t>
-struct pdlp_solver_settings_t;
-
-template <typename i_t, typename f_t>
-struct mip_solver_settings_t;
+class solver_settings_t;
 
 // ============================================================================
 // Remote Execution Functions
 // ============================================================================
 
 /**
- * @brief Solve LP problem remotely (CPU backend)
+ * @brief Solve an LP remotely.
  */
 template <typename i_t, typename f_t>
 std::unique_ptr<lp_solution_interface_t<i_t, f_t>> solve_lp_remote(
-  cpu_optimization_problem_t<i_t, f_t> const& cpu_problem,
-  pdlp_solver_settings_t<i_t, f_t> const& settings);
+  cpu_optimization_problem_t<i_t, f_t> const& cpu_problem, solver_settings_t<i_t, f_t>& settings);
 
 /**
- * @brief Solve MIP problem remotely (CPU backend)
+ * @brief Solve a MIP remotely.
  */
 template <typename i_t, typename f_t>
 std::unique_ptr<mip_solution_interface_t<i_t, f_t>> solve_mip_remote(
-  cpu_optimization_problem_t<i_t, f_t> const& cpu_problem,
-  mip_solver_settings_t<i_t, f_t> const& settings);
+  cpu_optimization_problem_t<i_t, f_t> const& cpu_problem, solver_settings_t<i_t, f_t>& settings);
 
-}  // namespace cuopt::mathematical_optimization
+}  // namespace CUOPT_EXPORT mathematical_optimization
+}  // namespace cuopt

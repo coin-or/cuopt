@@ -6,12 +6,14 @@
 /* clang-format on */
 
 #include <cuopt/error.hpp>
+#include <cuopt/export.hpp>
 #include <cuopt/mathematical_optimization/pdlp/pdlp_warm_start_data.hpp>
 #include <cuopt/mathematical_optimization/pdlp/solver_settings.hpp>
 #include <math_optimization/solution_writer.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <utilities/logger.hpp>
 
+#include <cuda/stream>
 #include <raft/util/cudart_utils.hpp>
 
 #include <thrust/scatter.h>
@@ -35,7 +37,7 @@ void pdlp_solver_settings_t<i_t, f_t>::set_optimality_tolerance(f_t eps_optimal)
 
 template <typename i_t, typename f_t>
 void pdlp_solver_settings_t<i_t, f_t>::set_initial_primal_solution(
-  const f_t* initial_primal_solution, i_t size, rmm::cuda_stream_view stream)
+  const f_t* initial_primal_solution, i_t size, cuda::stream_ref stream)
 {
   cuopt_expects(initial_primal_solution != nullptr,
                 error_type_t::ValidationError,
@@ -48,7 +50,7 @@ void pdlp_solver_settings_t<i_t, f_t>::set_initial_primal_solution(
 template <typename i_t, typename f_t>
 void pdlp_solver_settings_t<i_t, f_t>::set_initial_dual_solution(const f_t* initial_dual_solution,
                                                                  i_t size,
-                                                                 rmm::cuda_stream_view stream)
+                                                                 cuda::stream_ref stream)
 {
   cuopt_expects(initial_dual_solution != nullptr,
                 error_type_t::ValidationError,
@@ -393,33 +395,12 @@ pdlp_warm_start_data_t<i_t, f_t>& pdlp_solver_settings_t<i_t, f_t>::get_pdlp_war
   return pdlp_warm_start_data_;
 }
 
-template <typename i_t, typename f_t>
-const cpu_pdlp_warm_start_data_t<i_t, f_t>&
-pdlp_solver_settings_t<i_t, f_t>::get_cpu_pdlp_warm_start_data() const noexcept
-{
-  return cpu_pdlp_warm_start_data_;
-}
-
-template <typename i_t, typename f_t>
-cpu_pdlp_warm_start_data_t<i_t, f_t>&
-pdlp_solver_settings_t<i_t, f_t>::get_cpu_pdlp_warm_start_data() noexcept
-{
-  return cpu_pdlp_warm_start_data_;
-}
-
-template <typename i_t, typename f_t>
-const pdlp_warm_start_data_view_t<i_t, f_t>&
-pdlp_solver_settings_t<i_t, f_t>::get_pdlp_warm_start_data_view() const noexcept
-{
-  return pdlp_warm_start_data_view_;
-}
-
 #if MIP_INSTANTIATE_FLOAT || PDLP_INSTANTIATE_FLOAT
-template class pdlp_solver_settings_t<int, float>;
+template class CUOPT_EXPORT pdlp_solver_settings_t<int, float>;
 #endif
 
 #if MIP_INSTANTIATE_DOUBLE
-template class pdlp_solver_settings_t<int, double>;
+template class CUOPT_EXPORT pdlp_solver_settings_t<int, double>;
 #endif
 
 }  // namespace cuopt::mathematical_optimization

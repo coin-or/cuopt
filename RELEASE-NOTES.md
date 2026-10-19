@@ -1,5 +1,236 @@
 # Release Notes
 
+## Release Notes 26.10
+
+### New Features (26.10)
+
+- New Java interface for LP, QP, QCQP, SOCP and MIP
+- New RENS (Relaxation Enforced Neighboorhood Search) and mutation heuristics for MIP
+- MIP solver now runs diving and recursive sub-MIP heuristics during the cut passes
+- New primal heuristic for MIPs with arc-flow formulations
+- MIP solver includes new portfolio of CPUFJ heuristics with diversification
+- New compound move types in MIP CPUFJ: 2-opt, probing implication chain, clique exchange, set-partitioning row exchange and compound repair
+- New LNS heuristic for MIP that uses ruin-and-repair logic
+- New techniques for exploiting degeneracy in MIP
+- New implied indicator and capacity lifting presolve strengthening for fixed-charge MIP models
+- New MIP presolve: Block Bounded Value Elimination for binary problems
+- New MIP presolve: dual aggregation for binary variables with a single lock
+- New MIP presolve: exhaustive coefficient reduction for binary rows
+- New Curtis-Reid scaling for PDLP
+- New primal simplex method for LPs
+- Support for reusing the barrier ordering and symbolic factorization when solving a sequence of problems with different linear objectives and right-hand sides
+- The C API now exposes solver statistics as scalar solution attributes
+- New `cuOptSetLogCallback` for capturing solver logs in C API
+- Routing now supports per-vehicle distance-based breaks, so charging, refueling, or rest stops can be constrained by cumulative travel distance rather than time
+- The gRPC server now solves routing problems (VRP, TSP, and PDP). A Python gRPC routing client is included with cuOpt
+- A new HTTP proxy forwards requests to the gRPC server. The 26.10 container starts the proxy and gRPC server by default
+
+
+### Breaking Changes (26.10)
+
+- The container image now runs the proxy and gRPC servers by default; the legacy HTTP server is an optional start command
+- The proxy and gRPC servers (container defaults) support routing problems of up to 5500 locations with a travel time matrix, or 8000 without one. For larger problems use the legacy HTTP server.
+- `libcuopt` is split into client, mathopt and routing components, with separate wheels and conda packages; `libcuopt` is now a thin metapackage
+- The CUOPT_DISTRIBUTED_PDLP_PARTITIONER setting introduced in 26.08 is now CUOPT_MULTIGPU_PDLP_PARTITIONER
+- The CUOPT_USE_DISTRIBUTED_PDLP setting introduced in 26.08 has been removed; use method and num_gpus instead
+- When building from source the build.sh script no longer installs libcuopt into conda env by default
+
+### Improvements (26.10)
+
+- MIP heuristics improved by 3.2x on primal integral metric (geomean over the feasible MIPLIB2017 instances)
+- QP/QCQP solve 1.3X faster (geomean over QPLIB and Hans Mittelmann test set)
+- PDLP now uses column reduction on large problems (~2x faster in geomean over LPFeas addendum instances)
+- Dual simplex is 1.4X faster (geomean over MIPLIB root relaxations)
+- PDLP now fuses the Halpern update into the projection kernels to improve performance
+- Concurrent LP now uses a threshold on the number of nonzeros to decide whether to launch barrier and dual simplex
+- LP presolve now uses less memory by freeing the transpose matrix and PSLP reduced problem
+- LPs with poor scaling are now attempted without presolve, even if PSLP declares infeasibility
+- LP presolve now uses PSLP version 0.1.0; this version includes many improvements and bug fixes
+- MIP presolve now uses iteration and work limits rather than time limits
+- Set solution callbacks now use presolve and postsolve
+- Dual simplex now perturbs the cost more aggressively and uses primal simplex to remove perturbations
+- Dual simplex now attempts to remove perturbations when variables leave the basis
+- Dual simplex now tries several initial points on problems with dual degenerate bounded variables
+- Dual simplex's bound flipping ratio test is now approximately O(n) and combines Harris ratio test with bound flips
+- SOCP now use a tighter default tolerance on the duality gap without a performance regression
+- QCQP to SOCP conversion performance is improved and memory required is reduced
+- QP/SOCP presolve now eliminates free variables with zero cost
+- QP presolve now removes empty columns
+- Barrier now performs Ruiz scaling and builds the augmented system on the GPU
+- Barrier now scales QCQP/SOCP constraints by variable bounds before Ruiz equilibration
+- Barrier now performs iterative refinement on GPU when using the normal equations
+- Barrier now prints the cumulative setup time before the solve
+- Barrier termination check now has reduced GPU/host synchronization overhead
+- Barrier now has parameters to control adaptive regularization
+- Barrier now has parameters for tuning primal and dual regularization
+- Barrier now has a parameter to control bounding free variables
+- Barrier now has more initial point options
+- MIP root relaxation now honors the LP method selected
+- MIP performance improvement in duplicate cut detection
+- MIP reduced cost strengthening now stores lurking bounds based on incumbent objective value
+- MIP now includes a new Mod-2 cut separator for zero-half cuts
+- MIP random number generators are now per-worker instead of process wide; eliminating a source of nondeterminism
+- MIP time to first solution is improved by reducing overheads
+- MIP CPUFJ now has a fast-path heuristic for binary problems with integer activities
+- MIP CPUFJ now has structure-aware starts and repairs
+- Solution callback publication is now unified across solver components
+- Routing now uses cost instead of distance terminology when the objective does not represent a physical distance
+- The gRPC server now accepts a MIP starting solution
+- The gRPC server now checks GPU health and shuts down if the GPU is unusable. It also provides the standard gRPC readiness and liveness probes
+
+### Bug Fixes (26.10)
+
+- Fix an issue in the C API when accessing solutions on infeasible problems
+- Fix an issue in MPS writer on problems with no linear constraints
+- Fix ranged constraint conversion and MPS writing/reading round trips
+- Fix an issue in LP/MIP presolve where the user specified feasibility tolerance was not propagated to Papilo
+- Fix an issue in PDLP where reduced costs where not returned for the default PDLP preset (Stable3)
+- Fix a missing header in log for multi-GPU PDLP
+- Fix an issue in multi-GPU PDLP where the solver stopped silently when asking for more GPUs than available
+- Fix an issue on the C API where performing a multi-GPU PDLP solve on a problem built from row types and RHS was not supported
+- Fix an issue on multi-GPU PDLP where project_initial_primal was ignored
+- Fix a barrier crash when concurrent LP solving returned from cuDSS before its asynchronous work finished
+- Fix a segfault in concurrent LP if dual simplex or barrier finished without setting a solution
+- Fix several issues in barrier related to the cuDSS threading layer
+- Fix a bug on QCQP/SOCP problems with ranged rows
+- Fix an issue in QP/SOCP presolve where removing empty columns could corrupt memory, causing heap corruption errors or `cudaErrorLaunchFailure`
+- Fix nondeterminism in barrier when `--cudss-deterministic=1`
+- Fix an issue with QPs where duality gap was not included in the termination criteria
+- Fix a buffer overflow when getting the dual solution or reduced costs of a QCQP; these requests now return an error
+- Fix an issue in QP and SOCP where a large dual residual was reported for the final solution, even at an optimal solution
+- Fix an issue in dual simplex logs where bound flips were not accounted for in objective
+- Fix an issue in dual simplex inside MIP where cut off incorrectly used the perturbed objective
+- Fix an issue in dual simplex where dual variables and dual feasibility was not recomputed after basis repair
+- Fix MIP presolve incorrectly fixing continuous variables using integer-variable tolerance
+- Fix false optimality declaration in MIP deterministic mode
+- Fix several issues in MIP where the time limit was not respected
+- Fix an issue in MIP where flow cover cut generation was accidentally O(n^2)
+- Fix an issue in MIP where a large amount of time could elapse between logs
+- Fix an issue in MIP when converting knapsack constraints to rational coefficients could remove integer solutions
+- Fix an issue in MIP where termination was delayed during root cut passes
+- Fix an issue in MIP where the sub-MIP was not correctly stopped when the main solve finished
+- Fix an issue in MIP with halting cut passes
+- Fix an issue in MIP feasibility jump where weights were uninitialized when adding an objective cut
+- Fix an issue in MIP GF2 presolve where rank-deficient problems were incorrectly classified as infeasible
+- Fix an issue in MIP GF2 presolve where some one-sided rows were treated as equalities
+- Fix an issue in MIP presolve when performing single-lock-dual-aggregation
+- Fix an issue with tolerances in MIP mod-2 cuts
+- Fix a race condition in the asynchronous clique table generator and clique cuts
+- Fix an unsynchronized read/write of the MIP clique table
+- Fix a memory overflow in MIP when there were many feasible solutions
+- Disable clique table generation in MIP when running in deterministic mode
+- Fix an issue where the random number seed could change if multiple solves were performed within the same process
+- Fix an issue in routing: keep host sources alive for async route-view copies
+- Fix an issue in routing: avoid division by zero when vehicle capacity is zero
+- Fix an issue in routing: guard diagonal element lookup against negative offsets in top_k
+- Fix an issue in routing: uncapturable RMM copies inside CUDA graph captures
+- Fix an issue in routing: handle CUDA graph errors
+- Fix an issue where a PDLP warm start was ignored on a remote gRPC solve
+- Fix an issue where a gRPC connection could be closed during a long or idle solve because the server did not accept the client's keepalive pings
+- Fix an issue where stopping `cuopt_cli` or `cuopt_grpc_server` did not stop the solver process
+- Fix an issue in the Python gRPC client where waiting for a remote solve blocked other Python threads
+
+### Deprecations (26.10)
+
+- The container's default server is now the HTTP proxy plus `cuopt_grpc_server`, in place of the legacy HTTP server. The legacy HTTP server is still shipped in 26.10 and will be removed in 26.12. See "Starting the Container" on the Legacy HTTP Server page in the 26.10 user guide for the legacy container command and for `CUOPT_SERVER_TYPE=legacy` in Kubernetes. That page links to the 26.08 guide. Differences are in "Deprecated Interfaces Not Provided by the Proxy Server" in the 26.10 user guide.
+- Custom gRPC clients should now send solver settings through the `parameters` string map; individual setting fields are deprecated
+
+### Documentation (26.10)
+
+- Show mamba commands directly instead of a conda-then-swap note
+- Document the VRP gRPC client (RoutingClient)
+- Update NVIDIA Brev documentation links
+
+### New Contributors (26.10)
+
+- @nvidiacbrissette (#1524)
+- @vgong-nv (#1888)
+- @Juan-Francisco-Robles (#1299)
+- @ZedingZhang (#1925)
+- @vuule (#1900)
+- @neuriv (#1947)
+- @derluke (#1775)
+
+## Release Notes 26.08
+
+### New Features (26.08)
+
+- New Multi-GPU PDLP: distribute LP solves across multiple GPUs using METIS partitioning; 2.5x–8.8x speedup on 8 NVLink-connected B200 GPUs
+- New free-format MPS parser with faster parse time on large models
+- New recursive RINS heuristic for MIP
+- New zero-half (odd-cycle) cuts for MIP
+- New vector length diving and Farkas diving heuristics for MIP
+- Routing: accept NumPy and pandas inputs in the routing Python `DataModel` in addition to cuDF
+- C API: extend getters with additional query functions
+- C API: automatic CPU/GPU memory selection for problem construction (supports remote solve via gRPC from CPU host)
+- gRPC: Python interface to the C++ gRPC async client
+- gRPC: allow TLS arguments in the Python gRPC async API
+- UBI10 (Red Hat Universal Base Image) container variant for FIPS 140-3 compliant environments; image tags use `-ubi10` suffix (e.g. `latest-cu13-ubi10`)
+
+### Breaking Changes (26.08)
+
+- Routing `DataModel` now defers GPU device construction to solve time; applications that accessed device-side data between `DataModel` construction and the solve call must be updated
+- Removed the deprecated `get_solved_by_pdlp()` method from the Python LP solution object; use `get_solved_by()` instead
+
+### Improvements (26.08)
+- Include Q matrix in Ruiz scaling to improve convergence
+- Exploit sparsity in Barrier's augmented system on problems with large second order cone constraints
+- Conflict graph improvements: incorporate non-binary rows and probing implications
+- Improve Ruiz equilibration heuristic to also check column imbalance on QPs
+- Papilo-based primal/dual crush in MIP presolve
+- Reduce host memory footprint of concurrent LP solves
+- Remove pinned host memory from the barrier solver
+- Expose diving hyperparameters for MIP solver configuration
+- Unify threading model in the MIP solver using OpenMP tasks
+- MIP log cleanup and improved readability
+- Add short `cu12`/`cu13` Docker tag aliases
+- Remove `cuda-python` as an explicit dependency
+- gRPC: `objective_scaling_factor` is now optional in requests
+- gRPC: assign workers to distinct GPUs via `cudaSetDevice`
+
+### Bug Fixes (26.08)
+
+- Allow zero-valued coefficient updates in the LP Python model
+- Fix an issue in PDLP with cublas error capture and hang on infeasible solutions
+- Fix bug in barrier solver where cuDSS descriptors were being freed before their backing buffers
+- Fix a bug in MIP where root cut pass CPU feasibility-jump solutions were dropped by GPU heuristics
+- Add guard in MIP for huge bounds in bounds propagation
+- Fix a bug in MIP with incorrect GF2 presolve constraint addressing
+- Fix a bug in MIP in variable fixing for initial solutions
+- Fix issue in MIP in clique size computation and numerical issues
+- Fix a bug in MIP clique cut generation where small adjacency-list cliques were skipped and complement pairs were mishandled
+- Fix an issue in MIP where cut generation did not obey the time limit
+- Fix an issue on QPs where maximization was not supported
+- Fix rotated second-order cone detection: make canonical quadratic constraint Q matrix in triplet form
+- Fix nonconvex quadratic constraint detection bug
+- Fix a bug on QCQP models that incorrectly threw an unsupported exception
+- Fix second-order cone index collision and incorrect quadratic constraint to cone conversion for rotated cone constraints
+- Validate MPS row type byte before enum cast to avoid undefined behavior
+- Fix routing min-vehicles bug
+- Fix libomp ABI incompatibility
+- gRPC: fix race condition in gRPC with log streaming
+- gRPC: cancel active jobs on delete
+- gRPC: terminate workers cleanly on server shutdown
+- gRPC: drain all remaining log lines at job completion in `StreamLogs`
+- Fix row-major layout not preserved when resizing routing capacity routes
+- Fix routing YAML best-results export
+- Fix `import cuopt.routing` failing on GPU-less hosts (CPU-only clients)
+
+### Documentation (26.08)
+
+- Align cuOpt documentation branding and update Doxygen configuration
+- Update cuOpt MIP positioning documentation
+
+### New Contributors (26.08)
+
+- @jolorunyomi
+- @cafzal
+- @Sylendran95
+- @jackthepunished
+- @fallintoplace
+- @arhag23
+- @divyegala
+
 ## Release Notes 26.06
 
 ### New Features (26.06)
@@ -198,10 +429,10 @@
 
 ### Documentation (25.12)
 
-- Missing parameters added to the documentation for LP and MILP.
+- Missing parameters added to the documentation for LP and MIP.
 - Release notes added to the main repository for easy access.
 - Examples in the documentation improved.
-- The openapi spec for the service showed the 'status' value for LP/MILP results as an int but it is actually a string.
+- The openapi spec for the service showed the 'status' value for LP/MIP results as an int but it is actually a string.
 
 ## Release Notes 25.10
 
@@ -249,7 +480,7 @@
 - Add support for nightly ``cuopt-examples`` notebook testing
 - Reduce hard-coded version usage in repo
 - Container to work on all different users including root
-- Changes to download LP and MILP datasets, and also disable cvxpy testing for 3.10
+- Changes to download LP and MIP datasets, and also disable cvxpy testing for 3.10
 - Faster engine compile time
 - Fix pre-commit for trailing whitespace and end of file
 - Merge update version and fix version format bugs
@@ -287,7 +518,7 @@
 
 ### New Features (25.08)
 
-- Added Python API for LP and MILP ([#223](https://github.com/NVIDIA/cuopt/pull/223))
+- Added Python API for LP and MIP ([#223](https://github.com/NVIDIA/cuopt/pull/223))
 
 ### Breaking Changes (25.08)
 
@@ -353,7 +584,7 @@
 
 - Added concurrent mode that runs PDLP and Dual Simplex together
 - Added crossover from PDLP to Dual Simplex
-- Added a C API for LP and MILP
+- Added a C API for LP and MIP
 - PDLP: Faster iterations and new more robust default PDLPSolverMode Stable2
 - Added support for writing out mps file containing user problem. Useful for debugging
 
@@ -364,15 +595,15 @@
 
 ### Improvements (25.05)
 
-- Hook up MILP Gap parameters and add info about number of nodes explored and simplex iterations
+- Hook up MIP Gap parameters and add info about number of nodes explored and simplex iterations
 - FJ bug fixes, tests and improvements
-- Allow no time limit in MILP
+- Allow no time limit in MIP
 - Refactor routing
 - Probing cache optimization
 - Diversity improvements for routing
 - Enable more compile warnings and faster compile by bypassing rapids fetch
 - Constraint prop based on load balanced bounds update
-- Logger file handling and bug fixes on MILP
+- Logger file handling and bug fixes on MIP
 - Add shellcheck to pre-commit and fix warnings
 
 ### Bug Fixes (25.05)
@@ -386,7 +617,7 @@
 - Improve breaks to allow dimensions at arbitrary places in the route.
 - Free var elimination with a substitute variable for each free variable.
 - Fixed race condition when resetting vehicle IDs in heterogenous mode.
-- cuOpt self-hosted client, some MILPs do not have all fields in ``lp_stats``.
+- cuOpt self-hosted client, some MIPs do not have all fields in ``lp_stats``.
 - Fixed RAPIDS logger usage.
 - Handle LP state more cleanly, per solution.
 - Fixed routing solver intermittent failures.

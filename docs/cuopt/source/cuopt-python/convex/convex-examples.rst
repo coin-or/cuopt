@@ -247,7 +247,7 @@ Working with PDLP Warmstart Data
 Warmstart data allows to restart PDLP with a previous solution context. This should be used when you solve a new problem which is similar to the previous one.
 
 .. note::
-    Warmstart data is only available for Linear Programming (LP) problems, not for Mixed Integer Linear Programming (MILP) problems.
+    Warmstart data is only available for Linear Programming (LP) problems, not for Mixed Integer Programming (MIP) problems.
 
 :download:`pdlp_warmstart_example.py <examples/pdlp_warmstart_example.py>`
 
@@ -263,3 +263,14 @@ The response is as follows:
     x = 25.001763214569394
     y = 0.0
     Objective value = 50.00352642913879
+
+Solving an LP on Multiple GPUs
+------------------------------
+
+Multi-GPU PDLP shards an LP across GPUs. Set the method to PDLP and ``CUOPT_NUM_GPUS`` to ``-1`` (all visible GPUs) or to a value greater than 1. This helps most on large LPs, or LPs that do not fit in the memory of a single GPU. It is not supported for QP, QCQP or SOCP problems.
+
+:download:`multi_gpu_pdlp_example.py <examples/multi_gpu_pdlp_example.py>`
+
+.. literalinclude:: examples/multi_gpu_pdlp_example.py
+   :language: python
+   :linenos:

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # cmake-format: on
 
-if(BUILD_TESTS)
+if(BUILD_TESTS AND NOT SKIP_ROUTING_BUILD)
   add_library(cuopttestutils STATIC
       routing/utilities/check_constraints.cu
   )
@@ -17,12 +17,15 @@ if(BUILD_TESTS)
       PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/../src"
       "${CMAKE_CURRENT_SOURCE_DIR}"
-      "${dejavu_SOURCE_DIR}"
   )
+  target_include_directories(cuopttestutils SYSTEM PRIVATE "${dejavu_SOURCE_DIR}")
 
+  # cuopttestutils compiles routing/utilities/check_constraints.cu, so it belongs to the
+  # routing engine and names it directly. Linking the cuopt umbrella here would hand every
+  # consumer both engines and mask whether a test's own link line is complete.
   target_link_libraries(cuopttestutils
       PUBLIC
-      cuopt
+      cuopt_routing
       OpenMP::OpenMP_CXX
       OpenMP::OpenMP_CUDA
       GTest::gmock
@@ -30,6 +33,38 @@ if(BUILD_TESTS)
   )
   if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
     target_link_options(cuopttestutils PRIVATE -Wl,--enable-new-dtags)
+  endif()
+
+  # Static-linking flavor of the test utilities for tests built with STATIC_LIB
+  # (see ConfigureTest). These link cuopt_static to reach internal symbols, so
+  # their utilities must also resolve against cuopt_static rather than the shared
+  # cuopt, which would otherwise mix static and shared cuopt in one binary.
+  add_library(cuopttestutils_static STATIC
+      routing/utilities/check_constraints.cu
+  )
+
+  target_compile_options(cuopttestutils_static
+      PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:${CUOPT_CXX_FLAGS}>"
+      "$<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:CUDA>:${CUOPT_CUDA_FLAGS}>>"
+  )
+
+  target_include_directories(cuopttestutils_static
+      PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+      "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_include_directories(cuopttestutils_static SYSTEM PRIVATE "${dejavu_SOURCE_DIR}")
+
+  target_link_libraries(cuopttestutils_static
+      PUBLIC
+      cuopt_static
+      OpenMP::OpenMP_CXX
+      OpenMP::OpenMP_CUDA
+      GTest::gmock
+      GTest::gtest
+  )
+  if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
+    target_link_options(cuopttestutils_static PRIVATE -Wl,--enable-new-dtags)
   endif()
 endif()
 
@@ -45,10 +80,23 @@ function(ConfigureTest CMAKE_TEST_NAME)
     cmake_parse_arguments(CT "STATIC_LIB" "" "LABELS" ${ARGN})
     if(CT_STATIC_LIB)
         set(_cuopt_link_target cuopt_static)
-        set(_extra_libs "")
+        set(_extra_libs cuopttestutils_static)
     else()
-        set(_cuopt_link_target cuopt)
+        # The components rather than the cuopt umbrella: the umbrella no longer carries
+        # links to them, so that it can be exported on its own while each component
+        # exports separately (#1635).
+        # Order matches what the cuopt umbrella used to expand to; changing it changes
+        # which definition the linker resolves first.
+        set(_cuopt_link_target "")
+        if(NOT SKIP_ROUTING_BUILD)
+            list(APPEND _cuopt_link_target cuopt_routing)
+        endif()
+        list(APPEND _cuopt_link_target cuopt_mathopt cuopt_client)
         set(_extra_libs cuopttestutils)
+    endif()
+    # cuopttestutils only exists when the routing engine is built.
+    if(SKIP_ROUTING_BUILD)
+        set(_extra_libs "")
     endif()
     add_executable(${CMAKE_TEST_NAME} ${CT_UNPARSED_ARGUMENTS})
     target_include_directories(${CMAKE_TEST_NAME}
@@ -59,8 +107,8 @@ function(ConfigureTest CMAKE_TEST_NAME)
         "${papilo_SOURCE_DIR}/src"
         "${papilo_BINARY_DIR}"
         "${pslp_SOURCE_DIR}/include"
-        "${dejavu_SOURCE_DIR}"
     )
+    target_include_directories(${CMAKE_TEST_NAME} SYSTEM PRIVATE "${dejavu_SOURCE_DIR}")
     target_link_libraries(${CMAKE_TEST_NAME}
        PRIVATE
         ${_cuopt_link_target}
@@ -70,11 +118,12 @@ function(ConfigureTest CMAKE_TEST_NAME)
         GTest::gtest
         GTest::gtest_main
         ${CUOPT_PRIVATE_CUDA_LIBS}
+        OpenMP::OpenMP_CUDA
     )
     if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
       target_link_options(${CMAKE_TEST_NAME} PRIVATE -Wl,--enable-new-dtags)
     endif()
-    add_test(NAME ${CMAKE_TEST_NAME} COMMAND ${CMAKE_TEST_NAME})
+    rapids_test_add(NAME ${CMAKE_TEST_NAME} COMMAND ${CMAKE_TEST_NAME} INSTALL_COMPONENT_SET testing)
     if(CT_LABELS)
         set_tests_properties(${CMAKE_TEST_NAME} PROPERTIES LABELS "${CT_LABELS}")
     endif()
@@ -98,6 +147,15 @@ endif(RAPIDS_DATASET_ROOT_DIR)
 
 # ## test sources
 if(BUILD_TESTS)
+  # Must run before any ConfigureTest/rapids_test_add call in the subdirectories below:
+  # rapids_test_add records each test against the install component set rapids_test_init()
+  # creates, and rapids_test_install_relocatable (after the subdirectories) packages that
+  # record into an installable CTestTestfile.cmake so `ctest` works against the conda
+  # package directly, not just the build tree.
+  enable_testing()
+  include(rapids-test)
+  rapids_test_init()
+
   if(NOT SKIP_ROUTING_BUILD)
     add_subdirectory(routing)
     add_subdirectory(distance_engine)
@@ -111,5 +169,5 @@ if(BUILD_TESTS)
   add_subdirectory(qp)
   add_subdirectory(utilities)
 
-  enable_testing()
+  rapids_test_install_relocatable(INSTALL_COMPONENT_SET testing DESTINATION bin/gtests/libcuopt)
 endif()

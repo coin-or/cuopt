@@ -18,6 +18,8 @@
 
 #include <utilities/copy_helpers.hpp>
 
+#include <raft/core/nvtx.hpp>
+
 #include <limits>
 #include <tuple>
 #include <utility>
@@ -110,7 +112,7 @@ static simplex::user_problem_t<i_t, f_t> cuopt_problem_to_user_problem(
 
 template <typename i_t, typename f_t>
 static simplex::user_problem_t<i_t, f_t> cuopt_problem_to_user_problem(
-  raft::handle_t const* handle_ptr, mip::problem_t<i_t, f_t>& model)
+  raft::handle_t const* handle_ptr, mip::problem_t<i_t, f_t>& model, bool copy_names = true)
 {
   simplex::user_problem_t<i_t, f_t> user_problem(handle_ptr);
 
@@ -163,7 +165,7 @@ static simplex::user_problem_t<i_t, f_t> cuopt_problem_to_user_problem(
   std::tie(user_problem.lower, user_problem.upper) =
     extract_host_bounds<f_t>(model.variable_bounds, handle_ptr);
   user_problem.problem_name = model.original_problem_ptr->get_problem_name();
-  if (model.row_names.size() > 0) {
+  if (copy_names && model.row_names.size() > 0) {
     user_problem.row_names.resize(m);
     for (int i = 0; i < m; ++i) {
       if (i < (int)model.row_names.size()) {
@@ -173,7 +175,7 @@ static simplex::user_problem_t<i_t, f_t> cuopt_problem_to_user_problem(
       }
     }
   }
-  if (model.var_names.size() > 0) {
+  if (copy_names && model.var_names.size() > 0) {
     user_problem.col_names.resize(n);
     for (int j = 0; j < n; ++j) {
       if (j < (int)model.var_names.size()) {
@@ -213,6 +215,7 @@ template <typename i_t, typename f_t>
 static simplex::user_problem_t<i_t, f_t> cuopt_optimization_problem_to_user_problem(
   raft::handle_t const* handle_ptr, optimization_problem_t<i_t, f_t>& model)
 {
+  raft::common::nvtx::range fun_scope("QCQP: cuopt_optimization_problem_to_user_problem");
   simplex::user_problem_t<i_t, f_t> user_problem(handle_ptr);
 
   i_t const m  = model.get_n_constraints();
@@ -222,16 +225,6 @@ static simplex::user_problem_t<i_t, f_t> cuopt_optimization_problem_to_user_prob
   user_problem.num_rows  = m;
   user_problem.num_cols  = n;
   user_problem.objective = model.get_objective_coefficients_host();
-
-  // For maximization, negate the objective so the barrier (which always minimizes)
-  // finds the maximizer.  obj_scale = -1 ensures the reported objective is correct.
-  // Note: get_sense() returns true when the problem is a maximization problem.
-  const bool maximize = model.get_sense();
-  if (maximize) {
-    for (f_t& c : user_problem.objective) {
-      c = -c;
-    }
-  }
 
   csr_matrix_t<i_t, f_t> csr_A(m, n, nz);
   csr_A.x         = model.get_constraint_matrix_values_host();
@@ -247,18 +240,18 @@ static simplex::user_problem_t<i_t, f_t> cuopt_optimization_problem_to_user_prob
   user_problem.range_rows.clear();
   user_problem.range_value.clear();
 
-  auto model_constraint_sense = model.get_row_types_host();
-  auto model_constraint_rhs   = model.get_constraint_bounds_host();
+  auto model_constraint_lower_bounds = model.get_constraint_lower_bounds_host();
+  auto model_constraint_upper_bounds = model.get_constraint_upper_bounds_host();
 
-  if (!model_constraint_sense.empty()) {
+  // Explicit bounds include ranged rows that cannot be represented by sense and RHS alone.
+  if (model_constraint_lower_bounds.empty() || model_constraint_upper_bounds.empty()) {
+    auto model_constraint_sense = model.get_row_types_host();
+    auto model_constraint_rhs   = model.get_constraint_bounds_host();
     for (i_t i = 0; i < m; ++i) {
       user_problem.row_sense[i] = model_constraint_sense[i];
       user_problem.rhs[i]       = model_constraint_rhs[i];
     }
   } else {
-    auto model_constraint_lower_bounds = model.get_constraint_lower_bounds_host();
-    auto model_constraint_upper_bounds = model.get_constraint_upper_bounds_host();
-
     for (i_t i = 0; i < m; ++i) {
       const f_t constraint_lower_bound = model_constraint_lower_bounds[i];
       const f_t constraint_upper_bound = model_constraint_upper_bounds[i];
@@ -303,6 +296,8 @@ static simplex::user_problem_t<i_t, f_t> cuopt_optimization_problem_to_user_prob
     }
   }
 
+  // Note: get_sense() returns true when the problem is a maximization problem.
+  const bool maximize       = model.get_sense();
   user_problem.obj_constant = model.get_objective_offset();
   user_problem.obj_scale =
     maximize ? -model.get_objective_scaling_factor() : model.get_objective_scaling_factor();
@@ -320,6 +315,18 @@ static simplex::user_problem_t<i_t, f_t> cuopt_optimization_problem_to_user_prob
   user_problem.Q_offsets = model.get_quadratic_objective_offsets();
   user_problem.Q_indices = model.get_quadratic_objective_indices();
   user_problem.Q_values  = model.get_quadratic_objective_values();
+
+  // For maximization, negate the objective so the barrier (which always minimizes)
+  // finds the maximizer.  obj_scale = -1 ensures the reported objective is correct.
+  if (maximize) {
+    for (f_t& c : user_problem.objective) {
+      c *= -1;
+    }
+    for (f_t& q : user_problem.Q_values) {
+      q *= -1;
+    }
+    user_problem.obj_constant = -user_problem.obj_constant;
+  }
 
   if (model.has_quadratic_constraints()) {
     barrier::convert_quadratic_constraints_to_second_order_cones<i_t, f_t>(
@@ -347,14 +354,14 @@ void translate_to_crossover_problem(const mip::problem_t<i_t, f_t>& problem,
   csr_A.j         = std::vector<i_t>(cuopt::host_copy(problem.variables, stream));
   csr_A.row_start = std::vector<i_t>(cuopt::host_copy(problem.offsets, stream));
 
-  stream.synchronize();
+  stream.sync();
   CUOPT_LOG_DEBUG("Converting to compressed column");
   csr_A.to_compressed_col(lp.A);
   CUOPT_LOG_DEBUG("Converted to compressed column");
 
   std::vector<f_t> slack(problem.n_constraints);
   std::vector<f_t> tmp_x = cuopt::host_copy(sol.get_primal_solution(), stream);
-  stream.synchronize();
+  stream.sync();
   matrix_vector_multiply(lp.A, f_t(1.0), tmp_x, f_t(0.0), slack);
   CUOPT_LOG_DEBUG("Multiplied A and x");
 
@@ -393,7 +400,7 @@ void translate_to_crossover_problem(const mip::problem_t<i_t, f_t>& problem,
   std::copy(lower.begin(), lower.begin() + problem.n_variables, lp.lower.begin());
   std::copy(upper.begin(), upper.begin() + problem.n_variables, lp.upper.begin());
 
-  problem.handle_ptr->get_stream().synchronize();
+  problem.handle_ptr->get_stream().sync();
   for (i_t i = 0; i < m; ++i) {
     lp.lower[problem.n_variables + i] = constraint_lower[i];
     lp.upper[problem.n_variables + i] = constraint_upper[i];
@@ -413,7 +420,7 @@ void translate_to_crossover_problem(const mip::problem_t<i_t, f_t>& problem,
   initial_solution.y = cuopt::host_copy(sol.get_dual_solution(), stream);
 
   std::vector<f_t> tmp_z = cuopt::host_copy(sol.get_reduced_cost(), stream);
-  stream.synchronize();
+  stream.sync();
   std::copy(tmp_z.begin(), tmp_z.begin() + problem.n_variables, initial_solution.z.begin());
   for (i_t j = problem.n_variables; j < n; ++j) {
     initial_solution.z[j] = initial_solution.y[j - problem.n_variables];

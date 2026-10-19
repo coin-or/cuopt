@@ -9,10 +9,11 @@
 
 #include <cuopt/mathematical_optimization/constants.h>
 #include <cuopt/error.hpp>
+#include <cuopt/export.hpp>
 #include <cuopt/mathematical_optimization/mip/solver_stats.hpp>
 #include <cuopt/mathematical_optimization/utilities/internals.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
+#include <cuda/stream>
 #include <rmm/device_uvector.hpp>
 
 #include <raft/core/handle.hpp>
@@ -21,7 +22,8 @@
 #include <string>
 #include <vector>
 
-namespace cuopt::mathematical_optimization {
+namespace cuopt {
+namespace CUOPT_EXPORT mathematical_optimization {
 
 enum class mip_termination_status_t : int8_t {
   NoTermination         = CUOPT_TERMINATION_STATUS_NO_TERMINATION,
@@ -50,8 +52,8 @@ class mip_solution_t : public base_solution_t {
 
   mip_solution_t(mip_termination_status_t termination_status,
                  solver_stats_t<i_t, f_t> stats,
-                 rmm::cuda_stream_view stream_view);
-  mip_solution_t(const cuopt::logic_error& error_status, rmm::cuda_stream_view stream_view);
+                 cuda::stream_ref stream_view);
+  mip_solution_t(const cuopt::logic_error& error_status, cuda::stream_ref stream_view);
 
   bool is_mip() const override { return true; }
   const rmm::device_uvector<f_t>& get_solution() const;
@@ -74,7 +76,7 @@ class mip_solution_t : public base_solution_t {
   i_t get_num_simplex_iterations() const;
   const std::vector<std::string>& get_variable_names() const;
   const std::vector<rmm::device_uvector<f_t>>& get_solution_pool() const;
-  void write_to_sol_file(std::string_view filename, rmm::cuda_stream_view stream_view) const;
+  void write_to_sol_file(std::string_view filename, cuda::stream_ref stream_view) const;
   void log_detailed_summary() const;
   void log_summary() const;
 
@@ -92,4 +94,5 @@ class mip_solution_t : public base_solution_t {
   std::vector<rmm::device_uvector<f_t>> solution_pool_;
 };
 
-}  // namespace cuopt::mathematical_optimization
+}  // namespace CUOPT_EXPORT mathematical_optimization
+}  // namespace cuopt

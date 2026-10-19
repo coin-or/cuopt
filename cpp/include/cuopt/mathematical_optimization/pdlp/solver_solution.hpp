@@ -9,11 +9,12 @@
 
 #include <cuopt/mathematical_optimization/constants.h>
 #include <cuopt/error.hpp>
+#include <cuopt/export.hpp>
 #include <cuopt/mathematical_optimization/pdlp/pdlp_warm_start_data.hpp>
 #include <cuopt/mathematical_optimization/pdlp/solver_settings.hpp>
 #include <cuopt/mathematical_optimization/utilities/internals.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
+#include <cuda/stream>
 #include <rmm/device_uvector.hpp>
 
 #include <raft/core/handle.hpp>
@@ -22,7 +23,8 @@
 #include <string>
 #include <vector>
 
-namespace cuopt::mathematical_optimization {
+namespace cuopt {
+namespace CUOPT_EXPORT mathematical_optimization {
 
 // Possible reasons for terminating
 enum class pdlp_termination_status_t : int8_t {
@@ -90,7 +92,7 @@ class optimization_problem_solution_t : public base_solution_t {
     /** Solve time in seconds */
     double solve_time{std::numeric_limits<double>::signaling_NaN()};
 
-    /** Whether the problem was solved by PDLP, Barrier or Dual Simplex */
+    /** The method that solved the problem. */
     method_t solved_by = method_t::Unset;
   };
 
@@ -103,7 +105,7 @@ class optimization_problem_solution_t : public base_solution_t {
    * @param[in] stream_view An rmm view to a stream. All computations will go through this stream
    */
   optimization_problem_solution_t(pdlp_termination_status_t termination_status_,
-                                  rmm::cuda_stream_view stream_view);
+                                  cuda::stream_ref stream_view);
 
   /**
    * @brief Construct an optimization problem solution that serves as PDLP solver output
@@ -113,8 +115,7 @@ class optimization_problem_solution_t : public base_solution_t {
    * 'Optimal', 'PrimalInfeasible', 'DualInfeasible', 'TimeLimit'
    * @param[in] stream_view An rmm view to a stream. All computations will go through this stream
    */
-  optimization_problem_solution_t(cuopt::logic_error error_status_,
-                                  rmm::cuda_stream_view stream_view);
+  optimization_problem_solution_t(cuopt::logic_error error_status_, cuda::stream_ref stream_view);
   /**
    * @brief Construct an optimization problem solution that serves as PDLP solver output
    *
@@ -269,7 +270,7 @@ class optimization_problem_solution_t : public base_solution_t {
    * @param stream_view Non-owning stream view object
    */
   void write_to_file(std::string_view filename,
-                     rmm::cuda_stream_view stream_view,
+                     cuda::stream_ref stream_view,
                      bool generate_variable_values = true);
 
   /**
@@ -279,7 +280,7 @@ class optimization_problem_solution_t : public base_solution_t {
    * @param filename Name of the output file
    * @param stream_view Non-owning stream view object
    */
-  void write_to_sol_file(std::string_view filename, rmm::cuda_stream_view stream_view) const;
+  void write_to_sol_file(std::string_view filename, cuda::stream_ref stream_view) const;
 
   /**
    * @brief Copy solution from another solution object
@@ -310,4 +311,5 @@ class optimization_problem_solution_t : public base_solution_t {
   /** error struct */
   cuopt::logic_error error_status_;
 };
-}  // namespace cuopt::mathematical_optimization
+}  // namespace CUOPT_EXPORT mathematical_optimization
+}  // namespace cuopt

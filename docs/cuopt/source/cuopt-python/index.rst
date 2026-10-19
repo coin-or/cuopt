@@ -6,6 +6,13 @@ NVIDIA cuOpt supports Python API for routing optimization, convex optimization, 
 
 This section contains details on the cuOpt Python package.
 
+For remote LP, MIP, and QP solves with **no code changes**, set
+``CUOPT_REMOTE_HOST`` / ``CUOPT_REMOTE_PORT`` (see
+:doc:`../cuopt-grpc/quick-start`). For an **explicit** Python job API against
+``cuopt_grpc_server``, see the :doc:`gRPC linear programming client
+<../cuopt-grpc/python-async-client>` and the :doc:`gRPC routing client
+<../cuopt-grpc/routing>`.
+
 .. toctree::
    :maxdepth: 3
    :caption: Python API Overview
