@@ -6,12 +6,29 @@
 gRPC API (Reference)
 ======================
 
-The **CuOptRemoteService** gRPC API is defined in Protocol Buffers under the ``cuopt.remote`` package. Source files in the repository:
+The **CuOptRemoteService** gRPC API is defined in Protocol Buffers under the ``cuopt.remote`` package:
 
-* ``cpp/src/grpc/cuopt_remote_service.proto`` — service and job/chunk/log RPCs
-* ``cpp/src/grpc/cuopt_remote.proto`` — LP/MIP problem, settings, and result messages
-* ``cpp/src/grpc/routing/cuopt_routing.proto`` — VRP request messages
-* ``cpp/src/grpc/routing/cuopt_routing_solution.proto`` — VRP result messages
+* :download:`cuopt_remote_service.proto <protos/cuopt_remote_service.proto>` — service and job/chunk/log RPCs
+* :download:`cuopt_remote.proto <protos/cuopt_remote.proto>` — LP/MIP problem, settings, and result messages
+* :download:`cuopt_remote_data.proto <protos/cuopt_remote_data.proto>` — problem and result fields, including the array field ids used by chunked transfer. Generated from ``cpp/src/grpc/codegen/field_registry.yaml`` and committed to the repository.
+* :download:`cuopt_routing.proto <protos/cuopt_routing.proto>` — VRP request messages
+* :download:`cuopt_routing_solution.proto <protos/cuopt_routing_solution.proto>` — VRP result messages
+
+Download all five as :download:`cuopt-protos.zip <cuopt-protos.zip>`. They import each other by file name, so keep them in one directory.
+
+The ``libcuopt-client`` wheel and conda package install the same five files:
+
+* pip: ``<site-packages>/libcuopt_client/share/cuopt/proto``
+* conda: ``$CONDA_PREFIX/share/cuopt/proto``
+
+Generate stubs for your language with that directory as the include path, for example for Python (``pip install grpcio-tools`` first):
+
+.. code-block:: bash
+
+   python -m grpc_tools.protoc -I "$PROTO_DIR" --python_out=. --grpc_python_out=. \
+     "$PROTO_DIR"/*.proto
+
+The same files are in the repository under ``cpp/src/grpc/``, ``cpp/src/grpc/routing/`` and ``cpp/src/grpc/codegen/generated/``. The chunked-transfer wire format is described in `GRPC_INTERFACE.md <https://github.com/NVIDIA/cuopt/blob/main/cpp/src/grpc/GRPC_INTERFACE.md>`_.
 
 Most users do **not** call these RPCs directly:
 
@@ -42,7 +59,7 @@ Asynchronous Jobs
      - Purpose
    * - ``SubmitJob``
      - Submit an LP, MIP, or VRP job in one message (within gRPC message size
-       limits; VRP is unary-only today, see :doc:`routing`).
+       limits; larger problems use the chunked upload RPCs below).
    * - ``CheckStatus``
      - Poll job status by ``job_id``.
    * - ``GetResult``
@@ -69,6 +86,15 @@ Chunked Upload (Large Problems)
      - Upload one slice of a numeric array field.
    * - ``FinishChunkedUpload``
      - Finalize the upload and return ``job_id`` (same as ``SubmitJob``).
+
+A chunked VRP upload puts ``RoutingSolverSettings`` in ``vrp_settings`` and the
+``RoutingProblem`` in ``routing_problem``, with each matrix ``values`` field
+left empty. Those values are container ``ArrayChunk`` messages:
+``container_field_num`` is 10 for ``cost_matrices`` and 11 for
+``transit_time_matrices``, ``container_index`` is the matrix index, and
+``field_id`` is ``CostMatrix.ArrayId.VALUES``. ``VALUES`` is the
+container-relative array id, not the protobuf tag of ``values``. The payload
+is raw little-endian float32, row-major, ``n_locations`` by ``n_locations``.
 
 Chunked Download (Large Results)
 --------------------------------
@@ -115,7 +141,7 @@ Messages and Constraints
   is no ``CUOPT_REMOTE_HOST``/``CUOPT_REMOTE_PORT`` remote-execution path for
   routing; use the gRPC routing client (:doc:`routing`) or REST for remote
   routing.
-* **Solver settings** — Carried as ``PDLPSolverSettings`` or ``MIPSolverSettings`` inside the request or chunked header, aligned with the NVIDIA cuOpt solver options documentation.
+* **Solver settings** — Carried as ``PDLPSolverSettings``, ``MIPSolverSettings``, or ``RoutingSolverSettings`` inside the request or chunked header, aligned with the NVIDIA cuOpt solver options documentation.
 * **Errors** — Transport failures use gRPC status codes. Some outcomes use
   ``Status::OK`` with response fields: ``CheckStatus`` reports unknown jobs as
   ``job_status=NOT_FOUND``; ``GetResult`` uses transport ``NOT_FOUND`` /
