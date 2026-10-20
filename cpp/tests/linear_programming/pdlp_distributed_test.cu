@@ -247,8 +247,8 @@ static void expect_distributed_int64_matches_int32(raft::handle_t const& handle,
   auto problem_i64 = io::read_mps<int64_t, double>(path, fixed_mps_format);
 
   pdlp_solver_settings_t<int, double> dist_settings{};
-  dist_settings.method    = method_t::PDLP;
-  dist_settings.num_gpus  = -1;  // use every visible GPU
+  dist_settings.method   = method_t::PDLP;
+  dist_settings.num_gpus = -1;  // use every visible GPU
   // Presolve is not supported for mPDLP64
   dist_settings.presolver = presolver_t::None;
 
