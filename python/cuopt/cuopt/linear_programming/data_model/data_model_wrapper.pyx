@@ -580,7 +580,7 @@ cdef class DataModel:
 
     def _prepare_data_model_view_for_write(self):
         n_vars = self.get_variable_lower_bounds().shape[0]
-        n_types = self.variable_types.shape[0]
+        n_types = len(self.variable_types)
         if n_types == 0 and n_vars > 0:
             self.variable_types = np.array(["C"] * n_vars, dtype="S1")
         else:

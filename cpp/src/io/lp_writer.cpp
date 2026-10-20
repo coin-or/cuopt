@@ -405,9 +405,12 @@ void write_lp(const data_model_view_t<i_t, f_t>& problem, const std::string& lp_
   for (size_t q = 0; q < quadratic_constraints.size(); ++q) {
     typename mps_data_model_t<i_t, f_t>::quadratic_constraint_t qc = quadratic_constraints[q];
     const std::string name                                         = qc.constraint_row_name;
-    const char* rel = qc.constraint_row_type == 'G'   ? ">="
-                      : qc.constraint_row_type == 'E' ? "="
-                                                      : "<=";
+    mps_parser_expects(qc.constraint_row_type == 'L' || qc.constraint_row_type == 'G',
+                       error_type_t::ValidationError,
+                       "Quadratic constraint '%s' has unsupported row type '%c'",
+                       name.c_str(),
+                       qc.constraint_row_type);
+    const char* rel = qc.constraint_row_type == 'G' ? ">=" : "<=";
 
     if (name.empty()) {
       lp_file << " ";
@@ -422,20 +425,26 @@ void write_lp(const data_model_view_t<i_t, f_t>& problem, const std::string& lp_
     }
 
     canonicalize_coo_matrix(qc.rows, qc.cols, qc.vals, qc_scratch);
-    lp_file << " + [";
-    int quad_terms = 0;
-    for (size_t p = 0; p < qc.vals.size(); ++p) {
-      const i_t i = qc.rows[p];
-      const i_t j = qc.cols[p];
-      const f_t v = qc.vals[p];
-      if (v == f_t(0)) continue;
-      if (i == j) {
-        emit_term(v, var_name(i) + " ^ 2", quad_terms);
-      } else {
-        emit_term(v, var_name(i) + " * " + var_name(j), quad_terms);
+    // read_lp rejects an empty '[ ]' bracket, so only open it for a nonzero term.
+    const bool has_quad_terms =
+      std::any_of(qc.vals.begin(), qc.vals.end(), [](f_t v) { return v != f_t(0); });
+    if (has_quad_terms) {
+      lp_file << " + [";
+      int quad_terms = 0;
+      for (size_t p = 0; p < qc.vals.size(); ++p) {
+        const i_t i = qc.rows[p];
+        const i_t j = qc.cols[p];
+        const f_t v = qc.vals[p];
+        if (v == f_t(0)) continue;
+        if (i == j) {
+          emit_term(v, var_name(i) + " ^ 2", quad_terms);
+        } else {
+          emit_term(v, var_name(i) + " * " + var_name(j), quad_terms);
+        }
       }
+      lp_file << " ]";
     }
-    lp_file << " ] " << rel << " " << fmt(qc.rhs_value) << "\n";
+    lp_file << " " << rel << " " << fmt(qc.rhs_value) << "\n";
   }
 
   // --- Bounds / integrality / semi-continuous -----------------------------
@@ -511,6 +520,10 @@ void write_lp(const data_model_view_t<i_t, f_t>& problem, const std::string& lp_
 
   lp_file << "End\n";
   lp_file.close();
+  mps_parser_expects(!lp_file.fail(),
+                     error_type_t::ValidationError,
+                     "Error writing output LP file! Given path: %s",
+                     lp_file_path.c_str());
 }
 
 template <typename i_t, typename f_t>

@@ -350,13 +350,15 @@ Subject To
  lin: x + y <= 10
  qc: 3 x - 2 y + [ x ^ 2 + 5 x * y + 2 y ^ 2 ] <= 4
  qc2: y + [ 2 y ^ 2 ] <= 8
+ qc3: x + [ - 1 x ^ 2 - 1 y ^ 2 ] >= -9
 End
 )LP");
   const auto rewritten = read_lp_from_string<int, double>(write_lp_to_string(original, "qcqp_rt"));
 
   // Guard against a vacuous comparison if the parser ever stops populating these.
   ASSERT_TRUE(original.has_quadratic_objective());
-  ASSERT_EQ(original.get_quadratic_constraints().size(), 2u);
+  ASSERT_EQ(original.get_quadratic_constraints().size(), 3u);
+  ASSERT_EQ(original.get_quadratic_constraints()[2].constraint_row_type, 'G');
 
   expect_quadratic_content_equal(original, rewritten);
 }
