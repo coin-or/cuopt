@@ -195,12 +195,20 @@ int run_single_file(const std::string& file_path,
       CUOPT_LOG_ERROR("Initial solution file is not supported for multi-GPU PDLP.");
       return -1;
     }
-    std::visit(
+    // solve_lp_distributed_from_mps catches cuopt::logic_error internally (e.g. the
+    // "presolve + 64-bit model" rejection) and surfaces it via error_status on the
+    // returned solution. Propagate it to the CLI exit code so automation does not
+    // report success on a rejected solve.
+    auto sol = std::visit(
       [&](auto const& mps) {
-        cuopt::mathematical_optimization::solve_lp(
+        return cuopt::mathematical_optimization::solve_lp(
           handle_ptr.get(), mps, settings.get_pdlp_settings());
       },
       problem);
+    if (sol.get_error_status().get_error_type() != cuopt::error_type_t::Success) {
+      CUOPT_LOG_ERROR("Multi-GPU PDLP failed: %s", sol.get_error_status().what());
+      return -1;
+    }
     return 0;
   }
   // Only the 32-bit model is wired into the solver; the 64-bit one stops here for now.
