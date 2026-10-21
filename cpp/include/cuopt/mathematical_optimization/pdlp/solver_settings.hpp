@@ -313,6 +313,8 @@ class pdlp_solver_settings_t {
   i_t barrier_presolve_bound_free_variables{-1};  // -1 automatic, 0 disabled, 1 enabled
   // -1 automatic (on, off when the solve feeds a barrier cache), 0 disabled, 1 enabled.
   i_t barrier_presolve_fixed_variables{-1};
+  // -1 automatic (on, off when the solve feeds a barrier cache), 0 disabled, 1 enabled.
+  i_t barrier_presolve_singleton_rows{-1};
   // Ruiz equilibration for QCQP (barrier) scaling: -1 automatic (row/column
   // imbalance heuristic), 0 disabled, 1 enabled. Distinct from PDLP's own Ruiz
   // scaling in pdlp_hyper_params_t.

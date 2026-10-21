@@ -51,6 +51,7 @@
 #define CUOPT_POSTSOLVE_INFO                        "postsolve_info"
 #define CUOPT_BARRIER_PRESOLVE_BOUND_FREE_VARIABLES "barrier_presolve_bound_free_variables"
 #define CUOPT_BARRIER_PRESOLVE_FIXED_VARIABLES      "barrier_presolve_fixed_variables"
+#define CUOPT_BARRIER_PRESOLVE_SINGLETON_ROWS       "barrier_presolve_singleton_rows"
 #define CUOPT_BARRIER_ITERATIVE_REFINEMENT          "barrier_iterative_refinement"
 #define CUOPT_BARRIER_ADAPTIVE_REGULARIZATION       "barrier_adaptive_regularization"
 #define CUOPT_BARRIER_PRIMAL_REGULARIZATION         "barrier_primal_regularization"

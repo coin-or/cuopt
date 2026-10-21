@@ -91,6 +91,7 @@ struct simplex_solver_settings_t {
       postsolve_info(-1),
       barrier_presolve_bound_free_variables(-1),
       barrier_presolve_fixed_variables(-1),
+      barrier_presolve_singleton_rows(-1),
       qcqp_ruiz_equilibration(-1),
       gpu_ruiz_nnz_threshold(500000),
       barrier_initial_point_safeguard(10.0),
@@ -212,6 +213,7 @@ struct simplex_solver_settings_t {
   i_t postsolve_info;                         // -1 automatic (disabled), 0 disabled, 1 enabled
   i_t barrier_presolve_bound_free_variables;  // -1 automatic, 0 disabled, 1 enabled
   i_t barrier_presolve_fixed_variables;       // -1 automatic (enabled), 0 disabled, 1 enabled
+  i_t barrier_presolve_singleton_rows;        // -1 automatic (enabled), 0 disabled, 1 enabled
   i_t qcqp_ruiz_equilibration;          // -1 automatic (imbalance heuristic), 0 disabled, 1 enabled
   i_t gpu_ruiz_nnz_threshold;           // nnz(A)+nnz(Q) at or above which barrier Ruiz runs on
                                         // GPU instead of CPU

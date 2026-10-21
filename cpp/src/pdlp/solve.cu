@@ -560,6 +560,14 @@ i_t effective_fixed_variables(pdlp_solver_settings_t<i_t, f_t> const& settings)
   return settings.sequence_solve ? 0 : settings.barrier_presolve_fixed_variables;
 }
 
+// Singleton rows are removed during barrier presolve. Automatic (-1) choice resolves to 0 for a
+// sequence solve.
+template <typename i_t, typename f_t>
+i_t effective_singleton_rows(pdlp_solver_settings_t<i_t, f_t> const& settings)
+{
+  return settings.sequence_solve ? 0 : settings.barrier_presolve_singleton_rows;
+}
+
 template <typename i_t, typename f_t>
 std::tuple<simplex::lp_solution_t<i_t, f_t>, simplex::lp_status_t, f_t, f_t, f_t> run_barrier(
   const simplex::user_problem_t<i_t, f_t>& user_problem,
@@ -593,6 +601,7 @@ std::tuple<simplex::lp_solution_t<i_t, f_t>, simplex::lp_status_t, f_t, f_t, f_t
   barrier_settings.barrier_presolve_bound_free_variables = effective_bound_free_variables(settings);
   barrier_settings.barrier_eliminate_free_variables = effective_eliminate_free_variables(settings);
   barrier_settings.barrier_presolve_fixed_variables = effective_fixed_variables(settings);
+  barrier_settings.barrier_presolve_singleton_rows  = effective_singleton_rows(settings);
   barrier_settings.barrier_initial_point_safeguard  = settings.barrier_initial_point_safeguard;
   barrier_settings.barrier                          = true;
   barrier_settings.barrier_presolve                 = true;
