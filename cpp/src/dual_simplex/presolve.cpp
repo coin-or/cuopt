@@ -1837,7 +1837,9 @@ i_t presolve(const lp_problem_t<i_t, f_t>& original,
     if (problem.lower[j] != 0.0 && problem.lower[j] > -inf) { nonzero_lower_bounds++; }
   }
   if (settings.barrier_presolve && nonzero_lower_bounds > 0) {
+#ifdef BARRIER_PRESOLVE_LOG
     settings.log.printf("Transforming %ld nonzero lower bound\n", nonzero_lower_bounds);
+#endif
     presolve_info.removed_lower_bounds.resize(problem.num_cols);
     // We can construct a new variable: x'_j = x_j - l_j or x_j = x'_j + l_j
     // than we have 0 <= x'_j <= u_j - l_j
@@ -1914,7 +1916,9 @@ i_t presolve(const lp_problem_t<i_t, f_t>& original,
     }
   }
   if (num_empty_cols > 0) {
+#ifdef BARRIER_PRESOLVE_LOG
     settings.log.printf("Presolve attempt to remove %d empty cols\n", num_empty_cols);
+#endif
     remove_empty_cols(problem, num_empty_cols, presolve_info, linear_cols);
   }
 
@@ -1923,7 +1927,9 @@ i_t presolve(const lp_problem_t<i_t, f_t>& original,
     i_t num_fixed_variables = 0;
     remove_fixed_variables(static_cast<f_t>(0.0), problem, presolve_info, num_fixed_variables);
     if (num_fixed_variables > 0) {
+#ifdef BARRIER_PRESOLVE_LOG
       settings.log.printf("Presolve removed %d fixed variables\n", num_fixed_variables);
+#endif
       linear_cols = linear_variable_count(problem);
     }
   }
@@ -1939,7 +1945,9 @@ i_t presolve(const lp_problem_t<i_t, f_t>& original,
     }
   }
   if (num_empty_rows > 0) {
+#ifdef BARRIER_PRESOLVE_LOG
     settings.log.printf("Presolve removing %d empty rows\n", num_empty_rows);
+#endif
     i_t i = remove_empty_rows(problem, row_sense, num_empty_rows, presolve_info);
     if (i != 0) { return -1; }
   }
@@ -1961,15 +1969,17 @@ i_t presolve(const lp_problem_t<i_t, f_t>& original,
     presolve_info.direct_free_variables.clear();
     // Only free linear decision variables need to be handled; cone/stack columns
     // are unbounded by construction and must not be counted here.
-    i_t direct_free_count = 0;
+    [[maybe_unused]] i_t direct_free_count = 0;
     for (i_t j = 0; j < linear_cols; j++) {
       if (problem.lower[j] == -inf && problem.upper[j] == inf) {
         presolve_info.direct_free_variables.push_back(j);
         direct_free_count++;
       }
     }
+#ifdef BARRIER_PRESOLVE_LOG
     settings.log.printf("Handling %d free variables directly in augmented system\n",
                         direct_free_count);
+#endif
   } else if (settings.barrier_presolve && !has_cones && free_variables > 0) {
     // For pure LP problems (Q is empty and there are no cones in this branch)
     // We have a variable x_j: with -inf < x_j < inf
@@ -2057,9 +2067,11 @@ i_t presolve(const lp_problem_t<i_t, f_t>& original,
   // LP already goes through PSLP; this substitution is for QP/SOCP only. A cache fill skips it.
   if (settings.barrier_presolve && settings.barrier_eliminate_free_variables &&
       (has_cones || problem.Q.n > 0)) {
-    const i_t old_free_count         = static_cast<i_t>(presolve_info.direct_free_variables.size());
-    const f_t free_elimination_start = tic();
-    const i_t pivot_rejected         = eliminate_free_variables(problem, presolve_info);
+    [[maybe_unused]] const i_t old_free_count =
+      static_cast<i_t>(presolve_info.direct_free_variables.size());
+    [[maybe_unused]] const f_t free_elimination_start = tic();
+    [[maybe_unused]] const i_t pivot_rejected = eliminate_free_variables(problem, presolve_info);
+#ifdef BARRIER_PRESOLVE_LOG
     const i_t eliminated =
       old_free_count - static_cast<i_t>(presolve_info.direct_free_variables.size());
     if (eliminated > 0 || pivot_rejected > 0) {
@@ -2070,6 +2082,7 @@ i_t presolve(const lp_problem_t<i_t, f_t>& original,
         pivot_rejected,
         toc(free_elimination_start));
     }
+#endif
   }
 
   assert(problem.num_rows == problem.A.m);
