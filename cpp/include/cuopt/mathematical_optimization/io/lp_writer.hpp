@@ -17,20 +17,12 @@ namespace cuopt::mathematical_optimization::io {
 /**
  * @brief Writes an optimization problem to an LP formatted file
  *
- * Writes the problem in the LP format understood by read_lp(). The emitted
- * dialect is a superset of what a typical solver expects and round-trips
- * through read_lp():
- *   - Minimize / Maximize objective (with optional quadratic '[ ... ] / 2' term)
- *   - Subject To constraints (linear, plus optional quadratic '[ ... ]' term)
- *   - Bounds
- *   - Generals / Binaries / Semi-Continuous variable sections
+ * Writes CPLEX LP format, readable by read_lp(). Quadratic objective terms,
+ * quadratic constraints and semi-continuous variables are written when present.
  *
- * Notes / limitations that mirror the LP format itself:
- *   - Range rows (a linear row with two distinct finite bounds) are emitted as
- *     two constraints ('_lo' with '>=' and '_up' with '<=') because the LP
- *     format has no single-line ranged-row syntax.
- *   - The objective scaling factor is not representable in LP format and is
- *     therefore not written (identical to the MPS writer).
+ * Limitations:
+ *   - A ranged row is written as two rows, '<name>_lo' (>=) and '<name>_up' (<=).
+ *   - The objective scaling factor is not written.
  *
  * @tparam i_t  data type of the indices
  * @tparam f_t  data type of the weights and variables
