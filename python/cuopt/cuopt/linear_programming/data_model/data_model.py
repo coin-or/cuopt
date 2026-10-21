@@ -844,13 +844,17 @@ class DataModel(data_model_wrapper.DataModel):
         Exception
             Propagates validation or I/O failures from the underlying writer.
         """
-        from cuopt.linear_programming.io.format import file_format_from_path
-
-        fmt = file_format_from_path(user_problem_file)
-        if fmt == "lp":
+        lower = user_problem_file.lower()
+        if lower.endswith(".lp"):
             self._write_lp(user_problem_file)
-        else:
+        elif lower.endswith((".mps", ".qps")):
             self._write_mps(user_problem_file)
+        else:
+            raise RuntimeError(
+                "write: unrecognized output file extension. Supported "
+                "(case-insensitive): .mps, .qps, .lp. Compressed output is "
+                f"not supported. Given path: {user_problem_file}"
+            )
 
     @catch_cuopt_exception
     def writeMPS(self, user_problem_file: str) -> None:
