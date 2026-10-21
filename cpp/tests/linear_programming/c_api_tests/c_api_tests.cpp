@@ -339,8 +339,7 @@ static bool test_write_roundtrip(const std::string& mps_file_path, cuopt_int_t f
   bool result                              = false;
 
   const std::string extension = (format == CUOPT_FILE_FORMAT_LP) ? ".lp" : ".mps";
-  std::string model_basename =
-    std::filesystem::path(mps_file_path).stem().string() + extension;
+  std::string model_basename  = std::filesystem::path(mps_file_path).stem().string() + extension;
   std::string temp_file =
     std::filesystem::temp_directory_path().string() + "/roundtrip_temp_" + model_basename;
 

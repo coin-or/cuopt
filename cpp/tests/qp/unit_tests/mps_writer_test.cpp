@@ -6,8 +6,8 @@
 /* clang-format on */
 
 /**
- * Builds small unconstrained QPs as optimization_problem_t, writes MPS via write_to_file, and checks
- * QUADOBJ coefficients against the symmetric Hessian H = Q + Q^T stored internally (MPS uses
+ * Builds small unconstrained QPs as optimization_problem_t, writes MPS via write_to_file, and
+ * checks QUADOBJ coefficients against the symmetric Hessian H = Q + Q^T stored internally (MPS uses
  * (1/2) x^T H x for the quadratic part).
  */
 
