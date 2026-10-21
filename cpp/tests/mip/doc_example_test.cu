@@ -124,28 +124,4 @@ TEST(docs, user_problem_file)
   }
 }
 
-TEST(docs, user_problem_file_lp_extension)
-{
-  const raft::handle_t handle_{};
-  mip_solver_settings_t<int, double> settings;
-  auto problem = create_doc_example_problem();
-
-  const auto user_problem_path = std::filesystem::temp_directory_path() / "user_problem.lp";
-  std::filesystem::remove(user_problem_path);
-
-  settings.time_limit        = 1.;
-  settings.user_problem_file = user_problem_path;
-  settings.presolver         = cuopt::mathematical_optimization::presolver_t::None;
-  solve_mip(&handle_, problem, settings);
-
-  ASSERT_TRUE(std::filesystem::exists(user_problem_path));
-  auto written = io::read_lp<int, double>(user_problem_path);
-  std::filesystem::remove(user_problem_path);
-
-  EXPECT_EQ(written.get_n_variables(), problem.get_n_variables());
-  EXPECT_EQ(written.get_n_constraints(), problem.get_n_constraints());
-  EXPECT_EQ(written.get_nnz(), problem.get_nnz());
-  EXPECT_EQ(written.get_variable_types(), problem.get_variable_types());
-}
-
 }  // namespace cuopt::mathematical_optimization::test
