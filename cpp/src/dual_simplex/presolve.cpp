@@ -2787,7 +2787,9 @@ void uncrush_solution(const presolve_info_t<i_t, f_t>& presolve_info,
   if (!presolve_info.singleton_rows.empty()) {
     original_problem.A.to_compressed_row(original_Arow);
     // A slack dropped with its singleton row takes the value that satisfies the row.
-    for (const auto& record : presolve_info.singleton_rows) {
+    for (auto it = presolve_info.singleton_rows.rbegin(); it != presolve_info.singleton_rows.rend();
+         ++it) {
+      const auto& record = *it;
       if (record.slack == -1) { continue; }
       f_t activity = 0;
       f_t a_is     = 0;
