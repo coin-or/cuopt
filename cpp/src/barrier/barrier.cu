@@ -1252,8 +1252,7 @@ class iteration_data_t {
     raft::common::nvtx::range fun_scope("Barrier: Form ADAT");
     float64_t start_form_adat = tic();
     const i_t m               = AD.m;
-    // QPs factor A (D + dual_perturb)^{-1} A^T + primal_perturb I, the ADAT form of the regularized
-    // augmented system. As there, it only preconditions IR, which solves the unregularized system.
+    // QPs factor A (D + dual_perturb)^{-1} A^T with a small relative diagonal shift.
     const bool regularize = Q.n > 0;
 
     {
@@ -1349,22 +1348,19 @@ class iteration_data_t {
       multiply_kernels<i_t, f_t>(handle_ptr, device_ADAT, spgemm_info());
       handle_ptr->sync_stream();
     }
-    if (regularize && primal_perturb > 0) {
+    if (regularize && settings_.barrier_adat_regularization > 0) {
       raft::common::nvtx::range scope("Barrier: Form ADAT: regularize");
-      // Scaling with ADAT_ii keeps the shift above pivot roundoff on dependent rows as D spreads.
-      constexpr f_t relative_perturb = 1e-14;
+      const f_t relative_perturb = settings_.barrier_adat_regularization;
       thrust::for_each_n(rmm::exec_policy_nosync(stream_view_),
                          thrust::make_counting_iterator<i_t>(0),
                          m,
-                         [row_start            = cuopt::make_span(device_ADAT.row_start),
-                          col_index            = cuopt::make_span(device_ADAT.j),
-                          values               = cuopt::make_span(device_ADAT.x),
-                          primal_perturb_value = primal_perturb,
+                         [row_start = cuopt::make_span(device_ADAT.row_start),
+                          col_index = cuopt::make_span(device_ADAT.j),
+                          values    = cuopt::make_span(device_ADAT.x),
                           relative_perturb] __device__(i_t i) {
                            for (i_t p = row_start[i]; p < row_start[i + 1]; ++p) {
                              if (col_index[p] == i) {
-                               values[p] +=
-                                 cuda::std::max(primal_perturb_value, relative_perturb * values[p]);
+                               values[p] += relative_perturb * values[p];
                                break;
                              }
                            }

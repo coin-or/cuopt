@@ -334,6 +334,8 @@ class pdlp_solver_settings_t {
   // iterations). -1 automatic (uses the built-in heuristic), else the literal starting value.
   f_t barrier_primal_regularization{-1.0};
   f_t barrier_dual_regularization{-1.0};
+  // Relative diagonal shift of the QP ADAT factorization (ADAT_ii scaled by 1 + value); 0 disables.
+  f_t barrier_adat_regularization{1e-14};
   i_t barrier_soc_threshold{100};
   f_t barrier_step_scale{0.9};
   bool save_best_primal_so_far{false};
