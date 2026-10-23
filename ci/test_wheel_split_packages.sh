@@ -25,7 +25,10 @@ libcuopt-mathopt-${SUFFIX} @ file://$(echo "${MATHOPT_WHEELHOUSE}"/libcuopt_math
 libcuopt-routing-${SUFFIX} @ file://$(echo "${ROUTING_WHEELHOUSE}"/libcuopt_routing_*.whl)
 CONSTRAINTS
 
-FAILED=()
+EXITCODE=0
+trap "EXITCODE=1" ERR
+set +e
+
 for component in "${COMPONENTS[@]}"; do
   echo "=== wheel: libcuopt-${component} alone ==="
 
@@ -39,26 +42,15 @@ for component in "${COMPONENTS[@]}"; do
 
   venv="$(mktemp -d)/venv"
   python -m venv "${venv}"
-  # Run the component with errexit on in a subshell and read its status, so an early failure is not masked.
-  set +e
-  (
-    set -e
-    . "${venv}/bin/activate"
-    pip install --upgrade pip cmake ninja
-    rapids-pip-retry install --prefer-binary --constraint "${PIP_CONSTRAINT}" "${package}"
+  . "${venv}/bin/activate"
+  pip install --upgrade pip cmake ninja
+  rapids-pip-retry install --prefer-binary --constraint "${PIP_CONSTRAINT}" "${package}"
 
-    python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" wheel-packages "${expected[@]}"
-    prefixes=$(python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" cmake-prefixes)
-    bash "${REPO_ROOT}/ci/split_package_smoke/build_and_run.sh" "${component}" "${prefixes}"
-  )
-  status=$?
-  set -e
-  if [[ ${status} -ne 0 ]]; then
-    FAILED+=("${component}")
-  fi
+  python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" wheel-packages "${expected[@]}"
+  prefixes=$(python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" cmake-prefixes)
+  bash "${REPO_ROOT}/ci/split_package_smoke/build_and_run.sh" "${component}" "${prefixes}"
+  deactivate
 done
 
-if [[ ${#FAILED[@]} -gt 0 ]]; then
-  echo "FAILED wheel components: ${FAILED[*]}" >&2
-  exit 1
-fi
+rapids-logger "Test script exiting with value: ${EXITCODE}"
+exit "${EXITCODE}"

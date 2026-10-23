@@ -20,7 +20,10 @@ RAPIDS_CHANNEL=rapidsai-nightly
 rapids-is-release-build && RAPIDS_CHANNEL=rapidsai
 CUDA_VERSION=${RAPIDS_CUDA_VERSION%.*}
 
-FAILED=()
+EXITCODE=0
+trap "EXITCODE=1" ERR
+set +e
+
 for component in "${COMPONENTS[@]}"; do
   echo "=== conda: libcuopt-${component} alone ==="
   package="libcuopt-${component}"
@@ -30,30 +33,19 @@ for component in "${COMPONENTS[@]}"; do
   fi
 
   env_dir="$(mktemp -d)/env"
-  # Run the component with errexit on in a subshell and read its status, so an early failure is not masked.
-  set +e
-  (
-    set -e
-    rapids-mamba-retry create --yes --prefix "${env_dir}" \
-      --channel "${CPP_CHANNEL}" --channel "${RAPIDS_CHANNEL}" --channel conda-forge --channel nvidia \
-      "${package}" "cuda-version=${CUDA_VERSION}" \
-      cmake ninja cxx-compiler cuda-nvcc cuda-cudart-dev
+  rapids-mamba-retry create --yes --prefix "${env_dir}" \
+    --channel "${CPP_CHANNEL}" --channel "${RAPIDS_CHANNEL}" --channel conda-forge --channel nvidia \
+    "${package}" "cuda-version=${CUDA_VERSION}" \
+    cmake ninja cxx-compiler cuda-nvcc cuda-cudart-dev
 
-    python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" conda-packages "${env_dir}" "${expected[@]}"
+  python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" conda-packages "${env_dir}" "${expected[@]}"
 
-    set +u
-    conda activate "${env_dir}"
-    set -u
-    bash "${REPO_ROOT}/ci/split_package_smoke/build_and_run.sh" "${component}" "${env_dir}"
-  )
-  status=$?
-  set -e
-  if [[ ${status} -ne 0 ]]; then
-    FAILED+=("${component}")
-  fi
+  set +u
+  conda activate "${env_dir}"
+  set -u
+  bash "${REPO_ROOT}/ci/split_package_smoke/build_and_run.sh" "${component}" "${env_dir}"
+  conda deactivate
 done
 
-if [[ ${#FAILED[@]} -gt 0 ]]; then
-  echo "FAILED conda components: ${FAILED[*]}" >&2
-  exit 1
-fi
+rapids-logger "Test script exiting with value: ${EXITCODE}"
+exit "${EXITCODE}"
