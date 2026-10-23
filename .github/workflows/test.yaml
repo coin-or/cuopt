@@ -243,6 +243,7 @@ jobs:
       branch: ${{ inputs.branch }}
       date: ${{ inputs.date }}
       sha: ${{ inputs.sha }}
+    secrets: inherit # zizmor: ignore[secrets-inherit]
 
   nightly-summary:
     permissions:
