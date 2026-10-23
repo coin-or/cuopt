@@ -9,7 +9,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPONENTS="client mathopt routing"
+COMPONENTS=(client mathopt routing)
 
 source rapids-init-pip
 bash "${REPO_ROOT}/ci/utils/install_openssl3_runtime.sh"
@@ -26,7 +26,7 @@ libcuopt-routing-${SUFFIX} @ file://$(echo "${ROUTING_WHEELHOUSE}"/libcuopt_rout
 CONSTRAINTS
 
 FAILED=()
-for component in ${COMPONENTS}; do
+for component in "${COMPONENTS[@]}"; do
   echo "=== wheel: libcuopt-${component} alone ==="
 
   if [[ "${component}" == "client" ]]; then
@@ -39,7 +39,10 @@ for component in ${COMPONENTS}; do
 
   venv="$(mktemp -d)/venv"
   python -m venv "${venv}"
+  # Run the component with errexit on in a subshell and read its status, so an early failure is not masked.
+  set +e
   (
+    set -e
     . "${venv}/bin/activate"
     pip install --upgrade pip cmake ninja
     rapids-pip-retry install --prefer-binary --constraint "${PIP_CONSTRAINT}" "${package}"
@@ -47,7 +50,12 @@ for component in ${COMPONENTS}; do
     python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" wheel-packages "${expected[@]}"
     prefixes=$(python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" cmake-prefixes)
     bash "${REPO_ROOT}/ci/split_package_smoke/build_and_run.sh" "${component}" "${prefixes}"
-  ) || FAILED+=("${component}")
+  )
+  status=$?
+  set -e
+  if [[ ${status} -ne 0 ]]; then
+    FAILED+=("${component}")
+  fi
 done
 
 if [[ ${#FAILED[@]} -gt 0 ]]; then

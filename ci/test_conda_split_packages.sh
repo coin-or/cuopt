@@ -10,7 +10,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPONENTS="client mathopt routing"
+COMPONENTS=(client mathopt routing)
 
 . "$(conda info --base)/etc/profile.d/conda.sh"
 
@@ -21,14 +21,19 @@ rapids-is-release-build && RAPIDS_CHANNEL=rapidsai
 CUDA_VERSION=${RAPIDS_CUDA_VERSION%.*}
 
 FAILED=()
-for component in ${COMPONENTS}; do
+for component in "${COMPONENTS[@]}"; do
   echo "=== conda: libcuopt-${component} alone ==="
   package="libcuopt-${component}"
   expected=(libcuopt-client "${package}")
-  [[ "${component}" == "client" ]] && expected=(libcuopt-client)
+  if [[ "${component}" == "client" ]]; then
+    expected=(libcuopt-client)
+  fi
 
   env_dir="$(mktemp -d)/env"
+  # Run the component with errexit on in a subshell and read its status, so an early failure is not masked.
+  set +e
   (
+    set -e
     rapids-mamba-retry create --yes --prefix "${env_dir}" \
       --channel "${CPP_CHANNEL}" --channel "${RAPIDS_CHANNEL}" --channel conda-forge --channel nvidia \
       "${package}" "cuda-version=${CUDA_VERSION}" \
@@ -40,7 +45,12 @@ for component in ${COMPONENTS}; do
     conda activate "${env_dir}"
     set -u
     bash "${REPO_ROOT}/ci/split_package_smoke/build_and_run.sh" "${component}" "${env_dir}"
-  ) || FAILED+=("${component}")
+  )
+  status=$?
+  set -e
+  if [[ ${status} -ne 0 ]]; then
+    FAILED+=("${component}")
+  fi
 done
 
 if [[ ${#FAILED[@]} -gt 0 ]]; then
