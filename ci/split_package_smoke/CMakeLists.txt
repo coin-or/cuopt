@@ -4,7 +4,7 @@
 # cmake-format: on
 
 cmake_minimum_required(VERSION 3.30)
-project(cuopt_split_package_smoke LANGUAGES CXX)
+project(cuopt_split_package_smoke LANGUAGES C CXX)
 
 set(COMPONENT "" CACHE STRING "cuOpt component to link: client, mathopt or routing")
 if(NOT COMPONENT MATCHES "^(client|mathopt|routing)$")
@@ -19,7 +19,13 @@ if(NOT TARGET cuopt::${COMPONENT})
   message(FATAL_ERROR "cuopt::${COMPONENT} was not found in this installation")
 endif()
 
-add_executable(smoke_${COMPONENT} ${COMPONENT}.cpp)
+if(COMPONENT STREQUAL "mathopt")
+  set(SMOKE_SOURCE ${CMAKE_CURRENT_LIST_DIR}/../../docs/cuopt/source/cuopt-c/convex/examples/simple_lp_example.c)
+else()
+  set(SMOKE_SOURCE ${COMPONENT}.cpp)
+endif()
+
+add_executable(smoke_${COMPONENT} ${SMOKE_SOURCE})
 target_compile_features(smoke_${COMPONENT} PRIVATE cxx_std_20)
 # Keep the component in the link even if the program uses none of it, so a library that cannot
 # load fails at startup.

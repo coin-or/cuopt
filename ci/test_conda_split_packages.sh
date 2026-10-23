@@ -6,31 +6,20 @@
 # Installs each libcuopt-* conda package on its own, in a fresh environment, and builds and runs a
 # C++ binary against it, to catch a package that only works because another one happened to be
 # installed.
-#
-# CUOPT_SMOKE_CHANNELS replaces the downloaded channel, e.g. to test the published nightlies.
-# CUOPT_SMOKE_CUDA_VERSION is the CUDA major.minor to use when RAPIDS_CUDA_VERSION is not set.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPONENTS=${COMPONENTS:-"client mathopt routing"}
+COMPONENTS="client mathopt routing"
 
 # shellcheck disable=SC1091
 . "$(conda info --base)/etc/profile.d/conda.sh"
 
-if [[ -n "${CUOPT_SMOKE_CHANNELS:-}" ]]; then
-  read -ra CHANNEL_ARGS <<< "${CUOPT_SMOKE_CHANNELS}"
-  CUDA_VERSION=${CUOPT_SMOKE_CUDA_VERSION:?set CUOPT_SMOKE_CUDA_VERSION, e.g. 13.3}
-  create_env() { mamba create --yes "$@"; }
-else
-  conda config --set channel_priority strict
-  CPP_CHANNEL=$(rapids-download-from-github "$(rapids-artifact-name conda_cpp libcuopt cuopt --cuda "$RAPIDS_CUDA_VERSION")")
-  RAPIDS_CHANNEL=rapidsai-nightly
-  rapids-is-release-build && RAPIDS_CHANNEL=rapidsai
-  CHANNEL_ARGS=(--channel "${CPP_CHANNEL}" --channel "${RAPIDS_CHANNEL}" --channel conda-forge --channel nvidia)
-  CUDA_VERSION=${RAPIDS_CUDA_VERSION%.*}
-  create_env() { rapids-mamba-retry create --yes "$@"; }
-fi
+conda config --set channel_priority strict
+CPP_CHANNEL=$(rapids-download-from-github "$(rapids-artifact-name conda_cpp libcuopt cuopt --cuda "$RAPIDS_CUDA_VERSION")")
+RAPIDS_CHANNEL=rapidsai-nightly
+rapids-is-release-build && RAPIDS_CHANNEL=rapidsai
+CUDA_VERSION=${RAPIDS_CUDA_VERSION%.*}
 
 FAILED=()
 for component in ${COMPONENTS}; do
@@ -41,7 +30,8 @@ for component in ${COMPONENTS}; do
 
   env_dir="$(mktemp -d)/env"
   (
-    create_env --prefix "${env_dir}" "${CHANNEL_ARGS[@]}" \
+    rapids-mamba-retry create --yes --prefix "${env_dir}" \
+      --channel "${CPP_CHANNEL}" --channel "${RAPIDS_CHANNEL}" --channel conda-forge --channel nvidia \
       "${package}" "cuda-version=${CUDA_VERSION}" \
       cmake ninja cxx-compiler cuda-nvcc cuda-cudart-dev
 

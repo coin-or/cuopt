@@ -6,7 +6,6 @@
 # Usage: build_and_run.sh <client|mathopt|routing> <CMAKE_PREFIX_PATH>
 #
 # Builds the consumer for one component against whatever is on CMAKE_PREFIX_PATH, then runs it.
-# Extra CMake arguments can be passed in CUOPT_SMOKE_CMAKE_ARGS.
 
 set -euo pipefail
 
@@ -15,11 +14,9 @@ prefix_path=$2
 src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 build="$(mktemp -d)/${component}"
 
-# shellcheck disable=SC2086
 cmake -S "${src}" -B "${build}" -GNinja \
   -DCOMPONENT="${component}" \
-  -DCMAKE_PREFIX_PATH="${prefix_path}" \
-  ${CUOPT_SMOKE_CMAKE_ARGS:-}
+  -DCMAKE_PREFIX_PATH="${prefix_path}"
 cmake --build "${build}"
 
 cd "${build}"
