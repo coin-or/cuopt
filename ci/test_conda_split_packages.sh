@@ -35,13 +35,8 @@ for component in ${COMPONENTS}; do
       "${package}" "cuda-version=${CUDA_VERSION}" \
       cmake ninja cxx-compiler cuda-nvcc cuda-cudart-dev
 
-    installed=$(conda list --prefix "${env_dir}" --json | python -c \
-      "import json,sys; print(' '.join(sorted(p['name'] for p in json.load(sys.stdin) if p['name'].startswith(('libcuopt','cuopt')))))")
-    wanted=$(echo "${expected}" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')
-    if [[ "${installed}" != "${wanted}" ]]; then
-      echo "installing ${package} pulled in: ${installed} (expected: ${wanted})" >&2
-      exit 1
-    fi
+    # shellcheck disable=SC2086
+    python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" conda-packages "${env_dir}" ${expected}
 
     set +u
     conda activate "${env_dir}"

@@ -45,19 +45,9 @@ for component in ${COMPONENTS}; do
     pip install --upgrade pip cmake ninja
     rapids-pip-retry install --prefer-binary --constraint "${PIP_CONSTRAINT}" "${package}"
 
-    installed=$(pip list --format=freeze | sed -E 's/==.*//' | grep -E '^libcuopt' | sort | tr '\n' ' ')
-    wanted=$(echo "${expected}" | tr ' ' '\n' | sort | tr '\n' ' ')
-    if [[ "${installed}" != "${wanted}" ]]; then
-      echo "installing ${package} pulled in: ${installed} (expected: ${wanted})" >&2
-      exit 1
-    fi
-
-    prefixes=$(python - <<'PY'
-import importlib, importlib.metadata as md, os
-print(";".join(os.path.dirname(importlib.import_module(ep.value.split(":")[0]).__file__)
-               for ep in md.entry_points(group="cmake.prefix")))
-PY
-)
+    # shellcheck disable=SC2086
+    python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" wheel-packages ${expected}
+    prefixes=$(python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" cmake-prefixes)
     bash "${REPO_ROOT}/ci/split_package_smoke/build_and_run.sh" "${component}" "${prefixes}"
   ) || FAILED+=("${component}")
 done
