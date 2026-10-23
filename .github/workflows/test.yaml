@@ -178,7 +178,8 @@ jobs:
       script-env-secret-3-key: CUOPT_AWS_SECRET_ACCESS_KEY
       script-env-secret-3-value: ${{ secrets.CUOPT_AWS_SECRET_ACCESS_KEY }}
 
-  # Installs each libcuopt-* package alone and builds and runs a C++ binary against it.
+  # Installs each libcuopt-* package alone and builds and runs a C++ binary against it, on the
+  # latest amd64 CUDA and Python only.
   conda-split-package-tests:
     if: ${{ inputs.build_type == 'nightly' }}
     permissions:
@@ -194,6 +195,7 @@ jobs:
       date: ${{ inputs.date }}
       sha: ${{ inputs.sha }}
       script: ci/test_conda_split_packages.sh
+      matrix_filter: 'map(select(.ARCH == "amd64")) | sort_by(.CUDA_VER, .PY_VER) | [last]'
 
   wheel-split-package-tests:
     if: ${{ inputs.build_type == 'nightly' }}
@@ -210,6 +212,7 @@ jobs:
       date: ${{ inputs.date }}
       sha: ${{ inputs.sha }}
       script: ci/test_wheel_split_packages.sh
+      matrix_filter: 'map(select(.ARCH == "amd64")) | sort_by(.CUDA_VER, .PY_VER) | [last]'
 
   conda-notebook-tests:
     permissions:
