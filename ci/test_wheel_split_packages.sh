@@ -27,7 +27,6 @@ CONSTRAINTS
 
 EXITCODE=0
 trap "EXITCODE=1" ERR
-set +e
 
 for component in "${COMPONENTS[@]}"; do
   echo "=== wheel: libcuopt-${component} alone ==="
@@ -41,6 +40,7 @@ for component in "${COMPONENTS[@]}"; do
   fi
 
   venv="$(mktemp -d)/venv"
+  set +e
   python -m venv "${venv}"
   . "${venv}/bin/activate"
   pip install --upgrade pip cmake ninja
@@ -50,6 +50,7 @@ for component in "${COMPONENTS[@]}"; do
   prefixes=$(python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" cmake-prefixes)
   bash "${REPO_ROOT}/ci/split_package_smoke/build_and_run.sh" "${component}" "${prefixes}"
   deactivate
+  set -e
 done
 
 rapids-logger "Test script exiting with value: ${EXITCODE}"

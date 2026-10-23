@@ -22,7 +22,6 @@ CUDA_VERSION=${RAPIDS_CUDA_VERSION%.*}
 
 EXITCODE=0
 trap "EXITCODE=1" ERR
-set +e
 
 for component in "${COMPONENTS[@]}"; do
   echo "=== conda: libcuopt-${component} alone ==="
@@ -33,6 +32,7 @@ for component in "${COMPONENTS[@]}"; do
   fi
 
   env_dir="$(mktemp -d)/env"
+  set +e
   rapids-mamba-retry create --yes --prefix "${env_dir}" \
     --channel "${CPP_CHANNEL}" --channel "${RAPIDS_CHANNEL}" --channel conda-forge --channel nvidia \
     "${package}" "cuda-version=${CUDA_VERSION}" \
@@ -45,6 +45,7 @@ for component in "${COMPONENTS[@]}"; do
   set -u
   bash "${REPO_ROOT}/ci/split_package_smoke/build_and_run.sh" "${component}" "${env_dir}"
   conda deactivate
+  set -e
 done
 
 rapids-logger "Test script exiting with value: ${EXITCODE}"

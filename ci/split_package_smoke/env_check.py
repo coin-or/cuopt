@@ -20,6 +20,7 @@ import sys
 
 
 def installed_conda_packages(prefix):
+    """Return the names of the cuOpt packages installed in the conda environment at prefix."""
     out = subprocess.run(
         [
             os.environ.get("CONDA_EXE", "conda"),
@@ -40,6 +41,7 @@ def installed_conda_packages(prefix):
 
 
 def installed_wheels():
+    """Return the names of the libcuopt wheels installed in the current environment."""
     names = (
         d.metadata["Name"].lower().replace("_", "-")
         for d in metadata.distributions()
@@ -48,6 +50,7 @@ def installed_wheels():
 
 
 def check(installed, expected):
+    """Exit with an error unless the installed package names are exactly the expected ones."""
     if installed != set(expected):
         print(
             f"installed: {sorted(installed)}, expected: {sorted(expected)}",
@@ -57,6 +60,7 @@ def check(installed, expected):
 
 
 def cmake_prefixes():
+    """Return the CMake prefix paths of the installed wheels, joined with ";"."""
     return ";".join(
         os.path.dirname(
             importlib.import_module(ep.value.split(":")[0]).__file__
@@ -66,6 +70,7 @@ def cmake_prefixes():
 
 
 def main():
+    """Run the command named in argv."""
     command, args = sys.argv[1], sys.argv[2:]
     if command == "conda-packages":
         check(installed_conda_packages(args[0]), args[1:])
