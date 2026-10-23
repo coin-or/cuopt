@@ -12,7 +12,6 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPONENTS="client mathopt routing"
 
-# shellcheck disable=SC1091
 . "$(conda info --base)/etc/profile.d/conda.sh"
 
 conda config --set channel_priority strict
@@ -25,8 +24,8 @@ FAILED=()
 for component in ${COMPONENTS}; do
   echo "=== conda: libcuopt-${component} alone ==="
   package="libcuopt-${component}"
-  expected="libcuopt-client ${package}"
-  [[ "${component}" == "client" ]] && expected="libcuopt-client"
+  expected=(libcuopt-client "${package}")
+  [[ "${component}" == "client" ]] && expected=(libcuopt-client)
 
   env_dir="$(mktemp -d)/env"
   (
@@ -35,8 +34,7 @@ for component in ${COMPONENTS}; do
       "${package}" "cuda-version=${CUDA_VERSION}" \
       cmake ninja cxx-compiler cuda-nvcc cuda-cudart-dev
 
-    # shellcheck disable=SC2086
-    python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" conda-packages "${env_dir}" ${expected}
+    python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" conda-packages "${env_dir}" "${expected[@]}"
 
     set +u
     conda activate "${env_dir}"

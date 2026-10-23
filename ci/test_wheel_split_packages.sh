@@ -31,22 +31,20 @@ for component in ${COMPONENTS}; do
 
   if [[ "${component}" == "client" ]]; then
     package=libcuopt-client
-    expected="libcuopt-client"
+    expected=(libcuopt-client)
   else
     package="libcuopt-${component}-${SUFFIX}"
-    expected="libcuopt-client ${package}"
+    expected=(libcuopt-client "${package}")
   fi
 
   venv="$(mktemp -d)/venv"
   python -m venv "${venv}"
   (
-    # shellcheck disable=SC1091
     . "${venv}/bin/activate"
     pip install --upgrade pip cmake ninja
     rapids-pip-retry install --prefer-binary --constraint "${PIP_CONSTRAINT}" "${package}"
 
-    # shellcheck disable=SC2086
-    python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" wheel-packages ${expected}
+    python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" wheel-packages "${expected[@]}"
     prefixes=$(python "${REPO_ROOT}/ci/split_package_smoke/env_check.py" cmake-prefixes)
     bash "${REPO_ROOT}/ci/split_package_smoke/build_and_run.sh" "${component}" "${prefixes}"
   ) || FAILED+=("${component}")
