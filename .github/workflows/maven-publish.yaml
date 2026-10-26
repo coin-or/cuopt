@@ -82,11 +82,8 @@ jobs:
       - name: Determine publish destination
         id: destination
         run: |
-          if rapids-is-release-build; then
-            echo "is_release=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "is_release=false" >> "${GITHUB_OUTPUT}"
-          fi
+          # TEMP: force the Central path for the PR test. Remove before merge.
+          echo "is_release=true" >> "${GITHUB_OUTPUT}"
 
       - name: Download Maven repository artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
