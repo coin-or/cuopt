@@ -30,6 +30,7 @@ jobs:
       - conda-python-build
       - conda-python-tests
       - docs-build
+      - docs-build-matrix
       - multi-gpu-cpp-tests
       - wheel-build-libcuopt
       - wheel-build-libcuopt-client
@@ -43,12 +44,12 @@ jobs:
       - test-self-hosted-server
     permissions:
       contents: read
-    uses: rapidsai/shared-workflows/.github/workflows/pr-builder.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/pr-builder.yaml@main
     if: always()
     with:
       needs: ${{ toJSON(needs) }}
   build-details:
-    uses: rapidsai/shared-workflows/.github/workflows/compute-build-details.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/compute-build-details.yaml@main
   compute-matrix-filters:
     permissions:
       contents: read
@@ -78,7 +79,7 @@ jobs:
       contents: read
       packages: read
       pull-requests: read
-    uses: rapidsai/shared-workflows/.github/workflows/changed-files.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/changed-files.yaml@main
     with:
       files_yaml: |
         build_docs:
@@ -102,8 +103,6 @@ jobs:
           - '!.github/workflows/build_images.yaml'
           - '!.github/workflows/build_test_publish_images.yaml'
           - '!.github/workflows/cloud_ci.yaml'
-          - '!.github/workflows/inactivity_reminder.yaml'
-          - '!.github/workflows/issue_automation.yaml'
           - '!.github/workflows/kitmaker_portal.yaml'
           - '!.github/workflows/nightly.yaml'
           - '!.github/workflows/request-nvskills-ci.yml'
@@ -168,8 +167,6 @@ jobs:
           - '!.github/workflows/build_images.yaml'
           - '!.github/workflows/build_test_publish_images.yaml'
           - '!.github/workflows/cloud_ci.yaml'
-          - '!.github/workflows/inactivity_reminder.yaml'
-          - '!.github/workflows/issue_automation.yaml'
           - '!.github/workflows/kitmaker_portal.yaml'
           - '!.github/workflows/nightly.yaml'
           - '!.github/workflows/request-nvskills-ci.yml'
@@ -254,8 +251,6 @@ jobs:
           - '!.github/workflows/build_images.yaml'
           - '!.github/workflows/build_test_publish_images.yaml'
           - '!.github/workflows/cloud_ci.yaml'
-          - '!.github/workflows/inactivity_reminder.yaml'
-          - '!.github/workflows/issue_automation.yaml'
           - '!.github/workflows/kitmaker_portal.yaml'
           - '!.github/workflows/nightly.yaml'
           - '!.github/workflows/request-nvskills-ci.yml'
@@ -328,8 +323,6 @@ jobs:
           - '!.github/workflows/build_images.yaml'
           - '!.github/workflows/build_test_publish_images.yaml'
           - '!.github/workflows/cloud_ci.yaml'
-          - '!.github/workflows/inactivity_reminder.yaml'
-          - '!.github/workflows/issue_automation.yaml'
           - '!.github/workflows/kitmaker_portal.yaml'
           - '!.github/workflows/nightly.yaml'
           - '!.github/workflows/request-nvskills-ci.yml'
@@ -382,7 +375,7 @@ jobs:
   checks:
     permissions:
       contents: read
-    uses: rapidsai/shared-workflows/.github/workflows/checks.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/checks.yaml@main
     with:
       enable_check_generated_files: false
       ignored_pr_jobs: "pr-test-summary"
@@ -401,7 +394,7 @@ jobs:
       packages: read
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-build.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-build.yaml@main
     with:
       build_type: pull-request
       build-datetime: ${{ needs.build-details.outputs.build-datetime }}
@@ -414,7 +407,7 @@ jobs:
       id-token: write
       packages: read
       pull-requests: read
-    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-tests.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-tests.yaml@main
     if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp
     with:
       build_type: pull-request
@@ -438,6 +431,7 @@ jobs:
     if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp
     with:
       build_type: pull-request
+    secrets: inherit # zizmor: ignore[secrets-inherit]
   conda-python-build:
     needs: [build-details, conda-cpp-build, changed-files]
     # Consumed by conda-python-tests and docs-build.
@@ -451,7 +445,7 @@ jobs:
       packages: read
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@main
     with:
       build_type: pull-request
       build-datetime: ${{ needs.build-details.outputs.build-datetime }}
@@ -466,14 +460,21 @@ jobs:
       id-token: write
       packages: read
       pull-requests: read
-    uses: rapidsai/shared-workflows/.github/workflows/conda-python-tests.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-tests.yaml@main
     if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_conda
     with:
       build_type: pull-request
       run_codecov: false
       script: ci/test_python.sh
+  docs-build-matrix:
+    permissions:
+      contents: read
+    uses: rapidsai/shared-workflows/.github/workflows/compute-matrix.yaml@main
+    with:
+      build_type: pull-request
+      matrix_name: docs-build
   docs-build:
-    needs: [conda-python-build, changed-files]
+    needs: [docs-build-matrix, conda-python-build, changed-files]
     permissions:
       actions: read
       contents: read
@@ -481,15 +482,18 @@ jobs:
       packages: read
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/custom-job.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/custom-job.yaml@main
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.docs-build-matrix.outputs.matrix) }}
     if: fromJSON(needs.changed-files.outputs.changed_file_groups).build_docs
     with:
       build_type: pull-request
-      node_type: "gpu-l4-latest-1"
-      arch: "amd64"
+      node_type: "gpu-${{ matrix.GPU }}-${{ matrix.DRIVER }}-1"
+      arch: "${{ matrix.ARCH }}"
       file_to_upload: "docs/cuopt/build/html/"
       artifact-name: "cuopt_docs"
-      container_image: "rapidsai/ci-conda:26.10-latest"
+      container_image: "rapidsai/ci-conda:26.12-cuda${{ matrix.CUDA_VER }}-${{ matrix.LINUX_VER }}-py${{ matrix.PY_VER }}"
       script: "ci/build_docs.sh"
   # Compiles libcuopt from source (one self-contained classifier JAR per CUDA major and
   # architecture), so this does not need conda-cpp-build. See #1817.
@@ -537,7 +541,7 @@ jobs:
       # ci/build_java_static.sh reads it to pick the CUDA toolkit, so every "cuN" classifier
       # JAR would actually be built against the same CUDA version and just mislabeled. Matches
       # the pattern java-static-test (test.yaml) already uses for this image family.
-      container_image: "rapidsai/ci-wheel:26.10-cuda${{ matrix.CUDA_VER }}-${{ matrix.LINUX_VER }}-py${{ matrix.PY_VER }}"
+      container_image: "rapidsai/ci-wheel:26.12-cuda${{ matrix.CUDA_VER }}-${{ matrix.LINUX_VER }}-py${{ matrix.PY_VER }}"
       script: "ci/build_java_static.sh"
       artifact-name: "cuopt_java_${{ matrix.ARCH }}_cu${{ matrix.CUDA_MAJOR }}"
       file_to_upload: "java/cuopt/classifier-jars/"
@@ -565,7 +569,7 @@ jobs:
       # only needs a JDK, Maven and the CUDA runtime (libcublas/libcusparse, already in this
       # image) to test, and a fresh `conda create` every run was slow enough that concurrent
       # matrix jobs' cold Maven Central resolution reliably lined up and triggered 429s.
-      container_image: "rapidsai/ci-wheel:26.10-cuda${{ matrix.CUDA_VER }}-${{ matrix.LINUX_VER }}-py${{ matrix.PY_VER }}"
+      container_image: "rapidsai/ci-wheel:26.12-cuda${{ matrix.CUDA_VER }}-${{ matrix.LINUX_VER }}-py${{ matrix.PY_VER }}"
       script: "ci/test_java_static.sh"
       # Surefire fork-crash diagnostics (dumpstream/hs_err files) are also printed inline by
       # the script on failure, but keep the raw reports downloadable too -- the JVM sometimes
@@ -583,7 +587,7 @@ jobs:
       packages: read
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/custom-job.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/custom-job.yaml@main
     if: >-
       fromJSON(needs.changed-files.outputs.changed_file_groups).test_java ||
       fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp
@@ -591,29 +595,10 @@ jobs:
       build_type: pull-request
       node_type: "gpu-l4-latest-1"
       arch: "amd64"
-      container_image: "rapidsai/ci-conda:26.10-latest"
+      container_image: "rapidsai/ci-conda:26.12-latest"
       script: "ci/test_java.sh"
       artifact-name: "cuopt-java"
       file_to_upload: "java/cuopt/target/"
-  wheel-build-libcuopt:
-    needs: [build-details, compute-matrix-filters, changed-files]
-    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_wheels
-    permissions:
-      actions: read
-      contents: read
-      id-token: write
-      packages: read
-      pull-requests: read
-    secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@release/26.10
-    with:
-      # build for every combination of arch and CUDA version, but only for the latest Python
-      matrix_filter: ${{ needs.compute-matrix-filters.outputs.libcuopt_filter }}
-      package-type: cpp
-      package-name: libcuopt
-      build_type: pull-request
-      build-datetime: ${{ needs.build-details.outputs.build-datetime }}
-      script: ci/build_wheel_libcuopt.sh
   wheel-build-libcuopt-client:
     needs: [build-details, compute-matrix-filters, changed-files]
     if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_wheels
@@ -624,7 +609,7 @@ jobs:
       packages: read
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
     with:
       matrix_filter: ${{ needs.compute-matrix-filters.outputs.libcuopt_client_filter }}
       package-type: cpp
@@ -635,7 +620,7 @@ jobs:
       build-datetime: ${{ needs.build-details.outputs.build-datetime }}
       script: ci/build_wheel_libcuopt_client.sh
   wheel-build-libcuopt-mathopt:
-    needs: [build-details, compute-matrix-filters, changed-files]
+    needs: [build-details, compute-matrix-filters, changed-files, wheel-build-libcuopt-client]
     if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_wheels
     permissions:
       actions: read
@@ -644,7 +629,7 @@ jobs:
       packages: read
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
     with:
       # Same filter as libcuopt: every arch and CUDA version, latest Python only.
       matrix_filter: ${{ needs.compute-matrix-filters.outputs.libcuopt_filter }}
@@ -654,7 +639,7 @@ jobs:
       build-datetime: ${{ needs.build-details.outputs.build-datetime }}
       script: ci/build_wheel_libcuopt_mathopt.sh
   wheel-build-libcuopt-routing:
-    needs: [build-details, compute-matrix-filters, changed-files]
+    needs: [build-details, compute-matrix-filters, changed-files, wheel-build-libcuopt-client]
     if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_wheels
     permissions:
       actions: read
@@ -663,7 +648,7 @@ jobs:
       packages: read
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
     with:
       # Same filter as libcuopt: every arch and CUDA version, latest Python only.
       matrix_filter: ${{ needs.compute-matrix-filters.outputs.libcuopt_filter }}
@@ -672,8 +657,14 @@ jobs:
       build_type: pull-request
       build-datetime: ${{ needs.build-details.outputs.build-datetime }}
       script: ci/build_wheel_libcuopt_routing.sh
-  wheel-build-cuopt:
-    needs: [build-details, wheel-build-libcuopt, compute-matrix-filters, changed-files]
+  wheel-build-libcuopt:
+    needs:
+      - build-details
+      - compute-matrix-filters
+      - changed-files
+      - wheel-build-libcuopt-client
+      - wheel-build-libcuopt-mathopt
+      - wheel-build-libcuopt-routing
     if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_wheels
     permissions:
       actions: read
@@ -682,7 +673,33 @@ jobs:
       packages: read
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
+    with:
+      # build for every combination of arch and CUDA version, but only for the latest Python
+      matrix_filter: ${{ needs.compute-matrix-filters.outputs.libcuopt_filter }}
+      package-type: cpp
+      package-name: libcuopt
+      build_type: pull-request
+      build-datetime: ${{ needs.build-details.outputs.build-datetime }}
+      script: ci/build_wheel_libcuopt.sh
+  wheel-build-cuopt:
+    needs:
+      - build-details
+      - wheel-build-libcuopt
+      - wheel-build-libcuopt-client
+      - wheel-build-libcuopt-mathopt
+      - wheel-build-libcuopt-routing
+      - compute-matrix-filters
+      - changed-files
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_wheels
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: read
+    secrets: inherit # zizmor: ignore[secrets-inherit]
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
     with:
       build_type: pull-request
       build-datetime: ${{ needs.build-details.outputs.build-datetime }}
@@ -699,7 +716,7 @@ jobs:
       id-token: write
       packages: read
       pull-requests: read
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-test.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-test.yaml@main
     if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_wheels
     with:
       build_type: pull-request
@@ -721,7 +738,7 @@ jobs:
       packages: read
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
     with:
       build_type: pull-request
       build-datetime: ${{ needs.build-details.outputs.build-datetime }}
@@ -741,7 +758,7 @@ jobs:
       packages: read
       pull-requests: read
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
     with:
       build_type: pull-request
       build-datetime: ${{ needs.build-details.outputs.build-datetime }}
@@ -760,7 +777,7 @@ jobs:
       id-token: write
       packages: read
       pull-requests: read
-    uses: rapidsai/shared-workflows/.github/workflows/wheels-test.yaml@release/26.10
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-test.yaml@main
     if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_wheels
     with:
       build_type: pull-request

@@ -41,6 +41,21 @@ void report_cpu_incumbent(fj_cpu_climber_t<i_t, f_t>& c)
 }
 
 template <typename i_t, typename f_t>
+void share_cpu_incumbent(fj_cpu_climber_t<i_t, f_t>& c,
+                         f_t objective,
+                         const std::vector<f_t>& assignment)
+{
+  if (c.shared_incumbent)
+    c.shared_incumbent->publish(objective, c.get_user_objective(objective), assignment);
+}
+
+template <typename i_t, typename f_t>
+void share_cpu_incumbent(fj_cpu_climber_t<i_t, f_t>& c)
+{
+  share_cpu_incumbent(c, c.h_incumbent_objective, c.h_assignment.underlying());
+}
+
+template <typename i_t, typename f_t>
 void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, f_t delta, bool localmin = false)
 {
   CPUFJ_NVTX_RANGE("CPUFJ::apply_move");
@@ -63,7 +78,9 @@ void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, f_t delta, bool
   const f_t floor_      = std::max(get_lower(var_bounds), (f_t)-fj_cpu.hp.start_magnitude_limit);
   const f_t ceil_       = std::min(get_upper(var_bounds), (f_t)fj_cpu.hp.start_magnitude_limit);
   if (floor_ <= ceil_) new_val = std::min(std::max(new_val, floor_), ceil_);
-  delta = new_val - old_val;
+  delta              = new_val - old_val;
+  const f_t delta_z  = delta - new_val;
+  const f_t delta_lo = (new_val - (delta - delta_z)) + (-old_val - delta_z);
   cuopt_assert(std::isfinite(new_val), "assignment is not finite");
   cuopt_assert(std::isfinite(delta), "applied delta is not finite");
   cuopt_assert(check_variable_within_bounds<i_t, f_t>(fj_cpu, var_idx, new_val),
@@ -105,15 +122,34 @@ void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, f_t delta, bool
     const f_t h           = -cstr_coeff * delta;
     f_t t                 = old_slack + h;
     const f_t z           = t - old_slack;
-    f_t new_sumcomp =
-      old_sumcomp + (((old_slack - (t - z)) + (h - z)) + std::fma(-cstr_coeff, delta, -h));
+    f_t new_sumcomp       = old_sumcomp +
+                      (((old_slack - (t - z)) + (h - z)) + std::fma(-cstr_coeff, delta, -h)) -
+                      cstr_coeff * delta_lo;
 
     const f_t old_value = old_slack + old_sumcomp;
     f_t new_value       = t + new_sumcomp;
     if (fj_cpu.h_row_is_integral[cstr_idx]) {
       cuopt_assert(old_value == std::round(old_value), "integral row state is fractional");
-      cuopt_assert(fj_cpu.problem->is_integer(new_value),
-                   "integral row received a fractional move");
+      if (!fj_cpu.problem->is_integer(new_value)) {
+        const f_t integrality_gap = std::fabs(new_value - std::round(new_value));
+        CUOPT_LOG_DEBUG(
+          "%sCPUFJ integral row %d received a fractional move: value %.17g, gap %.17g, tolerance "
+          "%.17g, var %d, old row value %.17g, coefficient %.17g, delta %.17g, delta_lo %.17g, "
+          "slack %.17g, sumcomp %.17g",
+          fj_cpu.log_prefix.c_str(),
+          (int)cstr_idx,
+          new_value,
+          integrality_gap,
+          fj_cpu.problem->tolerances.integrality_tolerance,
+          (int)var_idx,
+          old_value,
+          cstr_coeff,
+          delta,
+          delta_lo,
+          t,
+          new_sumcomp);
+        cuopt_assert(false, "integral row received a fractional move");
+      }
       new_value   = std::round(new_value);
       t           = new_value;
       new_sumcomp = 0;
@@ -171,9 +207,10 @@ void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, f_t delta, bool
 
   // Kahan compensated summation, as for the slacks. The incumbent objective is reported as-is, so
   // it cannot carry the drift of a long uncompensated chain of deltas.
-  const f_t obj_old = fj_cpu.h_incumbent_objective;
-  const f_t obj_y   = fj_cpu.problem->h_obj_coeffs[var_idx] * delta - fj_cpu.h_objective_sumcomp;
-  const f_t obj_t   = obj_old + obj_y;
+  const f_t obj_old   = fj_cpu.h_incumbent_objective;
+  const f_t obj_coeff = fj_cpu.problem->h_obj_coeffs[var_idx];
+  const f_t obj_y     = obj_coeff * delta - (fj_cpu.h_objective_sumcomp - obj_coeff * delta_lo);
+  const f_t obj_t     = obj_old + obj_y;
   fj_cpu.h_objective_sumcomp   = (obj_t - obj_old) - obj_y;
   fj_cpu.h_incumbent_objective = obj_t;
   // The result of this addition carries the ulp of its larger operand, not of itself, and the
@@ -182,9 +219,14 @@ void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, f_t delta, bool
   // noise, so rebuild here rather than setting the deferred flag: the gate is in this same function
   // and would otherwise latch on the value this move just made unreliable. The row loop and the
   // assignment write are done, so the state a rebuild reads is consistent.
+  // The gate can only fire on a point with no violated rows, so the O(nnz) rebuild is only needed
+  // then. Rebuilding on every move made each move O(nnz) whenever |objective| exceeds
+  // breakthrough_move_epsilon / eps (~4.5e11), which stalled large models (e.g. millions of
+  // epigraph projections before the search loop, with no halt check in between).
   const f_t obj_resolution =
     std::numeric_limits<f_t>::epsilon() * std::max(std::fabs(obj_old), std::fabs(obj_y));
-  if (obj_resolution > (f_t)fj_cpu.settings.parameters.breakthrough_move_epsilon) {
+  if (obj_resolution > (f_t)fj_cpu.settings.parameters.breakthrough_move_epsilon &&
+      fj_cpu.violated_constraints.empty()) {
     recompute_slack(fj_cpu);
   }
   cuopt_func_call(audit_objective_update(fj_cpu, var_idx, old_val, delta, obj_old, obj_y));
@@ -197,13 +239,26 @@ void apply_move(fj_cpu_climber_t<i_t, f_t>& fj_cpu, i_t var_idx, f_t delta, bool
       fj_cpu.h_incumbent_objective - fj_cpu.settings.parameters.breakthrough_move_epsilon;
     fj_cpu.h_best_assignment     = fj_cpu.h_assignment;
     fj_cpu.iterations_since_best = 0;
+    fj_cpu.perturb_streak        = 0;
     report_cpu_incumbent(fj_cpu);
     fj_cpu.feasible_found = true;
+    // The true objective of the assignment, not the epsilon-reduced threshold stored above, so
+    // another lane comparing against it is not misled into adopting something no better.
+    share_cpu_incumbent(fj_cpu);
+    // Feasibility-only descent intentionally starts at zero objective pressure.  Once it has an
+    // incumbent, activate this lane's post-crossing objective persona before applying the incumbent
+    // bonus; otherwise objective_weight_floor is only a decay floor and never actually diversifies
+    // the objective phase.
+    fj_cpu.h_objective_weight = std::max(fj_cpu.h_objective_weight, fj_cpu.objective_weight_floor);
+    fj_cpu.h_objective_weight =
+      std::min((f_t)fj_cpu.hp.obj_weight_incumbent_cap,
+               fj_cpu.h_objective_weight + (f_t)fj_cpu.hp.obj_weight_incumbent_bump);
+    // The weight enters every score, and row versions cannot see it move.
+    retire_var_best_moves<i_t, f_t>(fj_cpu);
   }
 
-  i_t tabu_tenure = fj_cpu.settings.parameters.tabu_tenure_min +
-                    fj_cpu.rng.next_u32() % (fj_cpu.settings.parameters.tabu_tenure_max -
-                                             fj_cpu.settings.parameters.tabu_tenure_min);
+  const i_t tabu_tenure = fj_cpu.rng.uniform(fj_cpu.settings.parameters.tabu_tenure_min,
+                                             fj_cpu.settings.parameters.tabu_tenure_max);
   if (delta > 0) {
     fj_cpu.h_tabu_lastinc[var_idx]     = fj_cpu.iterations;
     fj_cpu.h_tabu_nodec_until[var_idx] = fj_cpu.iterations + tabu_tenure;
@@ -286,9 +341,10 @@ static void finish_full_recompute(fj_cpu_climber_t<i_t, f_t>& fj_cpu,
                                   const f_t* objective_lhs,
                                   const f_t* objective_rhs)
 {
-  fj_cpu.h_incumbent_objective =
-    compensated_dot2(objective_lhs, objective_rhs, fj_cpu.problem->n_variables);
-  fj_cpu.h_objective_sumcomp = 0;
+  f_t objective_correction;
+  fj_cpu.h_incumbent_objective = compensated_dot2_with_correction(
+    objective_lhs, objective_rhs, fj_cpu.problem->n_variables, objective_correction);
+  fj_cpu.h_objective_sumcomp = -objective_correction;
 }
 
 template <typename i_t, typename f_t>
@@ -333,13 +389,18 @@ void recompute_slack(fj_cpu_climber_t<i_t, f_t>& fj_cpu)
   const f_t* const assignment = fj_cpu.h_assignment.data();
 
   for (i_t r = 0; r < n_rows; ++r) {
-    f_t slack = fresh_row_slack<i_t, f_t>(fj_cpu, r, assignment);
-    if (fj_cpu.h_row_is_integral[r]) slack = std::round(slack);
+    f_t slack_sumcomp;
+    f_t slack = fresh_row_slack<i_t, f_t>(fj_cpu, r, assignment, slack_sumcomp);
+    if (fj_cpu.h_row_is_integral[r]) {
+      slack         = std::round(slack + slack_sumcomp);
+      slack_sumcomp = 0;
+    }
+    const f_t slack_value       = slack + slack_sumcomp;
     fj_cpu.row_state()[r].slack = slack;
-    fj_cpu.h_slack_sumcomp[r]   = 0;
-    if (slack < -fj_cpu.row_tolerance) {
+    fj_cpu.h_slack_sumcomp[r]   = slack_sumcomp;
+    if (slack_value < -fj_cpu.row_tolerance) {
       fj_cpu.violated_constraints.insert(r);
-      fj_cpu.total_violations += slack;
+      fj_cpu.total_violations += slack_value;
     } else {
       fj_cpu.satisfied_constraints.insert(r);
     }

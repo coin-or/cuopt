@@ -122,7 +122,6 @@ class mip_solver_settings_t {
   f_t work_limit                = std::numeric_limits<f_t>::infinity();
   f_t semi_continuous_big_m     = f_t(1e10);
   i_t node_limit                = std::numeric_limits<i_t>::max();
-  bool heuristics_only          = false;
   i_t reliability_branching     = -1;
   i_t num_cpu_threads           = -1;  // -1 means use default number of threads in branch and bound
   i_t symmetry                  = -1;
@@ -134,11 +133,14 @@ class mip_solver_settings_t {
   i_t clique_cuts               = -1;
   i_t zero_half_cuts            = -1;
   i_t implied_bound_cuts        = -1;
-  i_t strong_chvatal_gomory_cuts = -1;
-  i_t reduced_cost_strengthening = -1;
-  i_t objective_step             = 1;  // 0 = disable objective step tightening, 1 = enable
-  f_t cut_change_threshold       = -1.0;
-  f_t cut_min_orthogonality      = 0.5;
+  i_t strong_chvatal_gomory_cuts       = -1;
+  i_t reduced_cost_strengthening       = -1;
+  i_t dual_degenerate_feasibility_pump = -1;  // -1 = automatic (off), 0 = off, 1 = on
+  i_t primal_degenerate_pivots         = -1;  // -1 = automatic (on), 0 = off, 1 = on
+  i_t dual_degenerate_pivots = -1;  // -1 = automatic (off), 0 = off, 1 = root/dives, 2 = everywhere
+  i_t objective_step         = 1;   // 0 = disable objective step tightening, 1 = enable
+  f_t cut_change_threshold   = -1.0;
+  f_t cut_min_orthogonality  = 0.5;
   i_t mip_batch_pdlp_strong_branching{
     0};  // 0 = DS only, 1 = cooperative DS + PDLP, 2 = batch PDLP only
   i_t mip_batch_pdlp_reliability_branching{
@@ -146,7 +148,7 @@ class mip_solver_settings_t {
   i_t strong_branching_simplex_iteration_limit = -1;
   i_t num_gpus                                 = 1;
   method_t method{method_t::Concurrent};
-  i_t concurrent_nnz_cutoff{50'000'000};
+  i_t large_nnz_threshold{50'000'000};
   bool log_to_console = true;
 
   std::string log_file;
@@ -175,6 +177,13 @@ class mip_solver_settings_t {
    * no-op when no certified reduction exists.
    */
   bool block_bve{true};
+  /**
+   * @brief Enable the indicator-strengthening step of presolve (MIP only).
+   *
+   * Runs before Papilo and only when the higher-level presolve is enabled. It appends implied
+   * indicator rows and lifts capacity rows by the indicator that bounds all of their members.
+   */
+  bool indicator_strengthening{true};
   /**
    * @brief Determinism mode for MIP solver.
    *

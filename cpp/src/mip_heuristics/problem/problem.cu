@@ -27,6 +27,9 @@
 #include <mip_heuristics/utils.cuh>
 #include <utilities/hashing.hpp>
 
+#include <cub/device/device_segmented_reduce.cuh>
+#include <cub/device/device_segmented_sort.cuh>
+
 #include <thrust/binary_search.h>
 #include <thrust/copy.h>
 #include <thrust/count.h>
@@ -39,6 +42,7 @@
 #include <thrust/tabulate.h>
 #include <thrust/transform_reduce.h>
 #include <thrust/tuple.h>
+#include <cuda/functional>
 #include <cuda/std/functional>
 #include <cuda/stream>
 
@@ -117,10 +121,11 @@ template <typename i_t, typename f_t>
 problem_t<i_t, f_t>::problem_t(
   const optimization_problem_t<i_t, f_t>& problem_,
   const typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances_,
-  bool deterministic_)
+  bool deterministic_,
+  bool allocate_mip_workspace)
   : original_problem_ptr(&problem_),
     handle_ptr(problem_.get_handle_ptr()),
-    integer_fixed_variable_map(problem_.get_n_variables(), problem_.get_handle_ptr()->get_stream()),
+    integer_fixed_variable_map(0, problem_.get_handle_ptr()->get_stream()),
     tolerances(tolerances_),
     deterministic(deterministic_),
     n_variables(problem_.get_n_variables()),
@@ -150,21 +155,28 @@ problem_t<i_t, f_t>::problem_t(
     nonbinary_indices(0, problem_.get_handle_ptr()->get_stream()),
     is_binary_variable(0, problem_.get_handle_ptr()->get_stream()),
     related_variables(0, problem_.get_handle_ptr()->get_stream()),
-    related_variables_offsets(n_variables, problem_.get_handle_ptr()->get_stream()),
+    related_variables_offsets(0, problem_.get_handle_ptr()->get_stream()),
     var_names(problem_.get_variable_names()),
     row_names(problem_.get_row_names()),
     objective_name(problem_.get_objective_name()),
     objective_offset(problem_.get_objective_offset()),
-    lp_state(*this, problem_.get_handle_ptr()->get_stream()),
-    fixing_helpers(n_constraints, n_variables, handle_ptr),
+    lp_state(problem_.get_handle_ptr()->get_stream()),
+    fixing_helpers(0, 0, handle_ptr),
     clique_table(nullptr),
     Q_offsets(problem_.get_quadratic_objective_offsets()),
     Q_indices(problem_.get_quadratic_objective_indices()),
     Q_values(problem_.get_quadratic_objective_values())
 {
+  // LP relaxations may retain integer metadata but do not need MIP workspace.
+  if (allocate_mip_workspace && problem_.get_problem_category() != problem_category_t::LP) {
+    integer_fixed_variable_map.resize(n_variables, handle_ptr->get_stream());
+    related_variables_offsets.resize(n_variables, handle_ptr->get_stream());
+    lp_state = lp_state_t<i_t, f_t>(*this, handle_ptr->get_stream());
+    fixing_helpers.reduction_in_rhs.resize(n_constraints, handle_ptr->get_stream());
+    fixing_helpers.variable_fix_mask.resize(n_variables, handle_ptr->get_stream());
+  }
   op_problem_cstr_body(problem_);
-  branch_and_bound_callback             = nullptr;
-  set_root_relaxation_solution_callback = nullptr;
+  branch_and_bound_callback = nullptr;
 }
 
 template <typename i_t, typename f_t>
@@ -176,7 +188,6 @@ problem_t<i_t, f_t>::problem_t(const problem_t<i_t, f_t>& problem_)
     integer_fixed_problem(problem_.integer_fixed_problem),
     integer_fixed_variable_map(problem_.integer_fixed_variable_map, handle_ptr->get_stream()),
     branch_and_bound_callback(nullptr),
-    set_root_relaxation_solution_callback(nullptr),
     n_variables(problem_.n_variables),
     n_constraints(problem_.n_constraints),
     n_binary_vars(problem_.n_binary_vars),
@@ -236,7 +247,6 @@ problem_t<i_t, f_t>::problem_t(const problem_t<i_t, f_t>& problem_,
     integer_fixed_problem(problem_.integer_fixed_problem),
     integer_fixed_variable_map(problem_.integer_fixed_variable_map, handle_ptr->get_stream()),
     branch_and_bound_callback(nullptr),
-    set_root_relaxation_solution_callback(nullptr),
     n_variables(problem_.n_variables),
     n_constraints(problem_.n_constraints),
     n_binary_vars(problem_.n_binary_vars),
@@ -366,7 +376,9 @@ problem_t<i_t, f_t>::problem_t(const problem_t<i_t, f_t>& problem_, bool no_deep
                       handle_ptr->get_stream()),
     is_binary_variable((!no_deep_copy) ? 0 : problem_.is_binary_variable.size(),
                        handle_ptr->get_stream()),
-    related_variables(problem_.related_variables, handle_ptr->get_stream()),
+    related_variables((!no_deep_copy) ? rmm::device_uvector<i_t>(0, handle_ptr->get_stream())
+                                      : rmm::device_uvector<i_t>(problem_.related_variables,
+                                                                 handle_ptr->get_stream())),
     related_variables_offsets((!no_deep_copy) ? 0 : problem_.related_variables_offsets.size(),
                               handle_ptr->get_stream()),
     var_names(problem_.var_names),
@@ -379,8 +391,11 @@ problem_t<i_t, f_t>::problem_t(const problem_t<i_t, f_t>& problem_, bool no_deep
     preprocess_called(problem_.preprocess_called),
     objective_is_integral(problem_.objective_is_integral),
     objective_step(problem_.objective_step),
-    lp_state(problem_.lp_state),
-    fixing_helpers(problem_.fixing_helpers, handle_ptr),
+    lp_state((!no_deep_copy) ? lp_state_t<i_t, f_t>(handle_ptr->get_stream())
+                             : lp_state_t<i_t, f_t>(problem_.lp_state)),
+    fixing_helpers((!no_deep_copy)
+                     ? problem_fixing_helpers_t<i_t, f_t>(0, 0, handle_ptr)
+                     : problem_fixing_helpers_t<i_t, f_t>(problem_.fixing_helpers, handle_ptr)),
     vars_with_objective_coeffs(problem_.vars_with_objective_coeffs),
     expensive_to_fix_vars(problem_.expensive_to_fix_vars),
     related_vars_time_limit(problem_.related_vars_time_limit),
@@ -1421,6 +1436,7 @@ void problem_t<i_t, f_t>::substitute_variables(const std::vector<i_t>& var_indic
   raft::common::nvtx::range fun_scope("substitute_variables");
   cuopt_assert((are_exclusive<i_t, f_t>(var_indices, var_to_substitute_indices)),
                "variables and var_to_substitute_indices are not exclusive");
+  cuopt_assert(has_unique_entries(var_indices), "variable substituted more than once");
   const i_t dummy_substituted_variable = var_indices[0];
   cuopt_assert(var_indices.size() == var_to_substitute_indices.size(), "size mismatch");
   cuopt_assert(var_indices.size() == offset_values.size(), "size mismatch");
@@ -2205,7 +2221,7 @@ void problem_t<i_t, f_t>::set_papilo_presolve_data(
 
 template <typename i_t, typename f_t>
 void problem_t<i_t, f_t>::papilo_uncrush_assignment(rmm::device_uvector<f_t>& assignment,
-                                                    rmm::cuda_stream_view stream) const
+                                                    cuda::stream_ref stream) const
 {
   presolve_data.papilo_uncrush_assignment(assignment, stream);
 }

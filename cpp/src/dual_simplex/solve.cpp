@@ -8,6 +8,7 @@
 #include <dual_simplex/solve.hpp>
 
 #include <barrier/barrier.hpp>
+#include <barrier/scaling_gpu.cuh>
 
 #include <branch_and_bound/branch_and_bound.hpp>
 
@@ -36,6 +37,7 @@
 #include <exception>
 #include <memory>
 #include <queue>
+#include <stdexcept>
 #include <string>
 
 namespace cuopt::mathematical_optimization::simplex {
@@ -47,6 +49,7 @@ void unscale_uncrush_barrier_to_user(const user_problem_t<i_t, f_t>& user_proble
                                      const raft::handle_t* handle_ptr,
                                      i_t original_num_rows,
                                      i_t original_num_cols,
+                                     i_t converted_cone_var_start,
                                      const lp_problem_t<i_t, f_t>& barrier_lp,
                                      const presolve_info_t<i_t, f_t>& presolve_info,
                                      const std::vector<f_t>& column_scales,
@@ -67,8 +70,10 @@ void unscale_uncrush_barrier_to_user(const user_problem_t<i_t, f_t>& user_proble
                              unscaled_y,
                              unscaled_z);
 
-  // Dummy converted LP: sizes only. Bound-free=0 so uncrush_solution never reads A.
-  lp_problem_t<i_t, f_t> converted(handle_ptr, original_num_rows, original_num_cols, 0);
+  // Dummy converted LP. Bound-free=0 so uncrush_solution never reads A. cone_var_start undoes
+  // the shift convert applied to the cone block.
+  lp_problem_t<i_t, f_t> converted(
+    handle_ptr, original_num_rows, original_num_cols, 0, converted_cone_var_start);
   lp_solution_t<i_t, f_t> lp_solution(original_num_rows, original_num_cols);
   uncrush_solution(presolve_info,
                    barrier_settings,
@@ -89,6 +94,22 @@ void unscale_uncrush_barrier_to_user(const user_problem_t<i_t, f_t>& user_proble
   solution.l2_primal_residual = barrier_solution.l2_primal_residual;
   solution.l2_dual_residual   = barrier_solution.l2_dual_residual;
   solution.iterations         = barrier_solution.iterations;
+}
+
+// Presolve and scaling offset the data by a constant the maps alone cannot recover, so record
+// what the barrier values are worth beyond crush(user values); updates re-add it.
+// Returns 0 and writes shift, or -1 when the lengths disagree.
+template <typename i_t, typename f_t>
+i_t shift_from(const std::vector<f_t>& barrier_values,
+               const std::vector<f_t>& crushed,
+               std::vector<f_t>& shift)
+{
+  if (crushed.size() != barrier_values.size()) { return -1; }
+  shift.resize(barrier_values.size());
+  for (std::size_t k = 0; k < shift.size(); ++k) {
+    shift[k] = barrier_values[k] - crushed[k];
+  }
+  return 0;
 }
 
 template <typename i_t, typename f_t>
@@ -129,6 +150,20 @@ void compute_dual_residual(const lp_problem_t<i_t, f_t>& lp,
   }
   if (lp.Q.n > 0) { matrix_vector_multiply(lp.Q, -1.0, x, 1.0, residual); }
   matrix_transpose_vector_multiply(lp.A, 1.0, y, 1.0, residual);
+}
+
+// L2 norms of the primal residual b - A x and of the dual residual above.
+template <typename i_t, typename f_t>
+void compute_l2_residuals(const lp_problem_t<i_t, f_t>& lp,
+                          const lp_solution_t<i_t, f_t>& solution,
+                          f_t& l2_primal_residual,
+                          f_t& l2_dual_residual)
+{
+  std::vector<f_t> residual = lp.rhs;
+  matrix_vector_multiply(lp.A, 1.0, solution.x, -1.0, residual);
+  l2_primal_residual = vector_norm2<i_t, f_t>(residual);
+  compute_dual_residual(lp, solution.x, solution.y, solution.z, residual);
+  l2_dual_residual = vector_norm2<i_t, f_t>(residual);
 }
 
 lp_status_t map_primal_status_to_lp_status(primal_status_t status)
@@ -436,10 +471,13 @@ lp_status_t solve_linear_program_with_advanced_basis(
                                                work_estimate,
                                                work_unit_context);
     }
-    if (settings.inside_mip == 1 && settings.concurrent_halt != nullptr) {
+
+    if (settings.inside_submip != 1 && settings.inside_mip == 1 &&
+        settings.concurrent_halt != nullptr) {
       settings.log.debug("Setting concurrent halt to 1 inside_mip\n");
       *settings.concurrent_halt = 1;
     }
+
     if (status == dual_status_t::OPTIMAL) {
       std::vector<f_t> unscaled_x(lp.num_cols);
       std::vector<f_t> unscaled_y(lp.num_rows);
@@ -501,21 +539,35 @@ lp_status_t solve_linear_program_with_barrier(
   const simplex_solver_settings_t<i_t, f_t>& settings,
   f_t start_time,
   lp_solution_t<i_t, f_t>& solution,
-  cuopt::mathematical_optimization::barrier_cache_t* cache,
+  cuopt::mathematical_optimization::barrier_cache_t<i_t, f_t>* cache,
   const raft::handle_t* handle_ptr)
 {
   lp_status_t status                                   = lp_status_t::UNSET;
   simplex_solver_settings_t<i_t, f_t> barrier_settings = settings;
 
-  auto const* xf = (cache != nullptr && cache->c_dirty()) ? cache->transform() : nullptr;
-  const bool reuse_c_only =
-    xf != nullptr && xf->barrier_lp != nullptr && !user_problem.Q_values.empty() &&
-    user_problem.second_order_cone_dims.empty() && xf->second_order_cone_dims.empty() &&
-    xf->barrier_lp->second_order_cone_dims.empty() &&
-    settings.barrier_presolve_bound_free_variables == 0 &&
-    user_problem.num_cols == xf->user_num_cols && user_problem.num_rows == xf->user_num_rows;
+  auto const* xf          = (cache != nullptr && cache->dirty()) ? cache->transform() : nullptr;
+  const bool user_has_soc = !user_problem.second_order_cone_dims.empty();
+  // run_barrier already resolved -1 to 0. can_reuse_barrier_cache also rejects a cache whose
+  // presolve bounded free variables, which this path cannot replay.
+  const bool reuse_cached_data =
+    cuopt::mathematical_optimization::can_reuse_barrier_cache(
+      xf,
+      settings.barrier_presolve_bound_free_variables,
+      user_problem.num_cols,
+      user_problem.num_rows,
+      !user_problem.Q_values.empty(),
+      user_has_soc) &&
+    // Cone reuse also requires the expanded layout and dimensions to match. These checks stay
+    // here because the other caller of can_reuse_barrier_cache sees the pre-expansion problem.
+    (xf != nullptr && cuopt::mathematical_optimization::cone_layout_matches(*xf, user_problem)) &&
+    (!user_has_soc ||
+     (user_problem.num_cols == xf->user_num_cols && user_problem.num_rows == xf->user_num_rows));
 
-  if (reuse_c_only) {
+  if (reuse_cached_data) {
+    if (cache->rhs_infeasible()) {
+      settings.log.printf("Barrier: update_rhs made an empty constraint row infeasible\n");
+      return lp_status_t::INFEASIBLE;
+    }
     settings.log.printf("Barrier: reusing cache (skip convert/presolve/scaling)\n");
     lp_solution_t<i_t, f_t> barrier_solution(xf->barrier_lp->num_rows, xf->barrier_lp->num_cols);
     barrier::barrier_solver_t<i_t, f_t> barrier_solver(
@@ -527,6 +579,7 @@ lp_status_t solve_linear_program_with_barrier(
                                       cache->handle_ptr(),
                                       xf->original_num_rows,
                                       xf->original_num_cols,
+                                      xf->converted_cone_var_start,
                                       *xf->barrier_lp,
                                       xf->presolve_info,
                                       xf->column_scales,
@@ -534,7 +587,7 @@ lp_status_t solve_linear_program_with_barrier(
                                       barrier_settings,
                                       barrier_solution,
                                       solution);
-      cache->set_c_dirty(false);
+      cache->mark_clean();
     } else {
       cache->clear();
     }
@@ -568,7 +621,19 @@ lp_status_t solve_linear_program_with_barrier(
                                     presolved_lp.A.col_start[presolved_lp.num_cols]);
   std::vector<f_t> column_scales;
   std::vector<f_t> row_scales;
-  scaling(presolved_lp, barrier_settings, barrier_lp, column_scales, row_scales);
+
+  barrier::device_csc_matrix_ptr_t<i_t, f_t> device_A;
+  barrier::device_csc_matrix_ptr_t<i_t, f_t> device_Q;
+  const bool is_ruiz_candidate =
+    !presolved_lp.second_order_cone_dims.empty() || presolved_lp.Q.n > 0;
+  const i_t presolved_nnz = presolved_lp.A.col_start[presolved_lp.num_cols] +
+                            (presolved_lp.Q.n > 0 ? presolved_lp.Q.row_start[presolved_lp.Q.m] : 0);
+  if (is_ruiz_candidate && presolved_nnz >= barrier_settings.gpu_ruiz_nnz_threshold) {
+    scaling_ruiz_gpu(
+      presolved_lp, barrier_settings, barrier_lp, column_scales, row_scales, device_A, device_Q);
+  } else {
+    scaling(presolved_lp, barrier_settings, barrier_lp, column_scales, row_scales);
+  }
 
   // Solve using barrier
   lp_solution_t<i_t, f_t> barrier_solution(barrier_lp.num_rows, barrier_lp.num_cols);
@@ -576,9 +641,9 @@ lp_status_t solve_linear_program_with_barrier(
   lp_problem_t<i_t, f_t> const* solver_lp = &barrier_lp;
   if (cache != nullptr) {
     cache->clear();
-    auto xf           = std::make_unique<cuopt::mathematical_optimization::barrier_transform_t>();
-    xf->user_num_cols = user_problem.num_cols;
-    xf->user_num_rows = user_problem.num_rows;
+    auto xf = std::make_unique<cuopt::mathematical_optimization::barrier_transform_t<i_t, f_t>>();
+    xf->user_num_cols                = user_problem.num_cols;
+    xf->user_num_rows                = user_problem.num_rows;
     xf->original_num_cols            = original_lp.num_cols;
     xf->original_num_rows            = original_lp.num_rows;
     xf->obj_scale                    = user_problem.obj_scale;
@@ -586,13 +651,27 @@ lp_status_t solve_linear_program_with_barrier(
     xf->row_sense                    = user_problem.row_sense;
     xf->cone_var_start               = user_problem.cone_var_start;
     xf->second_order_cone_dims       = user_problem.second_order_cone_dims;
-    xf->expanded_original_num_cols   = user_problem.original_num_cols;
+    xf->pre_expansion_num_cols       = user_problem.original_num_cols;
     xf->original_col_to_expanded_col = user_problem.original_col_to_expanded_col;
-    xf->presolve_info                = presolve_info;
-    xf->column_scales                = column_scales;
-    xf->row_scales                   = row_scales;
-    xf->barrier_lp                   = std::make_unique<lp_problem_t<i_t, f_t>>(barrier_lp);
-    solver_lp                        = xf->barrier_lp.get();
+    xf->pre_expansion_num_rows       = user_problem.original_num_rows;
+    xf->converted_cone_var_start     = original_lp.cone_var_start;
+    xf->cone_head_bounds             = user_problem.cone_head_bounds;
+    // Append the expanded rhs.
+    if (!user_problem.original_col_to_expanded_col.empty()) {
+      xf->cone_row_rhs.assign(user_problem.rhs.begin() + user_problem.original_num_rows,
+                              user_problem.rhs.end());
+    }
+    xf->presolve_info = presolve_info;
+    xf->column_scales = column_scales;
+    xf->row_scales    = row_scales;
+    // convert_range_rows zeroes rhs[i] onto the slack bounds and folding aggregates rows, so
+    // neither leaves the user RHS in barrier_lp->rhs. Plain inequality/equality slacks do.
+    // Alias rows (alias - x = 0) are appended after the original constraints and stay in the
+    // cached tail, so they do not block an update of the original RHS.
+    xf->rhs_update_supported =
+      user_problem.num_range_rows == 0 && !presolve_info.folding_info.is_folded;
+    xf->barrier_lp = std::make_unique<lp_problem_t<i_t, f_t>>(barrier_lp);
+    solver_lp      = xf->barrier_lp.get();
     cache->store_transform(std::move(xf));
   }
 
@@ -607,26 +686,47 @@ lp_status_t solve_linear_program_with_barrier(
     barrier_solution.l2_dual_residual   = 0.0;
     barrier_status                      = lp_status_t::OPTIMAL;
   } else {
-    barrier::barrier_solver_t<i_t, f_t> barrier_solver(*solver_lp, presolve_info, barrier_settings);
+    barrier::barrier_solver_t<i_t, f_t> barrier_solver(
+      *solver_lp, presolve_info, barrier_settings, std::move(device_A), std::move(device_Q));
     barrier_status = barrier_solver.solve(start_time, barrier_solution, cache);
   }
 
   if (cache != nullptr) {
     if (barrier_status == lp_status_t::OPTIMAL) {
       auto* xf = cache->transform();
+      // Crushing this solve's own data also checks the maps still describe it: presolve may
+      // have dualized an LP, in which case the crush throws.
+      // Both crushes take model coordinates. The expansion only appends rows, so the RHS prefix
+      // is already model-sized, but it permutes columns, so gather the objective back.
+      bool objective_shift_ok = false;
       try {
-        auto crushed = cuopt::mathematical_optimization::crush_user_linear_objective(
-          *xf, user_problem.objective.data(), user_problem.num_cols);
-        xf->linear_obj_shift.resize(static_cast<std::size_t>(solver_lp->num_cols), 0.0);
-        if (static_cast<int>(crushed.size()) == solver_lp->num_cols) {
-          for (int j = 0; j < solver_lp->num_cols; ++j) {
-            xf->linear_obj_shift[static_cast<std::size_t>(j)] =
-              solver_lp->objective[static_cast<std::size_t>(j)] -
-              crushed[static_cast<std::size_t>(j)];
-          }
-        }
+        auto const problem_objective =
+          cuopt::mathematical_optimization::gather_problem_objective<i_t>(*xf,
+                                                                          user_problem.objective);
+        auto const crushed = cuopt::mathematical_optimization::crush_user_linear_objective(
+          *xf, problem_objective.data(), static_cast<i_t>(problem_objective.size()));
+        objective_shift_ok =
+          shift_from<i_t, f_t>(solver_lp->objective, crushed, xf->linear_obj_shift) == 0;
       } catch (std::exception const&) {
-        xf->linear_obj_shift.assign(static_cast<std::size_t>(solver_lp->num_cols), 0.0);
+        objective_shift_ok = false;
+      }
+      if (!objective_shift_ok) {
+        // A zero shift still lets an update run; it just contributes nothing.
+        xf->linear_obj_shift.assign(solver_lp->objective.size(), 0.0);
+      }
+      if (xf->rhs_update_supported) {
+        std::vector<f_t> crushed;
+        std::string error;
+        const i_t problem_m     = cuopt::mathematical_optimization::problem_num_rows(*xf);
+        bool const rhs_shift_ok = cuopt::mathematical_optimization::crush_user_rhs(
+                                    *xf, user_problem.rhs.data(), problem_m, crushed, error) ==
+                                    cuopt::mathematical_optimization::crush_rhs_status_t::success &&
+                                  shift_from<i_t, f_t>(solver_lp->rhs, crushed, xf->rhs_shift) == 0;
+        if (!rhs_shift_ok) {
+          // Maps cannot reproduce this RHS, so refuse later updates.
+          xf->rhs_update_supported = false;
+          xf->rhs_shift.clear();
+        }
       }
     } else {
       cache->clear();
@@ -907,7 +1007,25 @@ lp_status_t solve_linear_program_with_barrier(
     crossover_status_t crossover_status = crossover(
       original_lp, barrier_settings, lp_solution, start_time, crossover_solution, vstatus);
     settings.log.printf("Crossover status: %d\n", crossover_status);
-    if (crossover_status == crossover_status_t::OPTIMAL) { barrier_status = lp_status_t::OPTIMAL; }
+    if (crossover_status == crossover_status_t::OPTIMAL) {
+      barrier_status = lp_status_t::OPTIMAL;
+      // Return the crossover vertex, not the barrier point crossover started from. original_lp is
+      // the primal problem here (also when barrier solved the dual) with the artificial columns
+      // appended after the user columns, so it uncrushes like the barrier solution above.
+      uncrush_primal_solution(user_problem, original_lp, crossover_solution.x, solution.x);
+      uncrush_dual_solution(user_problem,
+                            original_lp,
+                            crossover_solution.y,
+                            crossover_solution.z,
+                            solution.y,
+                            solution.z);
+      solution.objective      = compute_objective(original_lp, crossover_solution.x);
+      solution.user_objective = compute_user_objective(original_lp, solution.objective);
+      // Residuals of the returned vertex; crossover does not set them and the barrier residuals
+      // copied above belong to the interior point.
+      compute_l2_residuals(
+        original_lp, crossover_solution, solution.l2_primal_residual, solution.l2_dual_residual);
+    }
   }
   return barrier_status;
 }
@@ -917,7 +1035,7 @@ lp_status_t solve_linear_program_with_barrier(
   const user_problem_t<i_t, f_t>& user_problem,
   const simplex_solver_settings_t<i_t, f_t>& settings,
   lp_solution_t<i_t, f_t>& solution,
-  cuopt::mathematical_optimization::barrier_cache_t* cache)
+  cuopt::mathematical_optimization::barrier_cache_t<i_t, f_t>* cache)
 {
   f_t start_time = tic();
   return solve_linear_program_with_barrier(
@@ -930,7 +1048,7 @@ lp_status_t solve_linear_program_with_barrier(
   const simplex_solver_settings_t<i_t, f_t>& settings,
   f_t start_time,
   lp_solution_t<i_t, f_t>& solution,
-  cuopt::mathematical_optimization::barrier_cache_t* cache)
+  cuopt::mathematical_optimization::barrier_cache_t<i_t, f_t>* cache)
 {
   return solve_linear_program_with_barrier(
     user_problem, settings, start_time, solution, cache, user_problem.handle_ptr);
@@ -986,16 +1104,8 @@ lp_status_t solve_linear_program_with_primal(const user_problem_t<i_t, f_t>& use
     lp_solution.objective      = compute_objective(lp, lp_solution.x);
     lp_solution.user_objective = compute_user_objective(lp, lp_solution.objective);
 
-    std::vector<f_t> residual = lp.rhs;
-    matrix_vector_multiply(lp.A, 1.0, lp_solution.x, -1.0, residual);
-    lp_solution.l2_primal_residual = vector_norm2<i_t, f_t>(residual);
-
-    std::vector<f_t> dual_residual = lp_solution.z;
-    for (i_t j = 0; j < lp.num_cols; ++j) {
-      dual_residual[j] -= lp.objective[j];
-    }
-    matrix_transpose_vector_multiply(lp.A, 1.0, lp_solution.y, 1.0, dual_residual);
-    lp_solution.l2_dual_residual = vector_norm2<i_t, f_t>(dual_residual);
+    compute_l2_residuals(
+      lp, lp_solution, lp_solution.l2_primal_residual, lp_solution.l2_dual_residual);
 
     std::vector<f_t> unscaled_x(lp.num_cols);
     std::vector<f_t> unscaled_y(lp.num_rows);
@@ -1186,7 +1296,7 @@ template lp_status_t solve_linear_program_with_barrier(
   const user_problem_t<int, double>& user_problem,
   const simplex_solver_settings_t<int, double>& settings,
   lp_solution_t<int, double>& solution,
-  cuopt::mathematical_optimization::barrier_cache_t* cache);
+  cuopt::mathematical_optimization::barrier_cache_t<int, double>* cache);
 
 template lp_status_t solve_linear_program_with_primal(
   const user_problem_t<int, double>& user_problem,
@@ -1199,14 +1309,14 @@ template lp_status_t solve_linear_program_with_barrier(
   const simplex_solver_settings_t<int, double>& settings,
   double start_time,
   lp_solution_t<int, double>& solution,
-  cuopt::mathematical_optimization::barrier_cache_t* cache);
+  cuopt::mathematical_optimization::barrier_cache_t<int, double>* cache);
 
 template lp_status_t solve_linear_program_with_barrier(
   const user_problem_t<int, double>& user_problem,
   const simplex_solver_settings_t<int, double>& settings,
   double start_time,
   lp_solution_t<int, double>& solution,
-  cuopt::mathematical_optimization::barrier_cache_t* cache,
+  cuopt::mathematical_optimization::barrier_cache_t<int, double>* cache,
   const raft::handle_t* handle_ptr);
 
 template lp_status_t solve_linear_program(const user_problem_t<int, double>& user_problem,

@@ -107,8 +107,6 @@ implementation of the issue, ask them in the issue instead of the PR.
 
 PRs that change content under `skills/` must be validated by NVSkills CI before merge. A maintainer or admin comments `/nvskills-ci` on the PR; the `nv-nvskill-ci[bot]` pushes a signature commit (`Attach NVSkills validation signatures`) that must remain in the PR. Re-comment `/nvskills-ci` after any further pushes to re-sign.
 
-NVSkills CI requires the PR to originate from a branch in `NVIDIA/cuopt`; fork-based PRs are not supported.
-
 ## Setting up your build environment
 
 The following instructions are for developers and contributors to NVIDIA cuOpt development. These
@@ -128,7 +126,7 @@ CUDA/GPU Runtime:
 
 Python:
 
-* Python >=3.11.x, <= 3.14.x
+* Python >=3.12.x, <= 3.14.x
 
 OS:
 
@@ -177,6 +175,9 @@ mamba activate ./.cuopt_env   # or: conda activate ./.cuopt_env
   installing them into the conda environment. Pass `--install` to also install `libcuopt` into the
   active conda environment (`$CONDA_PREFIX`, or a custom location via `$PREFIX`). Note that
   the script depends on the `nvcc` executable being on your path, or defined in `$CUDACXX`.
+  `--install` is the recommended way to build the Python packages. Without it, they load the
+  libraries from `$CUOPT_HOME/cpp/build` (or `$LIBCUOPT_BUILD_DIR` if you set it) through an
+  embedded RPATH, so that directory must stay in place.
 
 ```bash
 cd $CUOPT_HOME
@@ -185,7 +186,7 @@ cd $CUOPT_HOME
 # you want to build and install the libcuopt C++ library only,
 # or include the cuopt Python libraries:
 
-./build.sh           # All the libraries
+./build.sh --install # All the libraries (recommended)
 ./build.sh libcuopt  # libcuopt C++ only
 ```
 
@@ -211,7 +212,7 @@ This is only available to be built through source code and libcuopt is not being
 To build all libraries and tests, simply run
 
 ```bash
-./build.sh
+./build.sh --install
 ```
 
 - **Note**: if Cython files (`*.pyx` or `*.pxd`) have changed, the Python build must be rerun.
