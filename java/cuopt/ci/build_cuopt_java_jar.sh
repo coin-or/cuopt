@@ -208,7 +208,8 @@ if [[ -z "${VERSION}" ]]; then
   exit 1
 fi
 
-if rapids-is-release-build; then
+# TEMP: force the release branch for the PR test. Remove before merge.
+if true; then
   VERSION="${VERSION%-SNAPSHOT}"
   cp -p "${MODULE_DIR}/pom.xml" "${MODULE_DIR}/pom.xml.backup"
   POM_WAS_REWRITTEN=1
