@@ -46,7 +46,7 @@ portal_upload_bundle() {
   local body_file status url
   url="${CENTRAL_PORTAL_URL}/api/v1/publisher/upload?publishingType=${publishing_type}&name=$(printf %s "${name}" | jq -sRr @uri)"
   body_file=$(mktemp)
-  status=$(curl -sS --retry 3 --retry-delay 2 \
+  status=$(curl -sS --connect-timeout 30 \
     -H "Authorization: Bearer $(_portal_auth)" \
     --form "bundle=@${zip_path};type=application/octet-stream" \
     -X POST -o "${body_file}" -w '%{http_code}' "${url}") \
