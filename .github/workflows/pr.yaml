@@ -411,7 +411,7 @@ jobs:
     permissions:
       actions: read
       contents: read
-    uses: ./.github/workflows/maven-publish.yaml
+    uses: rapidsai/shared-workflows/.github/workflows/maven-publish.yaml@42dc26baaababbd31224fc94118fcb9a670df39b
     secrets:
       GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
