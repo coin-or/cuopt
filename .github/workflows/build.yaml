@@ -144,16 +144,16 @@ jobs:
           path: ${{ runner.temp }}/maven-repo
           if-no-files-found: error
 
-  # Release path only (vYY.MM.PP tags). Calls a vendored copy of the workflow
-  # (TODO: drop java/cuopt/ci/maven-publish/ and this file once
-  # rapidsai/shared-workflows#652 merges and ships in a branch cuOpt tracks).
+  # Release path only (vYY.MM.PP tags).
+  # TODO: switch @ramakrishnap-nv/maven-publish-portal-api to @main once
+  # rapidsai/shared-workflows#668 merges.
   java-maven-publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [java-static-gather]
     permissions:
       actions: read
       contents: read
-    uses: ./.github/workflows/maven-publish.yaml
+    uses: rapidsai/shared-workflows/.github/workflows/maven-publish.yaml@ramakrishnap-nv/maven-publish-portal-api
     secrets:
       GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
