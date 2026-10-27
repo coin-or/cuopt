@@ -145,15 +145,13 @@ jobs:
           if-no-files-found: error
 
   # Release path only (vYY.MM.PP tags).
-  # TODO: switch @ramakrishnap-nv/maven-publish-portal-api to @main once
-  # rapidsai/shared-workflows#668 merges.
   java-maven-publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [java-static-gather]
     permissions:
       actions: read
       contents: read
-    uses: rapidsai/shared-workflows/.github/workflows/maven-publish.yaml@ramakrishnap-nv/maven-publish-portal-api
+    uses: rapidsai/shared-workflows/.github/workflows/maven-publish.yaml@main
     secrets:
       GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
