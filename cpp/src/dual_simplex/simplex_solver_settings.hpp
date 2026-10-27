@@ -77,7 +77,7 @@ struct simplex_solver_settings_t {
       barrier_adaptive_regularization(-1),
       barrier_primal_regularization(-1.0),
       barrier_dual_regularization(-1.0),
-      barrier_adat_regularization(1e-14),
+      barrier_adat_regularization(0.0),
       barrier_step_scale(0.9),
       barrier_soc_threshold(100),
       num_gpus(1),
@@ -198,8 +198,8 @@ struct simplex_solver_settings_t {
                                     // initial dual regularization (augmented system's (1,1) block
                                     // diagonal) for the first barrier factorization. Same adaptive
                                     // caveat as above.
-  f_t barrier_adat_regularization;  // relative diagonal shift of the QP ADAT factorization, 0
-                                    // disables
+  f_t barrier_adat_regularization;  // relative diagonal shift of the QP ADAT factorization,
+                                    // 0 (the default) disables
   f_t barrier_step_scale;           // step scale for barrier method
   i_t barrier_soc_threshold;        // SOC dimension above which rank-2 sparse scaling is used
   int num_gpus;   // Number of GPUs to use (maximum of 2 gpus are supported at the moment)
