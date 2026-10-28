@@ -296,6 +296,7 @@ When enabled, the solver evaluates multiple branching candidates simultaneously 
 Set this value to 0 to disable batched PDLP strong branching (Dual Simplex only).
 Set this value to 1 to use batched PDLP cooperatively with Dual Simplex.
 Set this value to 2 to use batched PDLP only.
+For modes 1 and 2, the solver falls back to Dual Simplex when it evaluates a sub-MIP or when too few OpenMP threads are available. Mode 1 also falls back to Dual Simplex in deterministic mode.
 
 .. note:: The default value is ``0`` (disabled). This setting is ignored if the problem is not a MIP problem.
 
