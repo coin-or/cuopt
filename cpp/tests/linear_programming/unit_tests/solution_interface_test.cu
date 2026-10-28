@@ -394,6 +394,21 @@ TEST_F(SolutionInterfaceTest, cpu_problem_solves_lp_locally)
   EXPECT_NEAR(primal[2], 20.0 / 7.0, 1e-4);
 }
 
+TEST_F(SolutionInterfaceTest, cpu_problem_rejects_multi_gpu_pdlp)
+{
+  auto problem = std::make_unique<cpu_optimization_problem_t<int, double>>();
+  populate_tiny_problem(problem.get());
+  const char row_types[] = {'L', 'L'};
+  problem->set_row_types(row_types, kNCons);
+
+  for (int num_gpus : {2, -1}) {
+    solver_settings_t<int, double> settings;
+    settings.get_pdlp_settings().method   = method_t::PDLP;
+    settings.get_pdlp_settings().num_gpus = num_gpus;
+    EXPECT_THROW((solve_lp<int, double>(problem.get(), settings)), cuopt::logic_error);
+  }
+}
+
 TEST_F(SolutionInterfaceTest, cpu_problem_solves_qp_locally)
 {
   // min x^2 + 2 y^2 + x  s.t.  x + y >= 2,  0 <= x, y <= 5  (optimum 47 / 12 at x = 7/6, y = 5/6)

@@ -3099,6 +3099,10 @@ std::unique_ptr<lp_solution_interface_t<i_t, f_t>> solve_lp(
   auto& lp_settings = settings.get_pdlp_settings();
   auto* cpu_prob    = dynamic_cast<cpu_optimization_problem_t<i_t, f_t>*>(problem_interface);
   if (cpu_prob != nullptr) {
+    cuopt_expects(is_batch_mode || lp_settings.method != method_t::PDLP ||
+                    (lp_settings.num_gpus != -1 && lp_settings.num_gpus <= 1),
+                  error_type_t::ValidationError,
+                  "Multi-GPU PDLP (num_gpus != 1) is not supported for CPU-memory problems.");
     int device_count = 0;
     cuopt_expects(cudaGetDeviceCount(&device_count) == cudaSuccess && device_count > 0,
                   error_type_t::ValidationError,
