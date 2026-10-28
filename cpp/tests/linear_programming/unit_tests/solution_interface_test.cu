@@ -394,19 +394,30 @@ TEST_F(SolutionInterfaceTest, cpu_problem_solves_lp_locally)
   EXPECT_NEAR(primal[2], 20.0 / 7.0, 1e-4);
 }
 
-TEST_F(SolutionInterfaceTest, cpu_problem_rejects_multi_gpu_pdlp)
+TEST_F(SolutionInterfaceTest, cpu_problem_multi_gpu_pdlp_matches_single_gpu)
 {
   auto problem = std::make_unique<cpu_optimization_problem_t<int, double>>();
   populate_tiny_problem(problem.get());
   const char row_types[] = {'L', 'L'};
   problem->set_row_types(row_types, kNCons);
+  problem->set_maximize(true);
 
-  for (int num_gpus : {2, -1}) {
-    solver_settings_t<int, double> settings;
-    settings.get_pdlp_settings().method   = method_t::PDLP;
-    settings.get_pdlp_settings().num_gpus = num_gpus;
-    EXPECT_THROW((solve_lp<int, double>(problem.get(), settings)), cuopt::logic_error);
-  }
+  solver_settings_t<int, double> single;
+  single.get_pdlp_settings().method   = method_t::PDLP;
+  single.get_pdlp_settings().num_gpus = 1;
+  auto single_solution                = solve_lp<int, double>(problem.get(), single);
+
+  solver_settings_t<int, double> multi;
+  multi.get_pdlp_settings().method   = method_t::PDLP;
+  multi.get_pdlp_settings().num_gpus = -1;
+  auto multi_solution                = solve_lp<int, double>(problem.get(), multi);
+
+  ASSERT_NE(single_solution, nullptr);
+  ASSERT_NE(multi_solution, nullptr);
+  EXPECT_EQ(multi_solution->get_termination_status_int(),
+            static_cast<int>(pdlp_termination_status_t::Optimal));
+  EXPECT_NEAR(
+    multi_solution->get_objective_value(0), single_solution->get_objective_value(0), 1e-3);
 }
 
 TEST_F(SolutionInterfaceTest, cpu_problem_solves_qp_locally)
