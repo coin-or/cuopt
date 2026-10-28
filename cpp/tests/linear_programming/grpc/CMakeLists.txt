@@ -44,7 +44,7 @@ if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
   target_link_options(GRPC_CLIENT_TEST PRIVATE -Wl,--enable-new-dtags)
 endif()
 
-add_test(NAME GRPC_CLIENT_TEST COMMAND GRPC_CLIENT_TEST)
+rapids_test_add(NAME GRPC_CLIENT_TEST COMMAND GRPC_CLIENT_TEST INSTALL_COMPONENT_SET testing)
 set_tests_properties(GRPC_CLIENT_TEST PROPERTIES LABELS "numopt")
 
 install(
@@ -86,7 +86,8 @@ if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
   target_link_options(GRPC_PIPE_SERIALIZATION_TEST PRIVATE -Wl,--enable-new-dtags)
 endif()
 
-add_test(NAME GRPC_PIPE_SERIALIZATION_TEST COMMAND GRPC_PIPE_SERIALIZATION_TEST)
+rapids_test_add(NAME GRPC_PIPE_SERIALIZATION_TEST COMMAND GRPC_PIPE_SERIALIZATION_TEST
+                 INSTALL_COMPONENT_SET testing)
 set_tests_properties(GRPC_PIPE_SERIALIZATION_TEST PROPERTIES LABELS "numopt")
 
 install(
@@ -121,6 +122,32 @@ set_tests_properties(GRPC_WORKER_SPAWN_TEST PROPERTIES LABELS "numopt")
 
 install(
     TARGETS GRPC_WORKER_SPAWN_TEST
+    COMPONENT testing
+    DESTINATION bin/gtests/libcuopt
+    EXCLUDE_FROM_ALL
+)
+
+# ##################################################################################################
+# - gRPC job queue ordering ------------------------------------------------------------------------
+# Header-only checks of claim_ready_job_slot; no server or GPU is required.
+
+add_executable(GRPC_JOB_QUEUE_TEST ${CMAKE_CURRENT_SOURCE_DIR}/grpc_job_queue_test.cpp)
+
+target_compile_definitions(GRPC_JOB_QUEUE_TEST PRIVATE CUOPT_ENABLE_GRPC)
+
+target_include_directories(GRPC_JOB_QUEUE_TEST PRIVATE "${CUOPT_SOURCE_DIR}/src/grpc/server")
+
+target_link_libraries(GRPC_JOB_QUEUE_TEST PRIVATE GTest::gtest GTest::gtest_main Threads::Threads)
+
+if(NOT DEFINED INSTALL_TARGET OR "${INSTALL_TARGET}" STREQUAL "")
+  target_link_options(GRPC_JOB_QUEUE_TEST PRIVATE -Wl,--enable-new-dtags)
+endif()
+
+rapids_test_add(NAME GRPC_JOB_QUEUE_TEST COMMAND GRPC_JOB_QUEUE_TEST INSTALL_COMPONENT_SET testing)
+set_tests_properties(GRPC_JOB_QUEUE_TEST PROPERTIES LABELS "numopt")
+
+install(
+    TARGETS GRPC_JOB_QUEUE_TEST
     COMPONENT testing
     DESTINATION bin/gtests/libcuopt
     EXCLUDE_FROM_ALL
@@ -167,11 +194,15 @@ endif()
 # Integration tests need the server binary to be built first
 add_dependencies(GRPC_INTEGRATION_TEST cuopt_grpc_server)
 
-add_test(
+rapids_test_add(
     NAME GRPC_INTEGRATION_TEST
     COMMAND ${CMAKE_COMMAND} -E env
         "CUOPT_GRPC_SERVER_PATH=$<TARGET_FILE:cuopt_grpc_server>"
         $<TARGET_FILE:GRPC_INTEGRATION_TEST>
+    # The COMMAND's first token is cmake itself, not the test target, so
+    # rapids_test_add can't infer what to install -- name it explicitly.
+    INSTALL_COMPONENT_SET testing
+    INSTALL_TARGET GRPC_INTEGRATION_TEST
 )
 set_tests_properties(GRPC_INTEGRATION_TEST PROPERTIES LABELS "numopt")
 

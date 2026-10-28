@@ -54,12 +54,16 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes,
   this->start_time_ = std::chrono::steady_clock::now();
 
   // Tasks are not preempted, so a lane posted beyond the team size would sit in the queue for the
-  // whole of presolve without running an iteration.
+  // whole of presolve without running an iteration. The lane count is also capped independently of
+  // the team size (see CUOPT_MIP_EARLY_CPUFJ_MAX_LANES).
   n_lanes =
     threaded
       ? 1
       : std::clamp(
-          n_lanes, 1, std::max(1, omp_get_num_threads() - CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS));
+          n_lanes,
+          1,
+          std::min(CUOPT_MIP_EARLY_CPUFJ_MAX_LANES,
+                   std::max(1, omp_get_num_threads() - CUOPT_MIP_EARLY_CPUFJ_RESERVED_THREADS)));
   cuopt_assert(incumbent_assignment.empty() ||
                  incumbent_assignment.size() == (size_t)this->problem_ptr_->get_n_variables(),
                "incumbent assignment size mismatch");
@@ -119,17 +123,22 @@ void early_cpufj_t<i_t, f_t>::start(int n_lanes,
 }
 
 template <typename i_t, typename f_t>
+void early_cpufj_t<i_t, f_t>::request_stop()
+{
+  preemption_flag_.store(true);
+  for (auto& climber : climbers_) {
+    climber->halted = true;
+  }
+}
+
+template <typename i_t, typename f_t>
 void early_cpufj_t<i_t, f_t>::stop()
 {
   if (climbers_.empty()) { return; }
 
-  preemption_flag_.store(true);
-
   // Every lane is told to stop before any wait, otherwise the first wait blocks on a lane that has
   // not been asked to exit yet.
-  for (auto& climber : climbers_) {
-    climber->halted = true;
-  }
+  request_stop();
   if (worker_.joinable()) {
     worker_.join();
   } else {

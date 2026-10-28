@@ -15,13 +15,13 @@
 #include <mip_heuristics/lns/thread_budget.hpp>
 #include <mip_heuristics/mip_constants.hpp>
 #include <mip_heuristics/mip_scaling_strategy.cuh>
-#include <mip_heuristics/presolve/presolve_budget_policy.hpp>
-#include <mip_heuristics/presolve/semi_continuous.cuh>
-#include <mip_heuristics/presolve/third_party_presolve.hpp>
-#include <mip_heuristics/presolve/trivial_presolve.cuh>
 #include <mip_heuristics/solver.cuh>
 #include <mip_heuristics/structural/early_structural.cuh>
 #include <mip_heuristics/utils.cuh>
+#include <presolve/presolve_budget_policy.hpp>
+#include <presolve/semi_continuous.cuh>
+#include <presolve/third_party_presolve.hpp>
+#include <presolve/trivial_presolve.cuh>
 
 #include <pdlp/pdlp.cuh>
 #include <pdlp/restart_strategy/pdlp_restart_strategy.cuh>
@@ -603,6 +603,8 @@ mip_solution_t<i_t, f_t> solve_mip_helper(
     }
 
     auto early_cpufj_guard = cuopt::scope_guard([&]() {
+      if (early_gpufj) { early_gpufj->request_stop(); }
+      if (early_structural) { early_structural->request_stop(); }
       if (early_cpufj) {
         early_cpufj->stop();
         early_cpufj.reset();
@@ -742,7 +744,12 @@ mip_solution_t<i_t, f_t> solve_mip_helper(
       }
     }
 
-    // Stop early GPU FJ now that Papilo presolve is complete
+    // Stop the early heuristics now that Papilo presolve is complete
+    if (early_gpufj) { early_gpufj->request_stop(); }
+    if (early_cpufj && run_presolve && presolve_result_opt.has_value()) {
+      early_cpufj->request_stop();
+    }
+    if (early_structural) { early_structural->request_stop(); }
     if (early_gpufj) {
       early_gpufj->stop();
       if (early_gpufj->solution_found()) {
