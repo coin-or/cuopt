@@ -795,12 +795,12 @@ void strip_augmented_perturbation(i_t n,
                                   rmm::device_uvector<i_t>& augmented_diagonal_indices,
                                   cone_kkt_data_t<i_t, f_t>& cone_data,
                                   device_csr_matrix_t<i_t, f_t>& device_augmented,
-                                  rmm::cuda_stream_view stream)
+                                  cuda::stream_ref stream)
 {
   raft::common::nvtx::range scope("Barrier: strip augmented perturbation");
   if (n > 0) {
     const size_t grid = raft::ceildiv<size_t>(n, augmented_csr_block_size);
-    strip_primal_block_diag_kernel<i_t, f_t><<<grid, augmented_csr_block_size, 0, stream.value()>>>(
+    strip_primal_block_diag_kernel<i_t, f_t><<<grid, augmented_csr_block_size, 0, stream.get()>>>(
       cuopt::make_span(device_augmented.x),
       cuopt::make_span(augmented_diagonal_indices),
       dual_perturb,
@@ -810,7 +810,7 @@ void strip_augmented_perturbation(i_t n,
   if (m > 0) {
     const size_t grid = raft::ceildiv<size_t>(m, augmented_csr_block_size);
     strip_constraint_block_diag_kernel<i_t, f_t>
-      <<<grid, augmented_csr_block_size, 0, stream.value()>>>(
+      <<<grid, augmented_csr_block_size, 0, stream.get()>>>(
         cuopt::make_span(device_augmented.x),
         cuopt::make_span(augmented_diagonal_indices),
         primal_perturb,
@@ -821,7 +821,7 @@ void strip_augmented_perturbation(i_t n,
   if (p > 0) {
     const size_t grid = raft::ceildiv<size_t>(static_cast<size_t>(p), augmented_csr_block_size);
     strip_sparse_expansion_D_kernel<i_t, f_t>
-      <<<grid, augmented_csr_block_size, 0, stream.value()>>>(
+      <<<grid, augmented_csr_block_size, 0, stream.get()>>>(
         cuopt::make_span(device_augmented.x),
         cuopt::make_span(cone_data.sparse_expansion_D),
         dual_perturb);
