@@ -3099,10 +3099,11 @@ std::unique_ptr<lp_solution_interface_t<i_t, f_t>> solve_lp(
   auto& lp_settings = settings.get_pdlp_settings();
   auto* cpu_prob    = dynamic_cast<cpu_optimization_problem_t<i_t, f_t>*>(problem_interface);
   if (cpu_prob != nullptr) {
-    cuopt_expects(is_remote_execution_enabled(),
+    int device_count = 0;
+    cuopt_expects(cudaGetDeviceCount(&device_count) == cudaSuccess && device_count > 0,
                   error_type_t::ValidationError,
-                  "A CPU-memory problem requires remote execution. Set CUOPT_REMOTE_HOST and "
-                  "CUOPT_REMOTE_PORT to solve on a remote GPU server.");
+                  "A CPU-memory problem needs a CUDA device to solve locally. Set "
+                  "CUOPT_REMOTE_HOST and CUOPT_REMOTE_PORT to solve on a remote GPU server.");
     return solve_lp(*cpu_prob, lp_settings, problem_checking, use_pdlp_solver_mode, is_batch_mode);
   }
 
