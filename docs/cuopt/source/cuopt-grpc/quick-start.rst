@@ -153,7 +153,7 @@ Pass the GPU server's network location in the ``Client`` constructor
 (``host`` and ``port``); it does not read ``CUOPT_REMOTE_*``.
 
 Keep the ``DataModel`` setup and ``SolverSettings`` from the listing above, and
-replace everything from the ``Solve`` call onward (line 33 in that listing)
+replace everything from the ``Solve`` call onward (line 34 in that listing)
 with:
 
 .. code-block:: python
