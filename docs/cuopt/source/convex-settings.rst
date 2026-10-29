@@ -474,6 +474,8 @@ Barrier Step Scale
 ``CUOPT_BARRIER_STEP_SCALE`` controls the scaling factor applied to the step size in the barrier method.
 The step scale must be strictly less than 1. A value like 0.9 is conservative, while a value like 0.999 is aggressive.
 
+.. note:: By default cuOpt selects the step scale automatically.
+
 
 Barrier Adaptive Regularization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
