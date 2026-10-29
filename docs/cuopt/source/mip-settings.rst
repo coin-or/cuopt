@@ -304,7 +304,7 @@ Batch PDLP Reliability Branching
 ``CUOPT_MIP_BATCH_PDLP_RELIABILITY_BRANCHING`` controls whether to use batched PDLP for reliability branching evaluations.
 When enabled, candidate variables for reliability branching are evaluated simultaneously using a single batched PDLP solve.
 Set this value to 0 to disable (Dual Simplex only).
-Set this value to 1 to use batched PDLP cooperatively with Dual Simplex.
+Set this value to 1 to let the solver decide whether to use batched PDLP alongside Dual Simplex.
 Set this value to 2 to always use batched PDLP only.
 
 .. note:: The default value is ``0`` (disabled).
