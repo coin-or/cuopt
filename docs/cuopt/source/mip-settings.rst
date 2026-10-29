@@ -284,9 +284,7 @@ RINS
 ^^^^
 
 ``CUOPT_MIP_RINS`` controls whether the RINS (Relaxation Induced Neighborhood Search) sub-MIP heuristic is used inside branch and bound.
-Set this value to 0 to disable RINS. Any other value (the default ``-1``, or ``1``) enables it.
-
-.. note:: The default value is ``-1`` (enabled).
+Set this value to 0 to disable RINS. Any other value enables it.
 
 Batch PDLP Strong Branching
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -306,7 +304,7 @@ Batch PDLP Reliability Branching
 ``CUOPT_MIP_BATCH_PDLP_RELIABILITY_BRANCHING`` controls whether to use batched PDLP for reliability branching evaluations.
 When enabled, candidate variables for reliability branching are evaluated simultaneously using a single batched PDLP solve.
 Set this value to 0 to disable (Dual Simplex only).
-Set this value to 1 to use batched PDLP cooperatively with Dual Simplex when the solver judges it worthwhile (it is skipped in sub-MIPs, deterministic mode, or when there are few candidates).
+Set this value to 1 to use batched PDLP cooperatively with Dual Simplex.
 Set this value to 2 to always use batched PDLP only.
 
 .. note:: The default value is ``0`` (disabled).

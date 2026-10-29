@@ -150,22 +150,6 @@ The dual feasibility condition is computed as follows::
 
 .. note:: The default value is ``1e-4``.
 
-Primal Infeasible Tolerance
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-``CUOPT_PRIMAL_INFEASIBLE_TOLERANCE`` controls the tolerance used to detect primal infeasibility.
-The value must be in the range ``[0, 0.1]``.
-
-.. note:: The default value is ``1e-10``.
-
-Dual Infeasible Tolerance
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-``CUOPT_DUAL_INFEASIBLE_TOLERANCE`` controls the tolerance used to detect dual infeasibility.
-The value must be in the range ``[0, 0.1]``.
-
-.. note:: The default value is ``1e-10``.
-
 
 Absolute Gap Tolerance
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -342,8 +326,6 @@ available:
   full FP64 matrix, so this mode does not reduce overall memory usage. This provides a middle ground
   between full FP64 and FP32: faster PDHG iterations with limited impact on convergence.
 
-.. note:: The default value is -1 (default precision).
-
 Simplex Settings
 ^^^^^^^^^^^^^^^^
 
@@ -484,17 +466,13 @@ Barrier Iterative Refinement
 ``CUOPT_BARRIER_ITERATIVE_REFINEMENT`` controls whether iterative refinement is applied after each barrier iteration to improve solution accuracy.
 
 * ``0`` (``CUOPT_BARRIER_ITERATIVE_REFINEMENT_OFF``): Disable iterative refinement.
-* ``1`` (``CUOPT_BARRIER_ITERATIVE_REFINEMENT_ON``): Enable iterative refinement (default).
-
-.. note:: The default value is ``1`` (on).
+* ``1`` (``CUOPT_BARRIER_ITERATIVE_REFINEMENT_ON``): Enable iterative refinement.
 
 Barrier Step Scale
 ^^^^^^^^^^^^^^^^^^^
 
 ``CUOPT_BARRIER_STEP_SCALE`` controls the scaling factor applied to the step size in the barrier method.
-The step scale must be in the range ``[0.5, 0.9999]``. A value like 0.9 is conservative, while a value like 0.999 is aggressive.
-
-.. note:: The default value is ``0.9``.
+The step scale must be strictly less than 1. A value like 0.9 is conservative, while a value like 0.999 is aggressive.
 
 
 Barrier Adaptive Regularization
