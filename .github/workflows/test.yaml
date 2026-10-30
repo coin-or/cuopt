@@ -28,7 +28,7 @@ on:
 permissions: {}
 
 jobs:
-  conda-cpp-tests:
+  conda-cpp-tests-mathopt:
     permissions:
       actions: read
       contents: read
@@ -275,7 +275,8 @@ jobs:
       contents: read
     if: ${{ always() && inputs.build_type == 'nightly' }}
     needs:
-      - conda-cpp-tests
+      - conda-cpp-tests-mathopt
+      - conda-cpp-tests-routing
       - conda-python-tests
       - conda-java-tests
       - java-static-test

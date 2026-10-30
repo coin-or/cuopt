@@ -22,7 +22,7 @@ jobs:
       - changed-files
       - checks
       - conda-cpp-build
-      - conda-cpp-tests
+      - conda-cpp-tests-mathopt
       - conda-cpp-tests-routing
     permissions:
       contents: read
@@ -380,7 +380,7 @@ jobs:
       build_type: pull-request
       build-datetime: ${{ needs.build-details.outputs.build-datetime }}
       script: ci/build_cpp.sh
-  conda-cpp-tests:
+  conda-cpp-tests-mathopt:
     needs: [conda-cpp-build, changed-files]
     permissions:
       actions: read
