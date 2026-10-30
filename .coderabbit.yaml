@@ -62,7 +62,7 @@ reviews:
         When code changes affect docs, suggest specific files (e.g. docs/cuopt/source/*.rst)
         and recommend documenting performance characteristics, GPU requirements, or tolerances.
 
-        Also apply DOC- and TERM- rules from skills/cuopt-developer/references/review_rules.md:
+        Also apply the Docs and Naming and terminology rules from skills/cuopt-developer/references/review_rules.md:
         complete sentences, capitalized headings and bullets, "Quickstart" as one word, "MIP"
         not "MILP", no references to earlier versions or deprecated APIs, and no public
         documentation of hyperparameters.
@@ -90,8 +90,8 @@ reviews:
         .github/.coderabbit_review_guide.md. Do NOT comment on formatting
         (clang-format handles it) or exception use (cuOpt uses exceptions
         as its canonical error mechanism).
-        Also apply the COMMENT-, TERM-, CODE-, REUSE-, API- and LOG- rules from
-        skills/cuopt-developer/references/review_rules.md to added lines, citing the rule ID.
+        Also apply the Comments, Naming and terminology, Code, Reuse and placement, and Public API
+        rules from skills/cuopt-developer/references/review_rules.md to added lines, naming the rule.
 
     - path: "cpp/src/**/*.{cpp,hpp,h}"
       instructions: |
@@ -100,8 +100,8 @@ reviews:
         .github/.coderabbit_review_guide.md. Match nearby code; cuOpt's
         naming, exception use, and column limit override Google where they
         disagree. Do not flag formatting.
-        Also apply the COMMENT-, TERM-, CODE-, REUSE-, API- and LOG- rules from
-        skills/cuopt-developer/references/review_rules.md to added lines, citing the rule ID.
+        Also apply the Comments, Naming and terminology, Code, Reuse and placement, and Public API
+        rules from skills/cuopt-developer/references/review_rules.md to added lines, naming the rule.
 
     - path: "cpp/src/grpc/**"
       instructions: |
@@ -123,7 +123,7 @@ reviews:
 
         Do not require benchmarks here — benchmarks live in benchmarks/ and regression/.
 
-        Also apply the TEST- rules from skills/cuopt-developer/references/review_rules.md:
+        Also apply the Tests rules from skills/cuopt-developer/references/review_rules.md:
         a test must be able to fail if the feature is reverted, should check the contract
         rather than implementation details (no log-capture assertions, TEST_P for
         parametric cases), and should stay cheap (toy instances, tight time limits).
@@ -184,7 +184,7 @@ reviews:
         - Edge cases: empty, infeasible, unbounded, degenerate problems
         - No leaked GPU state across tests
         - Regression coverage for fixed bugs
-        - TEST- rules from skills/cuopt-developer/references/review_rules.md (tests must be
+        - Tests rules from skills/cuopt-developer/references/review_rules.md (tests must be
           able to fail, test the contract, stay cheap); phrase these as questions
 
         IMPORTANT — dataset references: tests resolve problem data via
