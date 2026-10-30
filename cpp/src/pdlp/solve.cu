@@ -560,6 +560,11 @@ std::tuple<simplex::lp_solution_t<i_t, f_t>, simplex::lp_status_t, f_t, f_t, f_t
   const raft::handle_t* handle_ptr,
   cuopt::mathematical_optimization::barrier_cache_t<i_t, f_t>* cache = nullptr)
 {
+  cuopt_expects(!(settings.cudss_deterministic && settings.cudss_hybrid_execute_mode == 1),
+                error_type_t::ValidationError,
+                "cudss_hybrid_execute_mode=1 is not supported with cudss_deterministic. "
+                "Set cudss_hybrid_execute_mode to -1 or 0, or disable cudss_deterministic.");
+
   f_t norm_user_objective = vector_norm2<i_t, f_t>(user_problem.objective);
   f_t norm_rhs            = vector_norm2<i_t, f_t>(user_problem.rhs);
 
