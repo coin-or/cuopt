@@ -73,9 +73,9 @@ run_step_with_timeout "gtests (run_ctests.sh)" 90m "" \
 
 rapids-logger "Generate nightly test report"
 source "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/utils/nightly_report_helper.sh"
-# Only routing gets its own report type; "cpp" keeps the existing flaky/failure history.
+# Separate report type per group so routing/mathopt keep separate history.
 REPORT_TYPE="cpp"
-[[ "${CUOPT_CPP_TEST_GROUP}" == "routing" ]] && REPORT_TYPE="cpp-routing"
+[[ "${CUOPT_CPP_TEST_GROUP}" != "all" ]] && REPORT_TYPE="cpp-${CUOPT_CPP_TEST_GROUP}"
 generate_nightly_report "${REPORT_TYPE}"
 
 if [ "${#FAILED_STEPS[@]}" -gt 0 ]; then
