@@ -38,15 +38,19 @@ nvidia-smi
 CUOPT_CPP_TEST_GROUP="${CUOPT_CPP_TEST_GROUP:-all}"
 export CUOPT_CPP_TEST_GROUP
 
-# Routing tests do not use the LP/MIP/QP datasets.
+# LP/MIP/QP datasets are for mathopt tests; get_test_data.sh fetches the routing datasets.
 if [[ "${CUOPT_CPP_TEST_GROUP}" != "routing" ]]; then
-    rapids-logger "Download datasets"
+    rapids-logger "Download mathopt datasets"
     ./datasets/linear_programming/download_pdlp_test_dataset.sh
     ./datasets/mip/download_miplib_test_dataset.sh
     ./datasets/quadratic_programming/download_qplib_test_dataset.sh
+fi
 
-    RAPIDS_DATASET_ROOT_DIR="$(realpath datasets)"
-    export RAPIDS_DATASET_ROOT_DIR
+RAPIDS_DATASET_ROOT_DIR="$(realpath datasets)"
+export RAPIDS_DATASET_ROOT_DIR
+
+if [[ "${CUOPT_CPP_TEST_GROUP}" != "mathopt" ]]; then
+    rapids-logger "Download routing datasets"
     pushd "${RAPIDS_DATASET_ROOT_DIR}"
     ./get_test_data.sh
     popd
