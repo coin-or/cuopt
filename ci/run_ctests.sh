@@ -14,6 +14,8 @@
 #   GTEST_OUTPUT      - gtest XML output prefix (set by test_cpp.sh)
 #   GTEST_MAX_RETRIES - max retries per failing test case (default: 2)
 #   RAPIDS_TESTS_DIR  - directory for test results
+#   CUOPT_CPP_TEST_GROUP - which binaries to run: all (default), routing
+#                          (ROUTING_* only) or mathopt (everything except ROUTING_*)
 
 set -euo pipefail
 
@@ -212,7 +214,19 @@ run_gtest_with_retry() {
     return 0
 }
 
+CUOPT_CPP_TEST_GROUP="${CUOPT_CPP_TEST_GROUP:-all}"
+case "${CUOPT_CPP_TEST_GROUP}" in
+    all | routing | mathopt) ;;
+    *) echo "Error: invalid CUOPT_CPP_TEST_GROUP '${CUOPT_CPP_TEST_GROUP}'" >&2; exit 1 ;;
+esac
+
 for gt in "${GTEST_DIR}"/*_TEST; do
+    is_routing=false
+    [[ "$(basename "${gt}")" == ROUTING_* ]] && is_routing=true
+    if [[ "${CUOPT_CPP_TEST_GROUP}" == "routing" && "${is_routing}" == false ]] ||
+       [[ "${CUOPT_CPP_TEST_GROUP}" == "mathopt" && "${is_routing}" == true ]]; then
+        continue
+    fi
     run_gtest_with_retry "${gt}" "$@" || true
 done
 
