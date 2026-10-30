@@ -241,7 +241,7 @@ For C++ naming (`snake_case`, `d_`/`h_` prefixes, `_t` suffix), file extensions 
 
 ## Pre-PR self-review
 
-Before every `git push`, review `git diff origin/main...HEAD` against [references/review_rules.md](references/review_rules.md) and run `ci/check_conventions.sh`. The rules (comment content, terminology, types and ownership, reuse, public API surface, test quality, docs wording, PR hygiene) are the ones reviewers repeat most; CodeRabbit applies the same file, so a miss here comes back as a review comment. Fix findings or add `conventions-ok: <RULE-ID>` on the line with a reason.
+Before every `git push`, review `git diff origin/main...HEAD` against [references/review_rules.md](references/review_rules.md). The rules (comment content, terminology, types and ownership, reuse, public API surface, test quality, docs wording, PR hygiene) are the ones reviewers repeat most; CodeRabbit applies the same file, so a miss here comes back as a review comment.
 
 ## OpenMP task/runtime compatibility
 

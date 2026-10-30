@@ -1,29 +1,26 @@
 # Review Rules — Pre-PR Self-Review and CodeRabbit
 
-One rule set for three consumers: the author (human or agent) before `git push`, CodeRabbit
-during review, and `ci/check_conventions.sh` for the subset that can be matched mechanically.
-Each rule has a stable ID so a review comment can cite it (`COMMENT-1`).
+One rule set for two consumers: the author (human or agent) before `git push`, and CodeRabbit
+during review. Each rule has a stable ID so a review comment can cite it (`COMMENT-1`).
 
 **How to use**
 
 - **Author / agent:** run through this list against `git diff origin/main...HEAD` before pushing.
-  Then run `ci/check_conventions.sh`.
 - **CodeRabbit:** raise a violation as a short nit that cites the rule ID. Do not raise anything
   that is not listed here as style, and do not restate rules enforced by `clang-format` or `ruff`.
 - **Reviewer:** cite the ID instead of re-explaining. If a rule is wrong or missing, change this
   file in the same PR.
 
-Rules marked **[grep]** are checked by `ci/check_conventions.sh`. When neighbouring code in the
-same file does the opposite of a rule, ask rather than assume which one is right.
+When neighbouring code in the same file does the opposite of a rule, ask rather than assume
+which one is right.
 
 ## Comments
 
 - **COMMENT-1 — Describe the current code, not its history.** No "used to be", "previously",
   "earlier version", "fixes the bug where", "load-bearing", or accounts of failed attempts. No
   numbers taken from one benchmark instance. Comments are for readers of the code as it is now.
-  **[grep]**
 - **COMMENT-2 — No volatile details.** No line numbers, commit hashes, PR numbers or timestamps.
-  See [conventions.md](conventions.md#comments). **[grep]**
+  See [conventions.md](conventions.md#comments).
 - **COMMENT-3 — Short and plain.** One or two lines saying what the code does or why, not prompts
   or notes addressed to an agent. A comment that restates the next line should be deleted. Define
   any jargon you use (ping-pong buffer, head, endpoint) or use the plain name.
@@ -37,7 +34,7 @@ same file does the opposite of a rule, ask rather than assume which one is right
   "internal objective", "user-space").
 - **TERM-2 — Project vocabulary.** "barrier", not "IPM"; "problem", not "model"; "multi-GPU", not
   "distributed"; "MIP", not "MILP"; `mathematical_optimization`, not `linear_programming`, for new
-  names; "dual residual", not "stationary residual". **[grep]**
+  names; "dual residual", not "stationary residual".
 - **TERM-3 — Spell names out.** No non-standard abbreviations in identifiers (`vub`, `fin`,
   `pb`); write `variable_upper_bound`. Name for what it is: a CSC structure is not "CSR".
 - **TERM-4 — Consistent casing across an API.** Pick `MIP`/`LP`/`QP`/`cuOpt` once and use it in
@@ -50,9 +47,8 @@ same file does the opposite of a rule, ask rather than assume which one is right
   in the neighbouring files.
 - **TYPE-2 — No gratuitous casts.** Drop `static_cast` that does not change the value. Index with
   the signed type. See [conventions.md](conventions.md#container-indexing--no-gratuitous-static_castsize_t).
-  **[grep]**
 - **TYPE-3 — Ownership.** `std::unique_ptr` by default; `std::shared_ptr` only with a comment
-  saying why sharing is essential **[grep]**. Prefer `std::span` over pointer + size. No raw owning
+  saying why sharing is essential. Prefer `std::span` over pointer + size. No raw owning
   pointers.
 - **TYPE-4 — No large lambdas or hidden control flow.** Short predicates only; no scope guards
   unless commented (see [conventions.md](conventions.md#c-implementation-style)). A condition
@@ -62,8 +58,8 @@ same file does the opposite of a rule, ask rather than assume which one is right
   an enum or status has no `default:`, so adding a value is a compile error.
 - **TYPE-6 — Invariants are asserts.** A condition the solver itself must maintain is a
   `cuopt_assert`; `CUOPT_EXPECTS` is for conditions a caller can violate.
-- **THREAD-1 — One threading model.** OpenMP, not `std::thread`/`pthread` **[grep]**. Random numbers
-  use `pcgenerator_t` with seeds derived via SplitMix/`derive_seed`, not `std::mt19937` **[grep]**.
+- **THREAD-1 — One threading model.** OpenMP, not `std::thread`/`pthread`. Random numbers
+  use `pcgenerator_t` with seeds derived via SplitMix/`derive_seed`, not `std::mt19937`.
   See the RNG call-site policy in `SKILL.md`.
 
 ## Reuse and placement
@@ -124,7 +120,7 @@ same file does the opposite of a rule, ask rather than assume which one is right
 ## PR hygiene
 
 - **PR-1 — Minimal diff.** Revert unrelated files and reformatting. Version bumps and dependency
-  upgrades go in their own PR. No build output committed. **[grep]**
+  upgrades go in their own PR. No build output committed.
 - **PR-2 — Follow-ups are issues.** A deferred item is a tracking issue, linked from the PR, not a
   `TODO` that only describes it.
 - **PR-3 — Description and release notes.** Fill in the PR description. Release-note entries are
