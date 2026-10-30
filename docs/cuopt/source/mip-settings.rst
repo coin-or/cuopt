@@ -284,7 +284,8 @@ RINS
 ^^^^
 
 ``CUOPT_MIP_RINS`` controls whether the RINS (Relaxation Induced Neighborhood Search) sub-MIP heuristic is used inside branch and bound.
-Set this value to 0 to disable RINS. Any other value enables it.
+Valid values are ``-1`` (automatic), ``0`` and ``1``.
+Set this value to 0 to disable RINS. Set it to -1 or 1 to enable RINS.
 
 Batch PDLP Strong Branching
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

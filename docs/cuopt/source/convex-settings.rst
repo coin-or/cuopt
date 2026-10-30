@@ -112,7 +112,7 @@ The primal feasibility condition is computed as follows::
 
    primal_feasiblity < absolute_primal_tolerance + relative_primal_tolerance * l2_norm(b)
 
-Default value is ``1e-4``.
+.. note:: The default value is ``1e-4``.
 
 
 Relative Primal Tolerance
