@@ -2,8 +2,6 @@
 
 Read this for cuOpt code style: naming, file extensions, include order, error handling, memory management, and test impact.
 
-The rules reviewers repeat most (comment content, terminology, types and ownership, reuse, API surface, test quality, docs wording) are in [review_rules.md](review_rules.md), which is also what CodeRabbit applies. Use it as the pre-push checklist.
-
 ## Comments
 
 **Never embed volatile details in code comments.** Anything that changes independently of the code will silently become wrong and mislead future readers. Volatile details include:
