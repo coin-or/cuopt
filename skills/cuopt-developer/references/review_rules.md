@@ -3,7 +3,7 @@
 One rule set for two consumers: the author (human or agent) before `git push`, and CodeRabbit
 during review.
 
-- **Author / agent:** go through this list against `git diff origin/main...HEAD` before pushing.
+- **Author / agent:** go through this list against `git diff origin/<target-branch>...HEAD` before pushing.
 - **CodeRabbit:** raise a violation as a short nit that names the rule. Do not raise style
   that is not listed here, or anything `clang-format` or `ruff` already enforces.
 - **Reviewer:** name the rule instead of re-explaining. If a rule is wrong or missing, change this
@@ -49,8 +49,8 @@ If neighbouring code in the same file does the opposite of a rule, ask which is 
 - **Plain control flow.** Short lambdas only, no scope guards or hidden cleanup without a
   comment. A condition used in two places is one named function.
 - **Name your constants.** Use an `enum class` for modes, and named constants or
-  settings for limits and tolerances, not literals. A `switch` over an enum has no `default:`, so
-  a new value fails to compile.
+  settings for limits and tolerances, not literals. Where `-Wswitch` is an error, leave
+  `default:` out of a `switch` over an enum so a new value fails to compile.
 - **Pick the right check.** An invariant the code itself must maintain is an assert;
   validation of caller input is `CUOPT_EXPECTS`.
 - **One threading and RNG model.** Use OpenMP rather than `std::thread`, and the
@@ -70,8 +70,9 @@ If neighbouring code in the same file does the opposite of a rule, ask which is 
 
 ## Public API
 
-- **Regular parameter first.** A new option is a regular `CUOPT_*` parameter that every
-  binding picks up automatically, not a special-case setter or enum in each language.
+- **Regular parameter first.** A new option is a regular `CUOPT_*` parameter that the
+  bindings pick up from the C API, not a special-case setter or enum in each language.
+  Add the gRPC field registry entry too (see [contributing.md](contributing.md)).
 - **Hyperparameters stay internal.** Do not expose or document them for users.
 - **The C API is the source.** Other bindings derive constants and statuses from it
   rather than copying them by hand or adding accessors it does not have.
@@ -81,7 +82,9 @@ If neighbouring code in the same file does the opposite of a rule, ask which is 
 - **A test must be able to fail.** If the feature were reverted, would it still pass?
   A bug fix needs its reproducer.
 - **Test the contract.** Check documented behaviour, not internals (no log-capture
-  assertions, no "this is unsupported" tests). Use `TEST_P` rather than a loop over parameters.
+  assertions). Do not test undocumented unsupported cases; documented errors are part of the
+  contract. Use `TEST_P` (C++) or `pytest.mark.parametrize` (Python) rather than a loop over
+  parameters.
 - **Keep tests small and cheap.** Toy instances and tight time limits; justify anything
   large or slow. Skip tests of trivial plumbing.
 - **New paths get the coverage their siblings have.**
@@ -89,8 +92,8 @@ If neighbouring code in the same file does the opposite of a rule, ask which is 
 ## Docs, logs and PRs
 
 - **Plain, complete sentences.** Capitalize headings and bullets, spell project terms
-  consistently ("Quickstart", "MIP"), and do not describe earlier versions, internals, other APIs
-  or deprecated APIs.
+  consistently ("Quickstart", "MIP"), and do not describe earlier versions, internals or other APIs.
+  Document deprecated APIs only in migration guides such as `docs/cuopt/source/transition.rst`.
 - **Generate, do not hand-copy.** Settings, constants and defaults come from the source
   of truth.
 - **Useful log lines.** Name the setting to change, and match the format of neighbouring
