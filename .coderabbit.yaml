@@ -90,7 +90,7 @@ reviews:
         .github/.coderabbit_review_guide.md. Do NOT comment on formatting
         (clang-format handles it) or exception use (cuOpt uses exceptions
         as its canonical error mechanism).
-        Also apply the COMMENT-, TERM-, TYPE-, THREAD-, REUSE-, NUM- and LOG- rules from
+        Also apply the COMMENT-, TERM-, CODE-, REUSE-, API- and LOG- rules from
         skills/cuopt-developer/references/review_rules.md to added lines, citing the rule ID.
 
     - path: "cpp/src/**/*.{cpp,hpp,h}"
@@ -100,7 +100,7 @@ reviews:
         .github/.coderabbit_review_guide.md. Match nearby code; cuOpt's
         naming, exception use, and column limit override Google where they
         disagree. Do not flag formatting.
-        Also apply the COMMENT-, TERM-, TYPE-, THREAD-, REUSE-, NUM- and LOG- rules from
+        Also apply the COMMENT-, TERM-, CODE-, REUSE-, API- and LOG- rules from
         skills/cuopt-developer/references/review_rules.md to added lines, citing the rule ID.
 
     - path: "cpp/src/grpc/**"
